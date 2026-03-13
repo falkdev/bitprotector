@@ -30,6 +30,18 @@ enum Commands {
         host: String,
         #[arg(long, default_value_t = 8443)]
         port: u16,
+        /// JWT signing secret (hex-encoded or plain text)
+        #[arg(long, default_value = "change-me-in-production")]
+        jwt_secret: String,
+        /// Path to TLS certificate PEM file
+        #[arg(long)]
+        tls_cert: Option<String>,
+        /// Path to TLS private key PEM file
+        #[arg(long)]
+        tls_key: Option<String>,
+        /// Maximum requests per second per IP
+        #[arg(long, default_value_t = 100)]
+        rate_limit_rps: usize,
     },
     /// Display system status (for SSH login)
     Status,
@@ -92,9 +104,17 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serve { host, port } => {
+        Commands::Serve { host, port, jwt_secret, tls_cert, tls_key, rate_limit_rps } => {
             tracing::info!("Starting BitProtector server on {}:{}", host, port);
-            bitprotector_lib::api::server::run_server(&host, port).await?;
+            bitprotector_lib::api::server::run_server(
+                &host,
+                port,
+                &cli.db,
+                jwt_secret.into_bytes(),
+                tls_cert.as_deref(),
+                tls_key.as_deref(),
+                rate_limit_rps,
+            ).await?;
         }
         Commands::Status => {
             bitprotector_lib::cli::ssh_status::print_status(&cli.db);

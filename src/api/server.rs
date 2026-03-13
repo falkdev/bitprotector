@@ -1,6 +1,403 @@
-/// Placeholder for Actix-web server setup (implemented in Milestone 12).
+use actix_cors::Cors;
+use actix_web::{
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    body::{BoxBody, EitherBody, MessageBody},
+    middleware, web, App, Error, HttpResponse, HttpServer,
+};
+use futures_util::future::{ready, LocalBoxFuture, Ready};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use crate::api::auth::JwtSecret;
+use crate::api::models::ApiError;
+use crate::db::repository::{create_pool, Repository};
 
-pub async fn run_server(_host: &str, _port: u16) -> anyhow::Result<()> {
-    // Full implementation in Milestone 12
+// ---------------------------------------------------------------------------
+// Rate limiter
+// ---------------------------------------------------------------------------
+
+/// Sliding-window per-IP rate limiter.
+pub struct RateLimiter {
+    requests: Mutex<HashMap<String, Vec<Instant>>>,
+    max_requests: usize,
+    window: Duration,
+}
+
+impl RateLimiter {
+    pub fn new(max_requests: usize, window_secs: u64) -> Self {
+        Self {
+            requests: Mutex::new(HashMap::new()),
+            max_requests,
+            window: Duration::from_secs(window_secs),
+        }
+    }
+
+    pub fn is_allowed(&self, key: &str) -> bool {
+        let mut map = self.requests.lock().unwrap();
+        let now = Instant::now();
+        let window = self.window;
+        let entry = map.entry(key.to_string()).or_default();
+        entry.retain(|&t| now.duration_since(t) < window);
+        if entry.len() < self.max_requests {
+            entry.push(now);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+// actix-web Transform + Service implementation for rate limiting ------------
+
+pub struct RateLimitLayer(pub Arc<RateLimiter>);
+
+impl<S, B> Transform<S, ServiceRequest> for RateLimitLayer
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = Error;
+    type Transform = RateLimitService<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(RateLimitService {
+            service,
+            limiter: self.0.clone(),
+        }))
+    }
+}
+
+pub struct RateLimitService<S> {
+    service: S,
+    limiter: Arc<RateLimiter>,
+}
+
+impl<S, B> Service<ServiceRequest> for RateLimitService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let ip = req
+            .peer_addr()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        if !self.limiter.is_allowed(&ip) {
+            let (req, _) = req.into_parts();
+            let resp = HttpResponse::TooManyRequests()
+                .json(ApiError::new("too_many_requests", "Rate limit exceeded"));
+            return Box::pin(async move {
+                Ok(ServiceResponse::new(req, resp).map_into_right_body())
+            });
+        }
+
+        let fut = self.service.call(req);
+        Box::pin(async move {
+            let res = fut.await?;
+            Ok(res.map_into_left_body())
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Route configuration
+// ---------------------------------------------------------------------------
+
+/// Register all API routes under `/api/v1`.
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    use crate::api::routes::{
+        auth, database, drives, files, folders, integrity, logs, scheduler, sync, virtual_paths,
+    };
+    cfg.service(
+        web::scope("/api/v1")
+            .configure(auth::configure)
+            .configure(drives::configure)
+            .configure(files::configure)
+            .configure(virtual_paths::configure)
+            .configure(integrity::configure)
+            .configure(folders::configure)
+            .configure(sync::configure)
+            .configure(logs::configure)
+            .configure(database::configure)
+            .configure(scheduler::configure),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// TLS helper
+// ---------------------------------------------------------------------------
+
+#[cfg(not(test))]
+fn load_tls_config(
+    cert_path: &str,
+    key_path: &str,
+) -> anyhow::Result<rustls::ServerConfig> {
+    use rustls_pemfile::{certs, private_key};
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let cert_file = &mut BufReader::new(File::open(cert_path)?);
+    let key_file = &mut BufReader::new(File::open(key_path)?);
+
+    let tls_certs: Vec<_> = certs(cert_file).collect::<Result<_, _>>()?;
+    let tls_key = private_key(key_file)?
+        .ok_or_else(|| anyhow::anyhow!("No private key found in {}", key_path))?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(tls_certs, tls_key)?;
+    Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Public server entry point
+// ---------------------------------------------------------------------------
+
+/// Start the HTTP (or HTTPS) server.
+pub async fn run_server(
+    host: &str,
+    port: u16,
+    db_path: &str,
+    jwt_secret: Vec<u8>,
+    tls_cert: Option<&str>,
+    tls_key: Option<&str>,
+    rate_limit_rps: usize,
+) -> anyhow::Result<()> {
+    let pool = create_pool(db_path)?;
+    let repo = Repository::new(pool);
+    let repo_data = web::Data::new(repo);
+    let jwt_data = web::Data::new(JwtSecret(jwt_secret));
+    let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
+
+    let server = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
+
+        App::new()
+            .wrap(cors)
+            .wrap(middleware::Logger::default())
+            .wrap(RateLimitLayer(limiter.clone()))
+            .app_data(repo_data.clone())
+            .app_data(jwt_data.clone())
+            .configure(configure_routes)
+    });
+
+    let bind_addr = format!("{}:{}", host, port);
+
+    #[cfg(not(test))]
+    if let (Some(cert), Some(key)) = (tls_cert, tls_key) {
+        let tls_config = load_tls_config(cert, key)?;
+        server.bind_rustls_0_23(&bind_addr, tls_config)?.run().await?;
+        return Ok(());
+    }
+    let _ = (tls_cert, tls_key);
+
+    server.bind(&bind_addr)?.run().await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use crate::db::repository::{create_memory_pool, Repository};
+    use crate::db::schema::initialize_schema;
+    use crate::api::auth::{issue_token, JwtSecret};
+
+    const SECRET: &[u8] = b"test_secret_key";
+
+    fn make_repo() -> Repository {
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        Repository::new(pool)
+    }
+
+    #[actix_rt::test]
+    async fn test_drives_list_returns_ok() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_rt::test]
+    async fn test_404_endpoint() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/nonexistent").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_rt::test]
+    async fn test_logs_list_returns_ok() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/logs").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_rt::test]
+    async fn test_database_list_returns_ok() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/database/backups").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_rt::test]
+    async fn test_unauthenticated_validate_returns_401() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/auth/validate").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_rt::test]
+    async fn test_valid_token_can_access_validate() {
+        let token = issue_token("alice", SECRET, 3600).unwrap();
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/v1/auth/validate")
+            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_rt::test]
+    async fn test_error_response_format_on_bad_drive_id() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/drives/999").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert!(body["error"].is_object(), "Error response must have 'error' object");
+        assert!(body["error"]["code"].is_string(), "Error must have 'code' field");
+        assert!(body["error"]["message"].is_string(), "Error must have 'message' field");
+    }
+
+    #[actix_rt::test]
+    async fn test_cors_headers_present() {
+        let app = test::init_service(
+            App::new()
+                .wrap(
+                    Cors::default()
+                        .allow_any_origin()
+                        .allow_any_method()
+                        .allow_any_header(),
+                )
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/v1/drives")
+            .insert_header(("Origin", "http://localhost:3000"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let headers = resp.headers();
+        assert!(
+            headers.contains_key("access-control-allow-origin"),
+            "CORS header must be present"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_rate_limiter_allows_within_limit() {
+        let limiter = RateLimiter::new(10, 1);
+        for _ in 0..5 {
+            assert!(limiter.is_allowed("127.0.0.1"), "Should allow within limit");
+        }
+    }
+
+    #[actix_rt::test]
+    async fn test_rate_limiter_blocks_over_limit() {
+        let limiter = RateLimiter::new(3, 60);
+        assert!(limiter.is_allowed("192.168.1.1"));
+        assert!(limiter.is_allowed("192.168.1.1"));
+        assert!(limiter.is_allowed("192.168.1.1"));
+        assert!(!limiter.is_allowed("192.168.1.1"), "Should block when over limit");
+    }
+
+    #[actix_rt::test]
+    async fn test_api_versioning_prefix() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        ).await;
+
+        // Unversioned path should 404
+        let req = test::TestRequest::get().uri("/drives").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+
+        // Versioned path should 200
+        let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
 }

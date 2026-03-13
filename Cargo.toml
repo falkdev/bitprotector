@@ -18,6 +18,8 @@ path = "src/lib.rs"
 # Web framework
 actix-web = { version = "4", features = ["rustls-0_23"] }
 actix-rt = "2"
+actix-cors = "0.7"
+futures-util = "0.3"
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }
