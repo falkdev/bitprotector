@@ -111,6 +111,7 @@ pub struct DbBackupConfig {
 }
 
 /// Data access repository providing CRUD operations on all entities.
+#[derive(Clone)]
 pub struct Repository {
     pool: DbPool,
 }

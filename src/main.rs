@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use bitprotector_lib::cli::commands::drives::DrivesCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -25,6 +26,19 @@ enum Commands {
     },
     /// Display system status (for SSH login)
     Status,
+    /// Manage drive pairs
+    Drives {
+        #[command(subcommand)]
+        action: DrivesCommand,
+    },
+}
+
+fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
+    let pool = bitprotector_lib::db::repository::create_pool(db_path)?;
+    let conn = pool.get()?;
+    bitprotector_lib::db::schema::initialize_schema(&*conn)?;
+    drop(conn);
+    Ok(bitprotector_lib::db::repository::Repository::new(pool))
 }
 
 #[tokio::main]
@@ -42,6 +56,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Status => {
             bitprotector_lib::cli::ssh_status::print_status(&cli.db);
+        }
+        Commands::Drives { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::drives::handle(action, &repo)?;
         }
     }
 
