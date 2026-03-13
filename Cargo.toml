@@ -82,6 +82,10 @@ tokio = { version = "1", features = ["full"] }
 name = "cli_drives"
 path = "tests/integration/cli_drives.rs"
 
+[[test]]
+name = "cli_files"
+path = "tests/integration/cli_files.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

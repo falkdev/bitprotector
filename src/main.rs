@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 use bitprotector_lib::cli::commands::drives::DrivesCommand;
+use bitprotector_lib::cli::commands::files::FilesCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -31,6 +32,11 @@ enum Commands {
         #[command(subcommand)]
         action: DrivesCommand,
     },
+    /// Track and manage files
+    Files {
+        #[command(subcommand)]
+        action: FilesCommand,
+    },
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
@@ -60,6 +66,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Drives { action } => {
             let repo = open_repo(&cli.db)?;
             bitprotector_lib::cli::commands::drives::handle(action, &repo)?;
+        }
+        Commands::Files { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::files::handle(action, &repo)?;
         }
     }
 
