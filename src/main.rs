@@ -7,6 +7,7 @@ use bitprotector_lib::cli::commands::virtual_paths::VirtualPathsCommand;
 use bitprotector_lib::cli::commands::folders::FoldersCommand;
 use bitprotector_lib::cli::commands::sync::SyncCommand;
 use bitprotector_lib::cli::commands::logs::LogsCommand;
+use bitprotector_lib::cli::commands::database::DatabaseCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -67,6 +68,11 @@ enum Commands {
         #[command(subcommand)]
         action: LogsCommand,
     },
+    /// Manage database backup destinations
+    Database {
+        #[command(subcommand)]
+        action: DatabaseCommand,
+    },
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
@@ -120,6 +126,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Logs { action } => {
             let repo = open_repo(&cli.db)?;
             bitprotector_lib::cli::commands::logs::handle(action, &repo)?;
+        }
+        Commands::Database { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::database::handle(action, &repo)?;
         }
     }
 
