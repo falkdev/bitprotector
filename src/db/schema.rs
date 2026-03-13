@@ -73,7 +73,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
                                 'both_corrupted', 'change_detected',
                                 'sync_completed', 'sync_failed'
                             )),
-            tracked_file_id INTEGER REFERENCES tracked_files(id),
+            tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
             message         TEXT NOT NULL,
             details         TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now'))

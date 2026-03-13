@@ -3,6 +3,7 @@ use std::fs;
 use anyhow::Context;
 use crate::core::{checksum, mirror};
 use crate::db::repository::{Repository, DrivePair, TrackedFolder, TrackedFile};
+use crate::logging::event_logger;
 
 /// Track a new file: compute checksum, record in database, and mirror it.
 pub fn track_file(
@@ -29,6 +30,7 @@ pub fn track_file(
         virtual_path,
     )?;
 
+    let _ = event_logger::log_file_tracked(repo, tracked.id, relative_path);
     Ok(tracked)
 }
 

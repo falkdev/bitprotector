@@ -102,6 +102,10 @@ path = "tests/integration/cli_folders.rs"
 name = "cli_sync"
 path = "tests/integration/cli_sync.rs"
 
+[[test]]
+name = "cli_logs"
+path = "tests/integration/cli_logs.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

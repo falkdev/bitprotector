@@ -1,5 +1,6 @@
 use crate::db::repository::{Repository, SyncQueueItem, TrackedFile};
 use crate::core::{mirror, integrity};
+use crate::logging::event_logger;
 
 /// Process a single pending sync queue item.
 pub fn process_item(
@@ -34,8 +35,14 @@ pub fn process_item(
     };
 
     match result {
-        Ok(()) => repo.update_sync_queue_status(item.id, "completed", None)?,
-        Err(e) => repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?,
+        Ok(()) => {
+            repo.update_sync_queue_status(item.id, "completed", None)?;
+            let _ = event_logger::log_sync_completed(repo, file.id, &item.action);
+        }
+        Err(e) => {
+            repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?;
+            let _ = event_logger::log_sync_failed(repo, file.id, &item.action, &e.to_string());
+        }
     }
 
     Ok(())
