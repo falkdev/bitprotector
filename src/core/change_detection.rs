@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use crate::core::checksum;
+use crate::db::repository::{Repository, DrivePair, TrackedFile};
 
 /// Represents a detected file change.
 #[derive(Debug, Clone)]
@@ -26,6 +27,40 @@ pub fn detect_change(
     } else {
         Ok(None)
     }
+}
+
+/// Scan all tracked files for a drive pair and return those whose checksum has changed.
+pub fn scan_all_changes(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+) -> anyhow::Result<Vec<(TrackedFile, String)>> {
+    let (files, _) = repo.list_tracked_files(Some(drive_pair.id), None, None, 1, i64::MAX)?;
+    let mut changes = Vec::new();
+    for file in files {
+        if let Some(new_hash) = detect_change(&drive_pair.primary_path, &file.relative_path, &file.checksum)? {
+            changes.push((file, new_hash));
+        }
+    }
+    Ok(changes)
+}
+
+/// Start a filesystem watcher on a directory. Returns the watcher handle (keep alive to continue watching).
+/// `on_event` is called for each filesystem event detected.
+pub fn watch_folder<F>(
+    folder_path: &str,
+    on_event: F,
+) -> anyhow::Result<notify::RecommendedWatcher>
+where
+    F: Fn(notify::Event) + Send + 'static,
+{
+    use notify::{Watcher, RecursiveMode};
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            on_event(event);
+        }
+    })?;
+    watcher.watch(std::path::Path::new(folder_path), RecursiveMode::Recursive)?;
+    Ok(watcher)
 }
 
 #[cfg(test)]
@@ -64,5 +99,51 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let change = detect_change(dir.path().to_str().unwrap(), "missing.txt", "anyhash").unwrap();
         assert!(change.is_none());
+    }
+
+    #[test]
+    fn test_scan_all_changes_detects_modified_file() {
+        use crate::db::repository::{create_memory_pool, Repository};
+        use crate::db::schema::initialize_schema;
+        use crate::core::tracker;
+
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        let repo = Repository::new(pool);
+
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+
+        fs::write(primary.path().join("scan.txt"), b"original content").unwrap();
+        tracker::track_file(&repo, &pair, "scan.txt", None).unwrap();
+
+        // Modify the file so it shows as changed
+        fs::write(primary.path().join("scan.txt"), b"modified content").unwrap();
+
+        let changes = scan_all_changes(&repo, &pair).unwrap();
+        assert_eq!(changes.len(), 1, "Should detect the modified file");
+        assert_eq!(changes[0].0.relative_path, "scan.txt");
+    }
+
+    #[test]
+    fn test_scan_all_changes_unchanged_file_not_reported() {
+        use crate::db::repository::{create_memory_pool, Repository};
+        use crate::db::schema::initialize_schema;
+        use crate::core::tracker;
+
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        let repo = Repository::new(pool);
+
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+
+        fs::write(primary.path().join("stable.txt"), b"no changes here").unwrap();
+        tracker::track_file(&repo, &pair, "stable.txt", None).unwrap();
+
+        let changes = scan_all_changes(&repo, &pair).unwrap();
+        assert!(changes.is_empty(), "Unchanged file should not be reported");
     }
 }
