@@ -3,6 +3,7 @@ use tracing_subscriber::EnvFilter;
 use bitprotector_lib::cli::commands::drives::DrivesCommand;
 use bitprotector_lib::cli::commands::files::FilesCommand;
 use bitprotector_lib::cli::commands::integrity::IntegrityCommand;
+use bitprotector_lib::cli::commands::virtual_paths::VirtualPathsCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -43,6 +44,11 @@ enum Commands {
         #[command(subcommand)]
         action: IntegrityCommand,
     },
+    /// Manage virtual paths and symlinks
+    VirtualPaths {
+        #[command(subcommand)]
+        action: VirtualPathsCommand,
+    },
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
@@ -80,6 +86,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Integrity { action } => {
             let repo = open_repo(&cli.db)?;
             bitprotector_lib::cli::commands::integrity::handle(action, &repo)?;
+        }
+        Commands::VirtualPaths { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::virtual_paths::handle(action, &repo)?;
         }
     }
 
