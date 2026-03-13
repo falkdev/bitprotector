@@ -1,0 +1,29 @@
+#!/bin/sh
+# postinst: post-installation script for bitprotector
+set -e
+
+case "$1" in
+    configure)
+        # Create bitprotector user and group if not present
+        if ! getent group bitprotector >/dev/null; then
+            addgroup --system bitprotector
+        fi
+        if ! getent passwd bitprotector >/dev/null; then
+            adduser --system --ingroup bitprotector \
+                --home /var/lib/bitprotector \
+                --no-create-home \
+                --shell /usr/sbin/nologin \
+                bitprotector
+        fi
+
+        # Create directories
+        install -d -m 0750 -o bitprotector -g bitprotector \
+            /var/lib/bitprotector \
+            /var/log/bitprotector \
+            /etc/bitprotector/tls
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

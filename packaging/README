@@ -1,0 +1,21 @@
+# BitProtector
+
+Distributed File Mirror and Integrity Protection System.
+
+Monitors files across redundant storage, detects corruption,
+and automatically recovers from mirror copies.
+
+## Quick Start
+
+    bitprotector drives add mybackup /primary/path /secondary/path
+    bitprotector files track <drive-id> /primary/path/to/file.txt
+    bitprotector integrity check all
+    bitprotector status
+
+## Service
+
+    sudo systemctl enable --now bitprotector
+
+## Configuration
+
+Edit /etc/bitprotector/config.toml to configure the server.

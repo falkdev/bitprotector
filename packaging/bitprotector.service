@@ -1,0 +1,27 @@
+[Unit]
+Description=BitProtector - Distributed File Mirror and Integrity Protection
+After=network.target
+Documentation=https://github.com/bitprotector/bitprotector
+
+[Service]
+Type=simple
+User=bitprotector
+Group=bitprotector
+ExecStart=/usr/bin/bitprotector \
+    --db /var/lib/bitprotector/bitprotector.db \
+    serve \
+    --host 127.0.0.1 \
+    --port 8443 \
+    --tls-cert /etc/bitprotector/tls/cert.pem \
+    --tls-key /etc/bitprotector/tls/key.pem
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bitprotector /var/log/bitprotector
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

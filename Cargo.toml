@@ -120,6 +120,33 @@ path = "tests/integration/cli_auth.rs"
 name = "cli_status"
 path = "tests/integration/cli_status.rs"
 
+[[test]]
+name = "packaging"
+path = "tests/integration/packaging.rs"
+
+[package.metadata.deb]
+name = "bitprotector"
+maintainer = "BitProtector Authors <bitprotector@example.com>"
+copyright = "2024, BitProtector Authors"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+Distributed File Mirror and Integrity Protection System.
+Monitors files across redundant storage, detects corruption,
+and automatically recovers from mirror copies."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/bitprotector", "usr/bin/bitprotector", "755"],
+    ["packaging/config.toml", "etc/bitprotector/config.toml", "644"],
+    ["packaging/bitprotector.service", "lib/systemd/system/bitprotector.service", "644"],
+    ["scripts/bitprotector-status.sh", "etc/profile.d/bitprotector-status.sh", "755"],
+    ["packaging/README", "usr/share/doc/bitprotector/README", "644"],
+]
+maintainer-scripts = "packaging/scripts"
+systemd-units = { enable = true, start = false }
+conf-files = ["/etc/bitprotector/config.toml"]
+
 [profile.release]
 opt-level = 3
 lto = true

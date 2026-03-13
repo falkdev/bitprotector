@@ -1,0 +1,24 @@
+# BitProtector default configuration
+# Location: /etc/bitprotector/config.toml
+
+[server]
+host = "127.0.0.1"
+port = 8443
+rate_limit_rps = 100
+
+[tls]
+cert = "/etc/bitprotector/tls/cert.pem"
+key = "/etc/bitprotector/tls/key.pem"
+
+[database]
+path = "/var/lib/bitprotector/bitprotector.db"
+
+[auth]
+# IMPORTANT: Change this secret before deploying to production!
+jwt_secret = "change-me-in-production"
+# Token validity in seconds (default: 8 hours)
+token_ttl = 28800
+
+[logging]
+level = "info"
+file = "/var/log/bitprotector/bitprotector.log"
