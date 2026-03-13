@@ -7,3 +7,4 @@ pub mod logs;
 pub mod scheduler;
 pub mod folders;
 pub mod database;
+pub mod auth;

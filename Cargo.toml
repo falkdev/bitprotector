@@ -110,6 +110,10 @@ path = "tests/integration/cli_logs.rs"
 name = "cli_database"
 path = "tests/integration/cli_database.rs"
 
+[[test]]
+name = "cli_auth"
+path = "tests/integration/cli_auth.rs"
+
 [profile.release]
 opt-level = 3
 lto = true
