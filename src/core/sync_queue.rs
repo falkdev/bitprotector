@@ -1,4 +1,4 @@
-use crate::db::repository::{Repository, SyncQueueItem};
+use crate::db::repository::{Repository, SyncQueueItem, TrackedFile};
 use crate::core::{mirror, integrity};
 
 /// Process a single pending sync queue item.
@@ -51,6 +51,28 @@ pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
         }
     }
     Ok(count)
+}
+
+/// Create a sync queue item from an integrity check failure.
+/// Returns None if the status is Ok or BothCorrupted (requires manual resolution).
+pub fn create_from_integrity_failure(
+    repo: &Repository,
+    file: &TrackedFile,
+    result: &integrity::IntegrityCheckResult,
+) -> anyhow::Result<Option<SyncQueueItem>> {
+    use integrity::IntegrityStatus;
+    let action = match result.status {
+        IntegrityStatus::Ok => return Ok(None),
+        IntegrityStatus::BothCorrupted => return Ok(None),
+        IntegrityStatus::MirrorCorrupted | IntegrityStatus::MirrorMissing => "restore_mirror",
+        IntegrityStatus::MasterCorrupted | IntegrityStatus::MasterMissing => "restore_master",
+    };
+    Ok(Some(repo.create_sync_queue_item(file.id, action)?))
+}
+
+/// Create a sync queue item to re-mirror a changed file.
+pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
+    repo.create_sync_queue_item(file_id, "mirror")
 }
 
 #[cfg(test)]
@@ -119,5 +141,74 @@ mod tests {
             let updated = repo.get_sync_queue_item(item.id).unwrap();
             assert_eq!(updated.status, "completed", "Action {} should complete", action);
         }
+    }
+
+    #[test]
+    fn test_create_from_integrity_failure_mirror_corrupted() {
+        let (primary, secondary, repo) = setup();
+        let content = b"integrity test";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("mi.txt"), content).unwrap();
+        fs::write(secondary.path().join("mi.txt"), content).unwrap();
+
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let file = repo.create_tracked_file(pair.id, "mi.txt", &hash, content.len() as i64, None).unwrap();
+
+        // Corrupt the mirror
+        fs::write(secondary.path().join("mi.txt"), b"corrupted").unwrap();
+        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+
+        let item = create_from_integrity_failure(&repo, &file, &result).unwrap();
+        assert!(item.is_some());
+        assert_eq!(item.unwrap().action, "restore_mirror");
+    }
+
+    #[test]
+    fn test_create_from_integrity_failure_ok_returns_none() {
+        let (primary, secondary, repo) = setup();
+        let content = b"synced content";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("ok.txt"), content).unwrap();
+        fs::write(secondary.path().join("ok.txt"), content).unwrap();
+
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let file = repo.create_tracked_file(pair.id, "ok.txt", &hash, content.len() as i64, None).unwrap();
+        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+
+        let item = create_from_integrity_failure(&repo, &file, &result).unwrap();
+        assert!(item.is_none(), "No queue item should be created when integrity is Ok");
+    }
+
+    #[test]
+    fn test_create_from_change_creates_mirror_item() {
+        let (primary, secondary, repo) = setup();
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let file = repo.create_tracked_file(pair.id, "changed.txt", "oldhash", 10, None).unwrap();
+
+        let item = create_from_change(&repo, file.id).unwrap();
+        assert_eq!(item.action, "mirror");
+        assert_eq!(item.tracked_file_id, file.id);
+    }
+
+    #[test]
+    fn test_integrity_failure_queue_resolve_cycle() {
+        let (primary, secondary, repo) = setup();
+        let content = b"cycle content";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("cyc.txt"), content).unwrap();
+
+        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let file = repo.create_tracked_file(pair.id, "cyc.txt", &hash, content.len() as i64, None).unwrap();
+
+        // Mirror is missing
+        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+        assert_eq!(result.status, integrity::IntegrityStatus::MirrorMissing);
+
+        let item = create_from_integrity_failure(&repo, &file, &result).unwrap().unwrap();
+        process_item(&repo, &item).unwrap();
+
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        assert!(secondary.path().join("cyc.txt").exists(), "Mirror should be restored");
     }
 }

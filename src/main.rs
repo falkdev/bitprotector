@@ -5,6 +5,7 @@ use bitprotector_lib::cli::commands::files::FilesCommand;
 use bitprotector_lib::cli::commands::integrity::IntegrityCommand;
 use bitprotector_lib::cli::commands::virtual_paths::VirtualPathsCommand;
 use bitprotector_lib::cli::commands::folders::FoldersCommand;
+use bitprotector_lib::cli::commands::sync::SyncCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -55,6 +56,11 @@ enum Commands {
         #[command(subcommand)]
         action: FoldersCommand,
     },
+    /// Manage sync queue and scheduled tasks
+    Sync {
+        #[command(subcommand)]
+        action: SyncCommand,
+    },
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
@@ -100,6 +106,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Folders { action } => {
             let repo = open_repo(&cli.db)?;
             bitprotector_lib::cli::commands::folders::handle(action, &repo)?;
+        }
+        Commands::Sync { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::sync::handle(action, &repo)?;
         }
     }
 
