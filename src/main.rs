@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 use bitprotector_lib::cli::commands::drives::DrivesCommand;
 use bitprotector_lib::cli::commands::files::FilesCommand;
+use bitprotector_lib::cli::commands::integrity::IntegrityCommand;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -37,6 +38,11 @@ enum Commands {
         #[command(subcommand)]
         action: FilesCommand,
     },
+    /// Run integrity checks and recovery
+    Integrity {
+        #[command(subcommand)]
+        action: IntegrityCommand,
+    },
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
@@ -70,6 +76,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Files { action } => {
             let repo = open_repo(&cli.db)?;
             bitprotector_lib::cli::commands::files::handle(action, &repo)?;
+        }
+        Commands::Integrity { action } => {
+            let repo = open_repo(&cli.db)?;
+            bitprotector_lib::cli::commands::integrity::handle(action, &repo)?;
         }
     }
 

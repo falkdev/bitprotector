@@ -86,6 +86,10 @@ path = "tests/integration/cli_drives.rs"
 name = "cli_files"
 path = "tests/integration/cli_files.rs"
 
+[[test]]
+name = "cli_integrity"
+path = "tests/integration/cli_integrity.rs"
+
 [profile.release]
 opt-level = 3
 lto = true
