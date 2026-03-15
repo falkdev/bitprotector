@@ -1,0 +1,176 @@
+# BitProtector
+
+**Distributed File Mirror and Integrity Protection System**
+
+Monitors files across redundant storage, detects bit-decay and silent corruption using BLAKE3 checksums, and automatically recovers from mirror copies. Operates as a background daemon with both a CLI tool and a HTTPS REST API.
+
+---
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Running the Service](#running-the-service)
+- [Documentation](#documentation)
+
+---
+
+## How It Works
+
+1. You register **drive pairs** — a primary path and a secondary (mirror) path.
+2. You **track files** (individually or by folder). BitProtector computes a BLAKE3 checksum and mirrors the file to the secondary path.
+3. Scheduled **integrity checks** re-hash both copies and compare them against the stored baseline:
+   - Mirror corrupted → restore from primary.
+   - Primary corrupted → restore from mirror.
+   - Both corrupted → flag for user action.
+4. A **virtual path** layer exposes tracked files as a unified symlink tree regardless of their physical location.
+
+---
+
+## Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| Rust stable toolchain | Install via [rustup](https://rustup.rs) |
+| `libpam0g-dev` | PAM headers for system authentication — `sudo apt install libpam0g-dev` |
+| TLS certificate and key | Required for the HTTPS API server — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#generating-a-self-signed-certificate) |
+| `cargo-deb` (optional) | Required only to build the `.deb` package — `cargo install cargo-deb` |
+
+---
+
+## Build
+
+```bash
+# Debug build
+cargo build
+
+# Release build
+cargo build --release
+
+# Build Debian package (Ubuntu 24 target)
+cargo deb
+```
+
+The release binary is written to `target/release/bitprotector`.
+The `.deb` package is written to `target/debian/`.
+
+---
+
+## Install
+
+### From the Debian package (recommended for production)
+
+```bash
+cargo deb
+sudo dpkg -i target/debian/bitprotector_*.deb
+```
+
+The package installs:
+- Binary to `/usr/bin/bitprotector`
+- Default config to `/etc/bitprotector/config.toml`
+- systemd unit to `/lib/systemd/system/bitprotector.service`
+- SSH login status hook to `/etc/profile.d/bitprotector-status.sh`
+
+### From source (development)
+
+```bash
+cargo build --release
+sudo install -m 755 target/release/bitprotector /usr/local/bin/
+sudo mkdir -p /etc/bitprotector /var/lib/bitprotector /var/log/bitprotector
+sudo cp packaging/config.toml /etc/bitprotector/config.toml
+```
+
+---
+
+## Quick Start
+
+```bash
+# 1. Register a drive pair
+bitprotector drives add mybackup /mnt/primary /mnt/mirror
+
+# 2. Track a file (mirrors it immediately)
+bitprotector files track <drive-pair-id> /mnt/primary/documents/report.pdf
+
+# 3. Track all files in a folder
+bitprotector folders add <drive-pair-id> documents/
+
+# 4. Run an integrity check
+bitprotector integrity check all
+
+# 5. Show overall status
+bitprotector status
+
+# 6. Assign a virtual path (creates a symlink)
+bitprotector virtual-paths set <file-id> /docs/report.pdf
+```
+
+For a full list of commands and flags, run:
+
+```bash
+bitprotector --help
+bitprotector <subcommand> --help
+```
+
+---
+
+## Configuration
+
+Edit `/etc/bitprotector/config.toml` before starting the service. The most important settings are:
+
+```toml
+[tls]
+cert = "/etc/bitprotector/tls/cert.pem"
+key  = "/etc/bitprotector/tls/key.pem"
+
+[auth]
+jwt_secret = "change-me-in-production"  # MUST be changed
+
+[server]
+port = 8443
+```
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for a full reference of every option.
+
+---
+
+## Running the Service
+
+```bash
+# Enable and start the systemd service
+sudo systemctl enable --now bitprotector
+
+# Check service status
+sudo systemctl status bitprotector
+
+# View logs
+sudo journalctl -u bitprotector -f
+```
+
+The REST API is available at `https://localhost:8443/api/v1` once the service is running.
+
+For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
+
+```bash
+bitprotector --db /tmp/test.db drives list
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module breakdown, and database schema |
+| [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |
+| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, writing new tests, and QEMU installation tests |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
