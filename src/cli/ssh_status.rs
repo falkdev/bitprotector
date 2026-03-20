@@ -89,26 +89,25 @@ pub fn format_status(report: &StatusReport) -> String {
 }
 
 /// Print a brief system health summary suitable for SSH MOTD.
+/// Fails silently if the database is inaccessible (e.g. insufficient permissions).
 pub fn print_status(db_path: &str) {
-    let pool = match crate::db::repository::create_pool(db_path) {
+    let pool = match crate::db::repository::create_cli_pool(db_path) {
         Ok(p) => p,
-        Err(e) => {
-            println!("BitProtector: unable to open database: {}", e);
-            return;
-        }
+        Err(_) => return,
     };
 
-    if let Ok(conn) = pool.get() {
-        if initialize_schema(&*conn).is_err() {
-            println!("BitProtector: database error");
-            return;
-        }
+    let conn = match pool.get() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if initialize_schema(&*conn).is_err() {
+        return;
     }
+    drop(conn);
 
     let repo = Repository::new(pool);
-    match gather_status(&repo) {
-        Ok(report) => println!("{}", format_status(&report)),
-        Err(e) => println!("BitProtector: error gathering status: {}", e),
+    if let Ok(report) = gather_status(&repo) {
+        println!("{}", format_status(&report));
     }
 }
 

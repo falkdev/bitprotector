@@ -7,10 +7,20 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 /// Create a connection pool for the given database path.
 pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
         Ok(())
     });
     let pool = Pool::builder().max_size(10).build(manager)?;
+    Ok(pool)
+}
+
+/// Create a single-connection pool for CLI commands that share the DB with a running service.
+pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
+    let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
+        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        Ok(())
+    });
+    let pool = Pool::builder().max_size(1).build(manager)?;
     Ok(pool)
 }
 

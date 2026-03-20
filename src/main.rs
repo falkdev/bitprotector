@@ -88,20 +88,22 @@ enum Commands {
 }
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
-    let pool = bitprotector_lib::db::repository::create_pool(db_path)?;
-    let conn = pool.get()?;
-    bitprotector_lib::db::schema::initialize_schema(&*conn)?;
-    drop(conn);
+    let pool = bitprotector_lib::db::repository::create_cli_pool(db_path)?;
     Ok(bitprotector_lib::db::repository::Repository::new(pool))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let cli = Cli::parse();
+
+    // Skip tracing for the Status command: it runs on every SSH login and
+    // r2d2's internal log output would pollute the terminal even when the
+    // error is handled silently.
+    if !matches!(cli.command, Commands::Status) {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     match cli.command {
         Commands::Serve { host, port, jwt_secret, tls_cert, tls_key, rate_limit_rps } => {

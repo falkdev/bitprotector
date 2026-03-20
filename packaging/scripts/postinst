@@ -17,10 +17,29 @@ case "$1" in
         fi
 
         # Create directories
+        # /var/lib/bitprotector is 0770 so group members can write the SQLite
+        # WAL/SHM files needed for concurrent read access.
+        install -d -m 0770 -o bitprotector -g bitprotector \
+            /var/lib/bitprotector
         install -d -m 0750 -o bitprotector -g bitprotector \
-            /var/lib/bitprotector \
             /var/log/bitprotector \
             /etc/bitprotector/tls
+
+        # Generate a self-signed TLS certificate if one is not already present.
+        # Replace with a CA-signed certificate for production use.
+        if [ ! -f /etc/bitprotector/tls/cert.pem ] || [ ! -f /etc/bitprotector/tls/key.pem ]; then
+            openssl req -x509 -newkey rsa:4096 \
+                -keyout /etc/bitprotector/tls/key.pem \
+                -out /etc/bitprotector/tls/cert.pem \
+                -days 3650 -nodes \
+                -subj "/CN=bitprotector" 2>/dev/null
+            chmod 640 \
+                /etc/bitprotector/tls/cert.pem \
+                /etc/bitprotector/tls/key.pem
+            chown bitprotector:bitprotector \
+                /etc/bitprotector/tls/cert.pem \
+                /etc/bitprotector/tls/key.pem
+        fi
     ;;
 esac
 
