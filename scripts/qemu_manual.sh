@@ -5,12 +5,13 @@
 # The VM disk image is reused across runs so your state is preserved.
 # To start fresh, delete the workdir: rm -rf ~/.cache/bitprotector-qemu
 #
-# This manual VM provisions the same extra-disk layout used by
-# tests/installation/qemu_failover_test.sh:
+# This manual VM provisions an extended extra-disk layout:
 #   /mnt/primary
 #   /mnt/mirror
 #   /mnt/replacement-primary
 #   /mnt/replacement-secondary
+#   /mnt/spare1
+#   /mnt/spare2
 #
 # Optional QMP support:
 #   ENABLE_QMP=1 ./scripts/qemu_manual.sh
@@ -117,6 +118,8 @@ create_data_disk "${WORKDIR}/primary.qcow2"
 create_data_disk "${WORKDIR}/mirror.qcow2"
 create_data_disk "${WORKDIR}/replacement-primary.qcow2"
 create_data_disk "${WORKDIR}/replacement-secondary.qcow2"
+create_data_disk "${WORKDIR}/spare1.qcow2"
+create_data_disk "${WORKDIR}/spare2.qcow2"
 
 if [[ "${FIRST_RUN}" == "true" ]]; then
     echo "Creating cloud-init seed ISO..."
@@ -173,6 +176,8 @@ write_files:
       setup_disk bpmirror /mnt/mirror
       setup_disk bpreplprimary /mnt/replacement-primary
       setup_disk bpreplsecondary /mnt/replacement-secondary
+      setup_disk bpspare1 /mnt/spare1
+      setup_disk bpspare2 /mnt/spare2
 
       mount -a
       mkdir -p /tmp/bitprotector-virtual
@@ -181,6 +186,8 @@ write_files:
           /mnt/mirror \
           /mnt/replacement-primary \
           /mnt/replacement-secondary \
+          /mnt/spare1 \
+          /mnt/spare2 \
           /tmp/bitprotector-virtual
 
 runcmd:
@@ -189,6 +196,8 @@ runcmd:
   - /usr/local/bin/bitprotector-qemu-storage.sh
   - apt-get update -q
   - apt-get install -y /mnt/debpkg/$(basename "${DEB_FILE}")
+  - mkdir -p /var/lib/bitprotector
+  - chown testuser:testuser /var/lib/bitprotector
   - systemctl enable bitprotector || true
   - systemctl start bitprotector || true
   - touch /tmp/install-done
@@ -220,6 +229,8 @@ echo "    /mnt/primary"
 echo "    /mnt/mirror"
 echo "    /mnt/replacement-primary"
 echo "    /mnt/replacement-secondary"
+echo "    /mnt/spare1"
+echo "    /mnt/spare2"
 echo "    /tmp/bitprotector-virtual"
 echo ""
 echo "  Shared package dir (host -> /mnt/debpkg in VM):"
@@ -252,6 +263,10 @@ exec qemu-system-x86_64 \
     -device "virtio-blk-pci,drive=drive-replacement-primary,id=dev-replacement-primary,serial=bpreplprimary" \
     -drive "if=none,id=drive-replacement-secondary,file=${WORKDIR}/replacement-secondary.qcow2,format=qcow2" \
     -device "virtio-blk-pci,drive=drive-replacement-secondary,id=dev-replacement-secondary,serial=bpreplsecondary" \
+    -drive "if=none,id=drive-spare1,file=${WORKDIR}/spare1.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-spare1,id=dev-spare1,serial=bpspare1" \
+    -drive "if=none,id=drive-spare2,file=${WORKDIR}/spare2.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-spare2,id=dev-spare2,serial=bpspare2" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=$(dirname "${DEB_FILE}"),mount_tag=debpkg,security_model=passthrough,id=debpkg"
