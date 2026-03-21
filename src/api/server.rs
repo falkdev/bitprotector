@@ -3,13 +3,16 @@ use crate::api::models::ApiError;
 use crate::core::scheduler::Scheduler;
 use crate::db::repository::{create_pool, Repository};
 use actix_cors::Cors;
+use actix_files::{Files, NamedFile};
 use actix_web::{
     body::{BoxBody, EitherBody, MessageBody},
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::ErrorInternalServerError,
     middleware, web, App, Error, HttpMessage, HttpResponse, HttpServer,
 };
 use futures_util::future::{ready, LocalBoxFuture, Ready};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -236,6 +239,43 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     );
 }
 
+const FRONTEND_DIST_DIR: &str = "/var/lib/bitprotector/frontend";
+
+#[derive(Clone)]
+pub struct FrontendAssets {
+    root: PathBuf,
+}
+
+impl FrontendAssets {
+    fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    fn index_path(&self) -> PathBuf {
+        self.root.join("index.html")
+    }
+}
+
+async fn frontend_index_fallback(
+    frontend: web::Data<FrontendAssets>,
+) -> actix_web::Result<NamedFile> {
+    NamedFile::open(frontend.index_path()).map_err(ErrorInternalServerError)
+}
+
+/// Register API routes and optional frontend static file serving.
+pub fn configure_application(cfg: &mut web::ServiceConfig, frontend_dir: Option<PathBuf>) {
+    configure_routes(cfg);
+
+    if let Some(frontend_dir) = frontend_dir {
+        cfg.app_data(web::Data::new(FrontendAssets::new(frontend_dir.clone())));
+        cfg.service(
+            Files::new("/", frontend_dir)
+                .index_file("index.html")
+                .default_handler(web::to(frontend_index_fallback)),
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TLS helper
 // ---------------------------------------------------------------------------
@@ -288,6 +328,7 @@ pub async fn run_server(
     let jwt_data = web::Data::new(JwtSecret(jwt_secret));
     let scheduler_data = web::Data::new(scheduler);
     let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
+    let frontend_dir = PathBuf::from(FRONTEND_DIST_DIR);
 
     let server = HttpServer::new(move || {
         let cors = Cors::default()
@@ -303,7 +344,7 @@ pub async fn run_server(
             .app_data(repo_data.clone())
             .app_data(jwt_data.clone())
             .app_data(scheduler_data.clone())
-            .configure(configure_routes)
+            .configure(|cfg| configure_application(cfg, Some(frontend_dir.clone())))
     });
 
     let bind_addr = format!("{}:{}", host, port);
@@ -674,5 +715,88 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["drive_pair"]["primary_state"], "rebuilding");
         assert_eq!(body["queued_rebuild_items"], 1);
+    }
+
+    #[actix_rt::test]
+    async fn test_frontend_root_serves_index_html() {
+        let frontend_dir = TempDir::new().unwrap();
+        fs::write(
+            frontend_dir.path().join("index.html"),
+            "<!doctype html><html><body>BitProtector UI</body></html>",
+        )
+        .unwrap();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(|cfg| {
+                    configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
+                }),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("BitProtector UI"));
+    }
+
+    #[actix_rt::test]
+    async fn test_frontend_client_route_falls_back_to_index() {
+        let frontend_dir = TempDir::new().unwrap();
+        fs::write(
+            frontend_dir.path().join("index.html"),
+            "<!doctype html><html><body>BitProtector SPA</body></html>",
+        )
+        .unwrap();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(|cfg| {
+                    configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
+                }),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/drives").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("BitProtector SPA"));
+    }
+
+    #[actix_rt::test]
+    async fn test_frontend_static_serving_does_not_shadow_api_routes() {
+        let frontend_dir = TempDir::new().unwrap();
+        fs::write(
+            frontend_dir.path().join("index.html"),
+            "<!doctype html><html><body>BitProtector API</body></html>",
+        )
+        .unwrap();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(|cfg| {
+                    configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
+                }),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/v1/status")
+            .insert_header(("Authorization", bearer_token()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert!(body["drive_pairs"].is_number());
     }
 }

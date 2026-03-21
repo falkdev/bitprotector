@@ -189,6 +189,18 @@ write_files:
           /mnt/spare1 \
           /mnt/spare2 \
           /tmp/bitprotector-virtual
+  - path: /etc/systemd/system/bitprotector.service.d/manual-qemu.conf
+    permissions: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/bitprotector \
+          --db /var/lib/bitprotector/bitprotector.db \
+          serve \
+          --host 0.0.0.0 \
+          --port 8443 \
+          --tls-cert /etc/bitprotector/tls/cert.pem \
+          --tls-key /etc/bitprotector/tls/key.pem
 
 runcmd:
   - mkdir -p /mnt/debpkg
@@ -196,8 +208,8 @@ runcmd:
   - /usr/local/bin/bitprotector-qemu-storage.sh
   - apt-get update -q
   - apt-get install -y /mnt/debpkg/$(basename "${DEB_FILE}")
-  - mkdir -p /var/lib/bitprotector
-  - chown testuser:testuser /var/lib/bitprotector
+  - usermod -a -G bitprotector testuser || true
+  - systemctl daemon-reload
   - systemctl enable bitprotector || true
   - systemctl start bitprotector || true
   - touch /tmp/install-done

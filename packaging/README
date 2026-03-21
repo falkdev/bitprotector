@@ -16,6 +16,17 @@ and automatically recovers from mirror copies.
 
     sudo systemctl enable --now bitprotector
 
+The web UI is served directly by the backend at:
+
+    https://localhost:8443/
+
+## Package Build
+
+Build the frontend before running `cargo deb`:
+
+    cd frontend && npm ci && npm run build && cd ..
+    cargo deb
+
 ## Configuration
 
 Edit /etc/bitprotector/config.toml to configure the server.

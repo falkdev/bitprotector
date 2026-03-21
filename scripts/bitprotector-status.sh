@@ -5,6 +5,6 @@
 
 DB_PATH="${BITPROTECTOR_DB:-/var/lib/bitprotector/bitprotector.db}"
 
-if command -v bitprotector >/dev/null 2>&1; then
+if [ -f "$DB_PATH" ] && command -v bitprotector >/dev/null 2>&1; then
     bitprotector --db "$DB_PATH" status 2>/dev/null || true
 fi

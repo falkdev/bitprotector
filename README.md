@@ -38,6 +38,7 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 | Requirement | Notes |
 |---|---|
 | Rust stable toolchain | Install via [rustup](https://rustup.rs) |
+| Node.js 20+ | Required to build, lint, and test the React frontend |
 | `libpam0g-dev` | PAM headers for system authentication — `sudo apt install libpam0g-dev` |
 | TLS certificate and key | Required for the HTTPS API server — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#generating-a-self-signed-certificate) |
 | `cargo-deb` (optional) | Required only to build the `.deb` package — `cargo install cargo-deb` |
@@ -47,6 +48,12 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 ## Build
 
 ```bash
+# Frontend build (required for the web UI and Debian package)
+cd frontend
+npm ci
+npm run build
+cd ..
+
 # Debug build
 cargo build
 
@@ -59,6 +66,7 @@ cargo deb
 
 The release binary is written to `target/release/bitprotector`.
 The `.deb` package is written to `target/debian/`.
+The production frontend bundle is written to `frontend/dist/`.
 
 ---
 
@@ -67,6 +75,10 @@ The `.deb` package is written to `target/debian/`.
 ### From the Debian package (recommended for production)
 
 ```bash
+cd frontend
+npm ci
+npm run build
+cd ..
 cargo deb
 sudo dpkg -i target/debian/bitprotector_*.deb
 ```
@@ -76,14 +88,20 @@ The package installs:
 - Default config to `/etc/bitprotector/config.toml`
 - systemd unit to `/lib/systemd/system/bitprotector.service`
 - SSH login status hook to `/etc/profile.d/bitprotector-status.sh`
+- Frontend assets to `/var/lib/bitprotector/frontend`
 
 ### From source (development)
 
 ```bash
+cd frontend
+npm ci
+npm run build
+cd ..
 cargo build --release
 sudo install -m 755 target/release/bitprotector /usr/local/bin/
-sudo mkdir -p /etc/bitprotector /var/lib/bitprotector /var/log/bitprotector
+sudo mkdir -p /etc/bitprotector /var/lib/bitprotector/frontend /var/log/bitprotector
 sudo cp packaging/config.toml /etc/bitprotector/config.toml
+sudo cp -r frontend/dist/* /var/lib/bitprotector/frontend/
 ```
 
 ---
@@ -158,7 +176,8 @@ sudo systemctl status bitprotector
 sudo journalctl -u bitprotector -f
 ```
 
-The REST API is available at `https://localhost:8443/api/v1` once the service is running.
+The web UI is available at `https://localhost:8443/` once the service is running.
+The REST API remains available at `https://localhost:8443/api/v1`.
 
 For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
 

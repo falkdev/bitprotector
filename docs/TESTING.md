@@ -50,6 +50,19 @@ Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for
 cargo test
 ```
 
+### Frontend checks
+
+The frontend toolchain targets Node.js 20+.
+
+```bash
+cd frontend
+npm ci
+npm run build
+npm run lint
+```
+
+`npm test` also expects Node.js 20+ because the current Vitest stack depends on newer Node APIs than Node 18 provides.
+
 ### Run all tests in one integration file
 
 ```bash
@@ -307,6 +320,10 @@ UBUNTU_IMAGE=/data/images/noble.img ./tests/installation/qemu_test.sh
 **2. Build the `.deb` package:**
 
 ```bash
+cd frontend
+npm ci
+npm run build
+cd ..
 cargo deb
 ```
 

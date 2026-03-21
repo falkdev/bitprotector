@@ -21,6 +21,8 @@ case "$1" in
         # WAL/SHM files needed for concurrent read access.
         install -d -m 0770 -o bitprotector -g bitprotector \
             /var/lib/bitprotector
+        install -d -m 0755 -o bitprotector -g bitprotector \
+            /var/lib/bitprotector/frontend
         install -d -m 0750 -o bitprotector -g bitprotector \
             /var/log/bitprotector \
             /etc/bitprotector/tls

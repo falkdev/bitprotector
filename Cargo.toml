@@ -19,6 +19,7 @@ path = "src/lib.rs"
 actix-web = { version = "4", features = ["rustls-0_23"] }
 actix-rt = "2"
 actix-cors = "0.7"
+actix-files = "0.6"
 futures-util = "0.3"
 
 # Database
@@ -158,6 +159,7 @@ assets = [
     ["packaging/bitprotector.service", "lib/systemd/system/bitprotector.service", "644"],
     ["scripts/bitprotector-status.sh", "etc/profile.d/bitprotector-status.sh", "755"],
     ["packaging/README", "usr/share/doc/bitprotector/README", "644"],
+    ["frontend/dist/**/*", "var/lib/bitprotector/frontend/", "644"],
 ]
 maintainer-scripts = "packaging/scripts"
 systemd-units = { enable = true, start = false }

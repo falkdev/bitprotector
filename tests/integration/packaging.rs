@@ -136,6 +136,14 @@ fn test_cargo_deb_metadata_present() {
         content.contains("config.toml"),
         "Cargo.toml deb config must reference config template"
     );
+    assert!(
+        content.contains("frontend/dist/**/*"),
+        "Cargo.toml deb config must package the built frontend assets"
+    );
+    assert!(
+        content.contains("var/lib/bitprotector/frontend"),
+        "Cargo.toml deb config must install frontend files under /var/lib/bitprotector/frontend"
+    );
 }
 
 #[test]
@@ -150,5 +158,9 @@ fn test_postinst_script_exists() {
     assert!(
         content.contains("/var/lib/bitprotector"),
         "postinst must create data directory"
+    );
+    assert!(
+        content.contains("/var/lib/bitprotector/frontend"),
+        "postinst must create the frontend asset directory"
     );
 }
