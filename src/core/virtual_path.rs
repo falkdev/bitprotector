@@ -11,6 +11,13 @@ pub struct VirtualPathMapping {
     pub real_path: String,
 }
 
+/// Result of a bulk virtual path operation.
+#[derive(Debug)]
+pub struct BulkResult {
+    pub succeeded: Vec<i64>,
+    pub failed: Vec<(i64, String)>,
+}
+
 /// Set the virtual path for a tracked file and create a symlink.
 pub fn set_virtual_path(
     repo: &Repository,
@@ -42,6 +49,76 @@ pub fn remove_virtual_path(
     repo.update_tracked_file_virtual_path(file_id, None)?;
     remove_symlink(symlink_base, virtual_path)?;
     Ok(())
+}
+
+/// Set virtual paths for multiple files in a single operation.
+///
+/// Each entry maps a `file_id` to a `(virtual_path, real_path)` tuple.
+/// Failures on individual items are collected rather than aborting the whole batch.
+pub fn bulk_set(
+    repo: &Repository,
+    symlink_base: &str,
+    entries: &[(i64, String, String)],
+) -> BulkResult {
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+
+    for (file_id, virtual_path, real_path) in entries {
+        match set_virtual_path(repo, symlink_base, *file_id, virtual_path, real_path) {
+            Ok(()) => succeeded.push(*file_id),
+            Err(e) => failed.push((*file_id, e.to_string())),
+        }
+    }
+
+    BulkResult { succeeded, failed }
+}
+
+/// Assign virtual paths to all tracked files in a folder using a common virtual base.
+///
+/// For each file under `folder_path` (relative within the drive pair), the virtual path
+/// is computed as `virtual_base / <relative-path-within-folder>`.
+pub fn bulk_from_real(
+    repo: &Repository,
+    symlink_base: &str,
+    drive_pair_id: i64,
+    folder_path: &str,
+    virtual_base: &str,
+    pair_active_path: &str,
+) -> anyhow::Result<BulkResult> {
+    if !virtual_base.starts_with('/') {
+        anyhow::bail!(
+            "virtual_base must be absolute (start with /): {}",
+            virtual_base
+        );
+    }
+
+    let (files, _) =
+        repo.list_tracked_files(Some(drive_pair_id), None, None, 1, i64::MAX)?;
+
+    let folder_norm = folder_path.trim_end_matches('/');
+    let mut entries: Vec<(i64, String, String)> = Vec::new();
+
+    for file in &files {
+        let rel = file.relative_path.as_str();
+        // Only include files whose path starts with the target folder
+        if !rel.starts_with(folder_norm) {
+            continue;
+        }
+        let suffix = rel[folder_norm.len()..].trim_start_matches('/');
+        let virtual_path = if suffix.is_empty() {
+            virtual_base.to_string()
+        } else {
+            format!("{}/{}", virtual_base.trim_end_matches('/'), suffix)
+        };
+        let real_path = PathBuf::from(pair_active_path).join(rel);
+        entries.push((
+            file.id,
+            virtual_path,
+            real_path.to_string_lossy().to_string(),
+        ));
+    }
+
+    Ok(bulk_set(repo, symlink_base, &entries))
 }
 
 /// Create a symlink at `symlink_base/virtual_path` -> `real_path`.

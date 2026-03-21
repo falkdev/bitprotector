@@ -1,4 +1,4 @@
-use actix_web::{web, FromRequest, HttpRequest};
+use actix_web::{web, FromRequest, HttpMessage, HttpRequest};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,13 @@ impl FromRequest for JwtAuth {
     type Future = Ready<Result<Self, actix_web::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
+        // Fast path: claims already inserted by the global JWT middleware.
+        if let Some(claims) = req.extensions().get::<Claims>().cloned() {
+            return ready(Ok(JwtAuth { claims }));
+        }
+
+        // Fallback: validate directly from the Authorization header.
+        // This supports handler-level use in tests or contexts without the middleware.
         let secret = match req.app_data::<web::Data<JwtSecret>>() {
             Some(s) => s.0.clone(),
             None => {

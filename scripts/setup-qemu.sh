@@ -33,6 +33,12 @@ fi
 echo ""
 echo "=== cargo-deb ==="
 
+if ! command -v cargo &>/dev/null; then
+    echo "ERROR: cargo is required to install cargo-deb, but it was not found on PATH." >&2
+    echo "Install the Rust toolchain first, or add ~/.cargo/bin to PATH if it is already installed." >&2
+    exit 1
+fi
+
 if cargo deb --version &>/dev/null; then
     echo "cargo-deb already installed: $(cargo deb --version)"
 else

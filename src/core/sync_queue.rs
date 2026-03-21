@@ -10,6 +10,11 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
         return Ok(());
     }
 
+    // Items requiring manual user action are not auto-processable.
+    if item.action == "user_action_required" {
+        return Ok(());
+    }
+
     repo.update_sync_queue_status(item.id, "in_progress", None)?;
 
     let result = match item.action.as_str() {
@@ -53,8 +58,14 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 /// Process all pending items in the sync queue.
 pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
     let (items, _) = repo.list_sync_queue(Some("pending"), 1, 1000)?;
-    let count = items.len() as u32;
+    let count = items
+        .iter()
+        .filter(|i| i.action != "user_action_required")
+        .count() as u32;
     for item in &items {
+        if item.action == "user_action_required" {
+            continue;
+        }
         if let Err(e) = process_item(repo, item) {
             tracing::error!("Error processing sync queue item {}: {}", item.id, e);
         }
@@ -62,8 +73,91 @@ pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
     Ok(count)
 }
 
+/// Resolve a `user_action_required` sync queue item.
+///
+/// `resolution` must be one of:
+/// - `"keep_master"` — overwrite mirror with master copy
+/// - `"keep_mirror"` — overwrite master with mirror copy
+/// - `"provide_new"` — replace both copies with the file at `new_file_path`
+///
+/// For `provide_new`, the path is validated to exist, be readable, and be a
+/// regular file before any copy is performed.
+pub fn resolve_queue_item(
+    repo: &Repository,
+    item_id: i64,
+    resolution: &str,
+    new_file_path: Option<&str>,
+) -> anyhow::Result<SyncQueueItem> {
+    let item = repo.get_sync_queue_item(item_id)?;
+    if item.action != "user_action_required" {
+        anyhow::bail!(
+            "Queue item #{} has action '{}'; only 'user_action_required' items can be resolved",
+            item_id,
+            item.action
+        );
+    }
+    if item.status != "pending" {
+        anyhow::bail!(
+            "Queue item #{} has status '{}'; only 'pending' items can be resolved",
+            item_id,
+            item.status
+        );
+    }
+
+    let file = repo.get_tracked_file(item.tracked_file_id)?;
+    let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
+
+    let master_path = std::path::PathBuf::from(&pair.primary_path).join(&file.relative_path);
+    let mirror_path = std::path::PathBuf::from(&pair.secondary_path).join(&file.relative_path);
+
+    match resolution {
+        "keep_master" => {
+            // Restore mirror from master
+            mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum)?;
+        }
+        "keep_mirror" => {
+            // Restore master from mirror
+            mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum)?;
+        }
+        "provide_new" => {
+            let src = new_file_path
+                .ok_or_else(|| anyhow::anyhow!("new_file_path is required for 'provide_new'"))?;
+            let src_path = std::path::Path::new(src);
+
+            // Pre-validate: exists, readable, regular file
+            if !src_path.exists() {
+                anyhow::bail!("provided path does not exist: {}", src);
+            }
+            if !src_path.is_file() {
+                anyhow::bail!("provided path is not a regular file: {}", src);
+            }
+            std::fs::metadata(src_path).map_err(|e| {
+                anyhow::anyhow!("provided path is not readable ({}): {}", src, e)
+            })?;
+
+            // Ensure parent directories exist on both sides
+            if let Some(parent) = master_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if let Some(parent) = mirror_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(src_path, &master_path)?;
+            std::fs::copy(src_path, &mirror_path)?;
+        }
+        other => anyhow::bail!("Unknown resolution '{}'; expected keep_master, keep_mirror, or provide_new", other),
+    }
+
+    repo.update_sync_queue_status(item_id, "completed", None)?;
+    repo.update_tracked_file_mirror_status(file.id, true)?;
+    let _ = event_logger::log_sync_completed(repo, file.id, resolution);
+
+    repo.get_sync_queue_item(item_id)
+}
+
 /// Create a sync queue item from an integrity check failure.
-/// Returns None if the status is Ok or BothCorrupted (requires manual resolution).
+/// Returns None if the status is Ok or a drive is unavailable.
+/// For BothCorrupted, creates a `user_action_required` item.
 pub fn create_from_integrity_failure(
     repo: &Repository,
     file: &TrackedFile,
@@ -72,10 +166,10 @@ pub fn create_from_integrity_failure(
     use integrity::IntegrityStatus;
     let action = match result.status {
         IntegrityStatus::Ok => return Ok(None),
-        IntegrityStatus::BothCorrupted => return Ok(None),
         IntegrityStatus::PrimaryDriveUnavailable | IntegrityStatus::SecondaryDriveUnavailable => {
             return Ok(None)
         }
+        IntegrityStatus::BothCorrupted => "user_action_required",
         IntegrityStatus::MirrorCorrupted | IntegrityStatus::MirrorMissing => "restore_mirror",
         IntegrityStatus::MasterCorrupted | IntegrityStatus::MasterMissing => "restore_master",
     };

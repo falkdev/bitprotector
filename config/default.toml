@@ -16,3 +16,5 @@ file = "/var/log/bitprotector/bitprotector.log"
 
 [scheduler]
 enabled = true
+sync_interval_seconds = 3600
+integrity_interval_seconds = 86400

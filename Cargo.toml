@@ -33,7 +33,7 @@ blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 
 # Scheduler
-tokio-cron-scheduler = "0.13"
+cron = "0.12"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

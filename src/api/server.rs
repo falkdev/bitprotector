@@ -1,16 +1,108 @@
 use crate::api::auth::JwtSecret;
 use crate::api::models::ApiError;
+use crate::core::scheduler::Scheduler;
 use crate::db::repository::{create_pool, Repository};
 use actix_cors::Cors;
 use actix_web::{
     body::{BoxBody, EitherBody, MessageBody},
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    middleware, web, App, Error, HttpResponse, HttpServer,
+    middleware, web, App, Error, HttpMessage, HttpResponse, HttpServer,
 };
 use futures_util::future::{ready, LocalBoxFuture, Ready};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+// ---------------------------------------------------------------------------
+// JWT authentication middleware
+// ---------------------------------------------------------------------------
+
+/// Global JWT authentication middleware. Validates the Bearer token from the
+/// Authorization header and inserts the decoded `Claims` into request extensions.
+/// Must be applied to the protected route scope (not the public login scope).
+pub struct JwtMiddlewareLayer;
+
+impl<S, B> Transform<S, ServiceRequest> for JwtMiddlewareLayer
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = Error;
+    type Transform = JwtMiddlewareService<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(JwtMiddlewareService { service }))
+    }
+}
+
+pub struct JwtMiddlewareService<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for JwtMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let secret = match req.app_data::<web::Data<JwtSecret>>() {
+            Some(s) => s.0.clone(),
+            None => {
+                let (req, _) = req.into_parts();
+                let resp = HttpResponse::InternalServerError()
+                    .json(ApiError::new("internal_error", "JWT secret not configured"));
+                return Box::pin(async move {
+                    Ok(ServiceResponse::new(req, resp).map_into_right_body())
+                });
+            }
+        };
+
+        let token = req
+            .headers()
+            .get("Authorization")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .map(|t| t.to_string());
+
+        match token {
+            None => {
+                let (req, _) = req.into_parts();
+                let resp = HttpResponse::Unauthorized()
+                    .json(ApiError::new("unauthorized", "Missing authorization header"));
+                Box::pin(async move {
+                    Ok(ServiceResponse::new(req, resp).map_into_right_body())
+                })
+            }
+            Some(token) => match crate::api::auth::validate_token(&token, &secret) {
+                Err(_) => {
+                    let (req, _) = req.into_parts();
+                    let resp = HttpResponse::Unauthorized()
+                        .json(ApiError::new("unauthorized", "Invalid or expired token"));
+                    Box::pin(async move {
+                        Ok(ServiceResponse::new(req, resp).map_into_right_body())
+                    })
+                }
+                Ok(claims) => {
+                    req.extensions_mut().insert(claims);
+                    let fut = self.service.call(req);
+                    Box::pin(async move {
+                        let res = fut.await?;
+                        Ok(res.map_into_left_body())
+                    })
+                }
+            },
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Rate limiter
@@ -114,6 +206,8 @@ where
 // ---------------------------------------------------------------------------
 
 /// Register all API routes under `/api/v1`.
+/// - `POST /api/v1/auth/login` is public (no JWT required).
+/// - All other routes are wrapped with `JwtMiddlewareLayer`.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     use crate::api::routes::{
         auth, database, drives, files, folders, integrity, logs, scheduler, status, sync,
@@ -121,17 +215,24 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     };
     cfg.service(
         web::scope("/api/v1")
-            .configure(auth::configure)
-            .configure(drives::configure)
-            .configure(files::configure)
-            .configure(virtual_paths::configure)
-            .configure(integrity::configure)
-            .configure(folders::configure)
-            .configure(sync::configure)
-            .configure(logs::configure)
-            .configure(database::configure)
-            .configure(scheduler::configure)
-            .configure(status::configure),
+            // ── Public: login only ──────────────────────────────────────────
+            .configure(auth::configure_public)
+            // ── Protected: everything else ──────────────────────────────────
+            .service(
+                web::scope("")
+                    .wrap(JwtMiddlewareLayer)
+                    .configure(auth::configure_protected)
+                    .configure(drives::configure)
+                    .configure(files::configure)
+                    .configure(virtual_paths::configure)
+                    .configure(integrity::configure)
+                    .configure(folders::configure)
+                    .configure(sync::configure)
+                    .configure(logs::configure)
+                    .configure(database::configure)
+                    .configure(scheduler::configure)
+                    .configure(status::configure),
+            ),
     );
 }
 
@@ -174,8 +275,18 @@ pub async fn run_server(
 ) -> anyhow::Result<()> {
     let pool = create_pool(db_path)?;
     let repo = Repository::new(pool);
+    let repo_arc = Arc::new(repo.clone());
+
+    // Create and load the scheduler from persisted DB schedules.
+    let scheduler = {
+        let mut sched = Scheduler::new(Arc::clone(&repo_arc));
+        let _ = sched.reload(); // ignore startup errors; schedules may be empty
+        Arc::new(Mutex::new(sched))
+    };
+
     let repo_data = web::Data::new(repo);
     let jwt_data = web::Data::new(JwtSecret(jwt_secret));
+    let scheduler_data = web::Data::new(scheduler);
     let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
 
     let server = HttpServer::new(move || {
@@ -191,6 +302,7 @@ pub async fn run_server(
             .wrap(RateLimitLayer(limiter.clone()))
             .app_data(repo_data.clone())
             .app_data(jwt_data.clone())
+            .app_data(scheduler_data.clone())
             .configure(configure_routes)
     });
 
@@ -233,6 +345,11 @@ mod tests {
         Repository::new(pool)
     }
 
+    /// Issue a valid test token and return the Authorization header value.
+    fn bearer_token() -> String {
+        format!("Bearer {}", issue_token("test_user", SECRET, 3600).unwrap())
+    }
+
     #[actix_rt::test]
     async fn test_drives_list_returns_ok() {
         let app = test::init_service(
@@ -243,7 +360,10 @@ mod tests {
         )
         .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/drives")
+            .insert_header(("Authorization", bearer_token()))
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }
@@ -260,6 +380,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/api/v1/nonexistent")
+            .insert_header(("Authorization", bearer_token()))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
@@ -275,7 +396,10 @@ mod tests {
         )
         .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/logs").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/logs")
+            .insert_header(("Authorization", bearer_token()))
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }
@@ -292,13 +416,14 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/api/v1/database/backups")
+            .insert_header(("Authorization", bearer_token()))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }
 
     #[actix_rt::test]
-    async fn test_unauthenticated_validate_returns_401() {
+    async fn test_unauthenticated_request_returns_401() {
         let app = test::init_service(
             App::new()
                 .app_data(web::Data::new(make_repo()))
@@ -307,8 +432,15 @@ mod tests {
         )
         .await;
 
+        // Any protected endpoint without a token must return 401
         let req = test::TestRequest::get()
             .uri("/api/v1/auth/validate")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+
+        let req = test::TestRequest::get()
+            .uri("/api/v1/drives")
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);
@@ -345,6 +477,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/api/v1/drives/999")
+            .insert_header(("Authorization", bearer_token()))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
@@ -383,6 +516,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri("/api/v1/drives")
             .insert_header(("Origin", "http://localhost:3000"))
+            .insert_header(("Authorization", bearer_token()))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
@@ -423,13 +557,17 @@ mod tests {
         )
         .await;
 
-        // Unversioned path should 404
+        // Unversioned path should 404 (behind middleware → 401 if unauthed, but
+        // the empty path is not under /api/v1 so it hits actix's 404 directly)
         let req = test::TestRequest::get().uri("/drives").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
 
-        // Versioned path should 200
-        let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
+        // Versioned path with token should 200
+        let req = test::TestRequest::get()
+            .uri("/api/v1/drives")
+            .insert_header(("Authorization", bearer_token()))
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }
@@ -444,7 +582,10 @@ mod tests {
         )
         .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/status").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/status")
+            .insert_header(("Authorization", bearer_token()))
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
         let body: serde_json::Value = test::read_body_json(resp).await;
@@ -484,6 +625,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/v1/drives/{}/replacement/mark", pair.id))
+            .insert_header(("Authorization", bearer_token()))
             .set_json(serde_json::json!({ "role": "primary" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -493,6 +635,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/v1/drives/{}/replacement/cancel", pair.id))
+            .insert_header(("Authorization", bearer_token()))
             .set_json(serde_json::json!({ "role": "primary" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -502,6 +645,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/v1/drives/{}/replacement/mark", pair.id))
+            .insert_header(("Authorization", bearer_token()))
             .set_json(serde_json::json!({ "role": "primary" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -509,6 +653,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/v1/drives/{}/replacement/confirm", pair.id))
+            .insert_header(("Authorization", bearer_token()))
             .set_json(serde_json::json!({ "role": "primary" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -518,6 +663,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/v1/drives/{}/replacement/assign", pair.id))
+            .insert_header(("Authorization", bearer_token()))
             .set_json(serde_json::json!({
                 "role": "primary",
                 "new_path": replacement.path().to_str().unwrap(),

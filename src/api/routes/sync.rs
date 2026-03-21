@@ -1,3 +1,4 @@
+use crate::api::models::ApiError;
 use crate::core::{scheduler, sync_queue};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
@@ -14,6 +15,12 @@ pub struct ListQuery {
     pub status: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct ResolveRequest {
+    pub resolution: String,
+    pub new_file_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -56,6 +63,38 @@ async fn get_queue_item(repo: web::Data<Repository>, path: web::Path<i64>) -> Ht
     }
 }
 
+/// POST /sync/queue/{id}/resolve
+///
+/// Resolve a `user_action_required` sync queue item.
+/// Body: `{ "resolution": "keep_master|keep_mirror|provide_new", "new_file_path": "<path>" }`
+async fn resolve_queue_item(
+    repo: web::Data<Repository>,
+    path: web::Path<i64>,
+    body: web::Json<ResolveRequest>,
+) -> HttpResponse {
+    let item_id = path.into_inner();
+    match sync_queue::resolve_queue_item(
+        &repo,
+        item_id,
+        &body.resolution,
+        body.new_file_path.as_deref(),
+    ) {
+        Ok(item) => HttpResponse::Ok().json(item),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("does not exist") || msg.contains("not a regular file") || msg.contains("not readable") {
+                HttpResponse::BadRequest().json(ApiError::new("validation_error", &msg))
+            } else if msg.contains("only 'user_action_required'") || msg.contains("only 'pending'") || msg.contains("Unknown resolution") {
+                HttpResponse::BadRequest().json(ApiError::new("bad_request", &msg))
+            } else if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {
+                HttpResponse::NotFound().json(ApiError::new("not_found", "Queue item not found"))
+            } else {
+                HttpResponse::InternalServerError().body(msg)
+            }
+        }
+    }
+}
+
 /// POST /sync/process
 async fn process_queue(repo: web::Data<Repository>) -> HttpResponse {
     match sync_queue::process_all_pending(&repo) {
@@ -87,6 +126,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/queue", web::get().to(list_queue))
             .route("/queue", web::post().to(add_queue_item))
             .route("/queue/{id}", web::get().to(get_queue_item))
+            .route("/queue/{id}/resolve", web::post().to(resolve_queue_item))
             .route("/process", web::post().to(process_queue))
             .route("/run/{task}", web::post().to(run_task)),
     );
