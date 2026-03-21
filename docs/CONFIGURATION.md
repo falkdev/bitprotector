@@ -1,6 +1,22 @@
 # Configuration Reference
 
-The configuration file is a TOML document read at startup. The installed default lives at `/etc/bitprotector/config.toml`. Pass `--config <path>` on the command line to use a different file.
+BitProtector is configured via command-line flags passed to `bitprotector serve`. The file `/etc/bitprotector/config.toml` is installed as a reference template but **is not currently read by the binary** — all settings must be passed as CLI flags.
+
+```bash
+bitprotector serve \
+  --host 0.0.0.0 \
+  --port 8443 \
+  --jwt-secret "$(openssl rand -hex 32)" \
+  --tls-cert /etc/bitprotector/tls/cert.pem \
+  --tls-key  /etc/bitprotector/tls/key.pem \
+  --rate-limit-rps 100
+```
+
+The database path is a global flag available to all subcommands:
+
+```bash
+bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
+```
 
 ---
 
@@ -23,17 +39,14 @@ The configuration file is a TOML document read at startup. The installed default
 
 Controls the HTTP listener.
 
-| Key | Type | Default | Description |
+| Key / CLI flag | Type | Default | Description |
 |---|---|---|---|
-| `host` | string | `"127.0.0.1"` | IP address to bind. Use `"0.0.0.0"` to listen on all interfaces. |
-| `port` | integer | `8443` | TCP port for the HTTPS API. |
-| `rate_limit_rps` | integer | `100` | Maximum requests per second per IP address. |
+| `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. |
+| `port` / `--port` | integer | `8443` | TCP port for the HTTPS API. |
+| `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address. |
 
-```toml
-[server]
-host = "127.0.0.1"
-port = 8443
-rate_limit_rps = 100
+```bash
+bitprotector serve --host 0.0.0.0 --port 8443 --rate-limit-rps 100
 ```
 
 ---
@@ -42,15 +55,14 @@ rate_limit_rps = 100
 
 TLS certificate and private key for the HTTPS server. Both files must be present before the service can start.
 
-| Key | Type | Default | Description |
+| Key / CLI flag | Type | Default | Description |
 |---|---|---|---|
-| `cert` | string | `"/etc/bitprotector/tls/cert.pem"` | Path to the PEM-encoded TLS certificate (or full chain). |
-| `key` | string | `"/etc/bitprotector/tls/key.pem"` | Path to the PEM-encoded private key. |
+| `tls_cert` / `--tls-cert` | string | *(none)* | Path to the PEM-encoded TLS certificate (or full chain). |
+| `tls_key` / `--tls-key` | string | *(none)* | Path to the PEM-encoded private key. |
 
-```toml
-[tls]
-cert = "/etc/bitprotector/tls/cert.pem"
-key  = "/etc/bitprotector/tls/key.pem"
+```bash
+bitprotector serve --tls-cert /etc/bitprotector/tls/cert.pem \
+                   --tls-key  /etc/bitprotector/tls/key.pem
 ```
 
 See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate) below.
@@ -59,33 +71,31 @@ See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate
 
 ## Section: [database]
 
-| Key | Type | Default | Description |
+| Key / CLI flag | Type | Default | Description |
 |---|---|---|---|
-| `path` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
+| `path` / `--db` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
 
-```toml
-[database]
-path = "/var/lib/bitprotector/bitprotector.db"
+```bash
+bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
 ```
 
 ---
 
 ## Section: [auth]
 
-Controls JWT token issuance. PAM is used for credential verification; no additional configuration is required for PAM itself.
+PAM is used for credential verification; no additional configuration is required for PAM itself.
 
-| Key | Type | Default | Description |
+| Key / CLI flag | Type | Default | Description |
 |---|---|---|---|
-| `jwt_secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
-| `token_ttl` | integer | `28800` | Token lifetime in seconds. Default is 8 hours. |
+| `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
 
-```toml
-[auth]
-jwt_secret = "change-me-in-production"
-token_ttl  = 28800
+The JWT token lifetime is fixed at **86400 seconds (24 hours)** and is not configurable.
+
+```bash
+bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 ```
 
-> **Security note:** `jwt_secret` must be kept confidential. Anyone with this value can forge valid tokens for any user. Generate a strong secret with:
+> **Security note:** The JWT secret must be kept confidential. Anyone with this value can forge valid tokens for any user. Generate a strong secret with:
 > ```bash
 > openssl rand -hex 32
 > ```
@@ -94,14 +104,15 @@ token_ttl  = 28800
 
 ## Section: [virtual_paths]
 
-| Key | Type | Default | Description |
+| Setting | Type | Default | Description |
 |---|---|---|---|
-| `symlink_base` | string | `"/var/lib/bitprotector/virtual/"` | Directory where virtual-path symlinks are created. The service must have write access. The directory is created on first use. |
+| `BITPROTECTOR_SYMLINK_BASE` env var | string | `"/var/lib/bitprotector/virtual"` | Directory where virtual-path symlinks are created. The service must have write access. The directory is created on first use. |
 
-```toml
-[virtual_paths]
-symlink_base = "/var/lib/bitprotector/virtual/"
+```bash
+export BITPROTECTOR_SYMLINK_BASE=/var/lib/bitprotector/virtual
 ```
+
+This can also be overridden per-request via the optional `symlink_base` field in API calls and the `--symlink-base` flag in CLI commands.
 
 ---
 
@@ -124,14 +135,7 @@ The `RUST_LOG` environment variable overrides `level` if set.
 
 ## Section: [scheduler]
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | boolean | `true` | Master switch for background scheduled tasks (sync and integrity check). Individual task schedules are managed via the API or CLI; this key suspends all of them at once without deleting their configuration. |
-
-```toml
-[scheduler]
-enabled = true
-```
+The scheduler API is not yet implemented. Background tasks can be run on demand via the CLI (`bitprotector sync process`) or the API (`POST /sync/process`, `POST /sync/run/{task}`). The `schedule_config` table is reserved for future scheduled-task management.
 
 ---
 
@@ -158,7 +162,7 @@ For production, use a certificate from a trusted CA (e.g., Let's Encrypt via `ce
 
 ## CLI --db flag
 
-The `--db` flag overrides `[database].path` at the command line without modifying the config file. This is primarily useful for testing or running ephemeral one-shot commands:
+The `--db` flag is a global flag available to all subcommands. It overrides the default database path without modifying any config file. This is primarily useful for testing or running ephemeral one-shot commands:
 
 ```bash
 bitprotector --db /tmp/scratch.db drives list
@@ -167,34 +171,18 @@ bitprotector --db /tmp/scratch.db drives list
 
 ---
 
-## Example — complete file
+## Example — complete serve invocation
 
-```toml
-# /etc/bitprotector/config.toml
-
-[server]
-host = "0.0.0.0"
-port = 8443
-rate_limit_rps = 100
-
-[tls]
-cert = "/etc/bitprotector/tls/cert.pem"
-key  = "/etc/bitprotector/tls/key.pem"
-
-[database]
-path = "/var/lib/bitprotector/bitprotector.db"
-
-[auth]
-jwt_secret = "replace-with-a-random-64-char-string"
-token_ttl  = 28800
-
-[virtual_paths]
-symlink_base = "/var/lib/bitprotector/virtual/"
-
-[logging]
-level = "info"
-file  = "/var/log/bitprotector/bitprotector.log"
-
-[scheduler]
-enabled = true
+```bash
+bitprotector \
+  --db /var/lib/bitprotector/bitprotector.db \
+  serve \
+  --host 0.0.0.0 \
+  --port 8443 \
+  --jwt-secret "replace-with-a-random-64-char-string" \
+  --tls-cert /etc/bitprotector/tls/cert.pem \
+  --tls-key  /etc/bitprotector/tls/key.pem \
+  --rate-limit-rps 100
 ```
+
+When deployed via the systemd unit, these flags are set in the `ExecStart` line of the service file at `/lib/systemd/system/bitprotector.service`.

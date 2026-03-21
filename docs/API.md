@@ -47,34 +47,26 @@ Authenticate with a local system account.
 ```json
 {
     "token": "<jwt>",
-    "expires_at": "2026-03-15T20:00:00Z"
+    "username": "alice",
+    "expires_in": 86400
 }
 ```
+
+`expires_in` is the token lifetime in seconds (fixed at 86400 — 24 hours).
 
 **Errors:** `401 Unauthorized`
 
 ---
 
-### POST `/auth/logout`
+### GET `/auth/validate`
 
-Invalidate the current session token.
-
-**Response `200`:**
-```json
-{ "message": "Logged out" }
-```
-
----
-
-### GET `/auth/status`
-
-Check whether the current token is valid.
+Check whether the current token is valid. Requires a valid JWT.
 
 **Response `200`:**
 ```json
 {
-    "authenticated": true,
-    "username": "alice"
+    "username": "alice",
+    "valid": true
 }
 ```
 
@@ -258,9 +250,9 @@ List tracked files with optional filtering and pagination.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `drive_pair_id` | integer | Filter by drive pair |
-| `virtual_path` | string | Filter by virtual path prefix |
-| `is_mirrored` | boolean | Filter by mirror status |
+| `drive_id` | integer | Filter by drive pair |
+| `virtual_prefix` | string | Filter by virtual path prefix |
+| `mirrored` | boolean | Filter by mirror status |
 | `page` | integer | Page number (default: 1) |
 | `per_page` | integer | Items per page (default: 50) |
 
@@ -298,11 +290,12 @@ Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an
 {
     "drive_pair_id": 1,
     "relative_path": "documents/report.pdf",
-    "virtual_path": "/docs/report.pdf"
+    "virtual_path": "/docs/report.pdf",
+    "mirror": false
 }
 ```
 
-`virtual_path` is optional.
+`virtual_path` and `mirror` are optional. When `mirror` is `true` and the standby slot can accept sync, the file is mirrored immediately after tracking.
 
 **Response `201`:** Newly created file object.  
 **Errors:** `400 Bad Request`, `404 Not Found` (file not on primary drive), `409 Conflict`
@@ -327,24 +320,18 @@ Stop tracking a file. Does **not** delete the file from disk.
 
 ---
 
-### POST `/files/{id}/verify`
+### POST `/files/{id}/mirror`
 
-Trigger an immediate integrity check for one file.
+Trigger an immediate mirror of the file to the secondary path. Requires the standby slot to be available.
 
 **Response `200`:**
 ```json
-{
-    "file_id": 1,
-    "master_checksum": "d74981ef...",
-    "mirror_checksum": "d74981ef...",
-    "stored_checksum": "d74981ef...",
-    "master_valid": true,
-    "mirror_valid":  true,
-    "status": "ok"
-}
+{ "mirrored": true }
 ```
 
-`status` is one of: `ok` | `master_corrupted` | `mirror_corrupted` | `both_corrupted`.
+**Errors:** `404 Not Found`, `500 Internal Server Error` (mirror failed)
+
+> **Note:** To verify file integrity, use [`POST /integrity/check/{id}`](#post-integritycheckid).
 
 ---
 
@@ -352,107 +339,49 @@ Trigger an immediate integrity check for one file.
 
 Virtual paths expose tracked files through a user-defined path, realised as symlinks under `symlink_base` (see [CONFIGURATION.md](CONFIGURATION.md)).
 
-### GET `/virtual-paths`
-
-List all virtual path mappings.
-
-**Response `200`:**
-```json
-{
-    "virtual_paths": [
-        {
-            "file_id": 1,
-            "virtual_path": "/docs/report.pdf",
-            "real_path": "/mnt/primary/documents/report.pdf"
-        }
-    ]
-}
-```
-
----
-
-### PUT `/files/{id}/virtual-path`
+### PUT `/virtual-paths/{file_id}`
 
 Set or update the virtual path for a tracked file.
 
 **Request body:**
 ```json
-{ "virtual_path": "/docs/report.pdf" }
+{
+    "virtual_path": "/docs/report.pdf",
+    "symlink_base": "/var/lib/bitprotector/virtual"
+}
 ```
 
-**Response `200`:** Updated file object.  
-**Errors:** `404 Not Found`, `409 Conflict` (path already assigned to another file)
+`symlink_base` is optional and defaults to `/var/lib/bitprotector/virtual` (or the value of the `BITPROTECTOR_SYMLINK_BASE` environment variable).
+
+**Response `200`:** Plain text confirmation.  
+**Errors:** `404 Not Found`, `500 Internal Server Error`
 
 ---
 
-### DELETE `/files/{id}/virtual-path`
+### DELETE `/virtual-paths/{file_id}`
 
 Remove the virtual path mapping (and its symlink) from a file.
 
-**Response `204`:** No content.  
-**Errors:** `404 Not Found`
+**Query parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `symlink_base` | string | Override the symlink base directory |
+
+**Response `200`:** Plain text confirmation.  
+**Errors:** `404 Not Found`, `400 Bad Request` (file has no virtual path)
 
 ---
 
-### POST `/virtual-paths/bulk`
-
-Assign virtual paths to multiple files in a single request.
-
-**Request body:**
-```json
-{
-    "assignments": [
-        { "file_id": 1, "virtual_path": "/docs/report.pdf" },
-        { "file_id": 2, "virtual_path": "/docs/summary.pdf" }
-    ]
-}
-```
-
-**Response `200`:**
-```json
-{
-    "updated": 2,
-    "failed": []
-}
-```
-
-Failed entries include `{ "file_id": N, "error": "..." }`.
-
----
-
-### POST `/virtual-paths/bulk-from-real`
-
-Derive virtual paths from real paths by stripping a prefix and prepending a base.
-
-**Request body:**
-```json
-{
-    "drive_pair_id": 1,
-    "source_folder": "documents/projects",
-    "virtual_base": "/projects",
-    "strip_prefix": "documents/"
-}
-```
-
-**Response `200`:**
-```json
-{
-    "updated": 10,
-    "mappings": [
-        {
-            "file_id": 1,
-            "real_path": "documents/projects/alpha/spec.txt",
-            "virtual_path": "/projects/alpha/spec.txt"
-        }
-    ]
-}
-```
-
----
-
-### POST `/virtual-paths/refresh-symlinks`
+### POST `/virtual-paths/refresh`
 
 Regenerate all symlinks on disk from the database. Useful after the `symlink_base` directory is lost or moved.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `symlink_base` | string | Override the symlink base directory |
 
 **Response `200`:**
 ```json
@@ -471,20 +400,18 @@ Tracked folders let BitProtector automatically discover and track new files adde
 
 ### GET `/folders`
 
-**Response `200`:**
+**Response `200`:** Flat JSON array of folder objects:
 ```json
-{
-    "folders": [
-        {
-            "id": 1,
-            "drive_pair_id": 1,
-            "folder_path": "documents/",
-            "auto_virtual_path": true,
-            "default_virtual_base": "/docs",
-            "created_at": "2026-01-01T00:00:00Z"
-        }
-    ]
-}
+[
+    {
+        "id": 1,
+        "drive_pair_id": 1,
+        "folder_path": "documents/",
+        "auto_virtual_path": true,
+        "default_virtual_base": "/docs",
+        "created_at": "2026-01-01T00:00:00Z"
+    }
+]
 ```
 
 ---
@@ -515,12 +442,19 @@ Tracked folders let BitProtector automatically discover and track new files adde
 
 ---
 
-### PUT `/folders/{id}`
+### POST `/folders/{id}/scan`
 
-**Request body:** any subset of `auto_virtual_path`, `default_virtual_base`.
+Scan a tracked folder for new and changed files. Newly discovered files are tracked automatically. Changed files are detected by re-hashing.
 
-**Response `200`:** Updated folder object.  
-**Errors:** `404 Not Found`
+**Response `200`:**
+```json
+{
+    "new_files": 3,
+    "changed_files": 1
+}
+```
+
+**Errors:** `404 Not Found`, `500 Internal Server Error`
 
 ---
 
@@ -601,119 +535,82 @@ When a slot is deliberately failed or rebuilding, integrity checks validate the 
 | `page` | integer | Page number |
 | `per_page` | integer | Items per page |
 
-**Response `200`:**
+**Response `200`:** Flat JSON array of queue items:
 ```json
-{
-    "queue": [
-        {
-            "id": 1,
-            "tracked_file_id": 5,
-            "relative_path": "data/file.bin",
-            "action": "mirror",
-            "status": "pending",
-            "error_message": null,
-            "created_at": "2026-03-15T08:00:00Z",
-            "completed_at": null
-        }
-    ],
-    "total": 10,
-    "page": 1,
-    "per_page": 50
-}
+[
+    {
+        "id": 1,
+        "tracked_file_id": 5,
+        "action": "mirror",
+        "status": "pending",
+        "error_message": null,
+        "created_at": "2026-03-15T08:00:00Z",
+        "completed_at": null
+    }
+]
 ```
 
 ---
 
-### POST `/sync/run`
+### POST `/sync/queue`
 
-Process the sync queue immediately (asynchronous).
-
-**Response `202`:**
-```json
-{
-    "job_id": "...",
-    "status": "started",
-    "queue_size": 10
-}
-```
-
----
-
-### POST `/sync/queue/{id}/resolve`
-
-Manually resolve a queue item with action `user_action_required` (i.e., both master and mirror are corrupted).
+Manually enqueue a sync action for a tracked file.
 
 **Request body:**
 ```json
 {
-    "resolution": "keep_master",
-    "new_file_path": null
+    "tracked_file_id": 5,
+    "action": "mirror"
 }
 ```
 
-`resolution` is one of: `keep_master` | `keep_mirror` | `provide_new`.  
-`new_file_path` is required only when `resolution` is `provide_new`.
+`action` is one of: `mirror` | `restore_master` | `restore_mirror` | `verify` | `user_action_required`.
 
-**Response `200`:** Updated queue item.  
-**Errors:** `404 Not Found`, `400 Bad Request`
+**Response `201`:** Created queue item.  
+**Errors:** `400 Bad Request`
+
+---
+
+### GET `/sync/queue/{id}`
+
+Get a single sync queue item.
+
+**Response `200`:** Queue item object.  
+**Errors:** `404 Not Found`
+
+---
+
+### POST `/sync/process`
+
+Process all pending sync queue items immediately (synchronous).
+
+**Response `200`:**
+```json
+{ "processed": 10 }
+```
+
+---
+
+### POST `/sync/run/{task}`
+
+Run a named task immediately. `{task}` is `sync` or `integrity-check`.
+
+**Response `200`:**
+```json
+{
+    "task": "sync",
+    "count": 5
+}
+```
+
+`count` is the number of items processed or queued by the task.  
+**Errors:** `400 Bad Request` (unknown task name)
 
 ---
 
 ## Scheduler
 
-### GET `/scheduler`
-
-**Response `200`:**
-```json
-{
-    "schedules": [
-        {
-            "id": 1,
-            "task_type": "sync",
-            "cron_expr": "0 2 * * *",
-            "interval_seconds": null,
-            "enabled": true,
-            "last_run": "2026-03-15T02:00:00Z",
-            "next_run": "2026-03-16T02:00:00Z"
-        }
-    ]
-}
-```
-
----
-
-### POST `/scheduler`
-
-**Request body:**
-```json
-{
-    "task_type": "integrity_check",
-    "cron_expr": "0 3 * * 0",
-    "interval_seconds": null,
-    "enabled": true
-}
-```
-
-Provide exactly one of `cron_expr` or `interval_seconds`.
-
-**Response `201`:** Created schedule object.  
-**Errors:** `400 Bad Request`
-
----
-
-### PUT `/scheduler/{id}`
-
-**Request body:** any subset of `cron_expr`, `interval_seconds`, `enabled`.
-
-**Response `200`:** Updated schedule object.  
-**Errors:** `404 Not Found`
-
----
-
-### DELETE `/scheduler/{id}`
-
-**Response `204`:** No content.  
-**Errors:** `404 Not Found`
+> **Not yet implemented.** The scheduler API endpoints are reserved for a future release. Background tasks can be run on demand via [`POST /sync/process`](#post-syncprocess) and [`POST /sync/run/{task}`](#post-syncruntask). The `schedule_config` table exists in the database schema but schedule management via the API is not yet available.
 
 ---
 
@@ -726,32 +623,36 @@ Provide exactly one of `cron_expr` or `interval_seconds`.
 | Parameter | Type | Description |
 |---|---|---|
 | `event_type` | string | Filter by event type (see schema for allowed values) |
-| `tracked_file_id` | integer | Filter by file |
+| `file_id` | integer | Filter by tracked file |
 | `from` | string | ISO 8601 start timestamp |
 | `to` | string | ISO 8601 end timestamp |
 | `page` | integer | Page number |
 | `per_page` | integer | Items per page |
 
-**Response `200`:**
+**Response `200`:** Flat JSON array of log entries:
 ```json
-{
-    "logs": [
-        {
-            "id": 1,
-            "event_type": "integrity_pass",
-            "tracked_file_id": 5,
-            "message": "Integrity check passed",
-            "details": "master=abc123 mirror=abc123",
-            "created_at": "2026-03-15T12:00:00Z"
-        }
-    ],
-    "total": 500,
-    "page": 1,
-    "per_page": 50
-}
+[
+    {
+        "id": 1,
+        "event_type": "integrity_pass",
+        "tracked_file_id": 5,
+        "message": "Integrity check passed",
+        "details": "master=abc123 mirror=abc123",
+        "created_at": "2026-03-15T12:00:00Z"
+    }
+]
 ```
 
 Valid `event_type` values: `file_created`, `file_edited`, `file_mirrored`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`.
+
+---
+
+### GET `/logs/{id}`
+
+Get a single event log entry.
+
+**Response `200`:** Event log object.  
+**Errors:** `404 Not Found`
 
 ---
 
@@ -761,20 +662,19 @@ Valid `event_type` values: `file_created`, `file_edited`, `file_mirrored`, `inte
 
 List all backup destination configurations.
 
-**Response `200`:**
+**Response `200`:** Flat JSON array of backup config objects:
 ```json
-{
-    "backup_configs": [
-        {
-            "id": 1,
-            "backup_path": "/mnt/backup1/db/",
-            "drive_label": "backup-drive-1",
-            "max_copies": 3,
-            "enabled": true,
-            "last_backup": "2026-03-15T02:30:00Z"
-        }
-    ]
-}
+[
+    {
+        "id": 1,
+        "backup_path": "/mnt/backup1/db/",
+        "drive_label": "backup-drive-1",
+        "max_copies": 5,
+        "enabled": true,
+        "last_backup": "2026-03-15T02:30:00Z",
+        "created_at": "2026-01-01T00:00:00Z"
+    }
+]
 ```
 
 ---
@@ -788,13 +688,24 @@ Add a backup destination.
 {
     "backup_path": "/mnt/backup1/db/",
     "drive_label": "backup-drive-1",
-    "max_copies": 3,
+    "max_copies": 5,
     "enabled": true
 }
 ```
 
+`drive_label`, `max_copies` (default: `5`), and `enabled` (default: `true`) are optional.
+
 **Response `201`:** Created backup config object.  
 **Errors:** `400 Bad Request`
+
+---
+
+### GET `/database/backups/{id}`
+
+Get a single backup config.
+
+**Response `200`:** Backup config object.  
+**Errors:** `404 Not Found`
 
 ---
 
@@ -818,18 +729,25 @@ Add a backup destination.
 
 Trigger an immediate backup to all enabled destinations.
 
-**Response `200`:**
+**Required query parameter:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `db_path` | string | Absolute path to the live database file to copy |
+
+**Response `200`:** Flat JSON array of per-destination results:
 ```json
-{
-    "results": [
-        {
-            "backup_config_id": 1,
-            "backup_path": "/mnt/backup1/db/bitprotector-2026-03-15T023000.db",
-            "status": "success"
-        }
-    ]
-}
+[
+    {
+        "backup_config_id": 1,
+        "backup_path": "/mnt/backup1/db/bitprotector-2026-03-15T023000.db",
+        "status": "success",
+        "error": null
+    }
+]
 ```
+
+**Errors:** `500 Internal Server Error`
 
 ---
 

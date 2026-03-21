@@ -111,6 +111,8 @@ bitprotector virtual-paths set <file-id> /docs/report.pdf
 
 # 7. Planned primary replacement workflow
 bitprotector drives replace mark <drive-pair-id> --role primary
+# (optional) cancel if you change your mind:
+bitprotector drives replace cancel <drive-pair-id> --role primary
 bitprotector drives replace confirm <drive-pair-id> --role primary
 bitprotector drives replace assign <drive-pair-id> --role primary /mnt/new-primary
 bitprotector sync process
@@ -129,18 +131,14 @@ bitprotector <subcommand> --help
 
 ## Configuration
 
-Edit `/etc/bitprotector/config.toml` before starting the service. The most important settings are:
+The service is configured via CLI flags passed to `bitprotector serve`. The most important flags are:
 
-```toml
-[tls]
-cert = "/etc/bitprotector/tls/cert.pem"
-key  = "/etc/bitprotector/tls/key.pem"
-
-[auth]
-jwt_secret = "change-me-in-production"  # MUST be changed
-
-[server]
-port = 8443
+```bash
+bitprotector serve \
+  --tls-cert /etc/bitprotector/tls/cert.pem \
+  --tls-key  /etc/bitprotector/tls/key.pem \
+  --jwt-secret "change-me-in-production"  # MUST be changed\
+  --port 8443
 ```
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for a full reference of every option.

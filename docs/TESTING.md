@@ -33,16 +33,12 @@ tests/
 │   ├── cli_virtual_paths.rs  # Virtual path CLI commands
 │   ├── cli_database.rs   # Database backup CLI commands
 │   └── packaging.rs      # Verifies packaging artifacts exist
-├── unit/                 # Out-of-tree unit test files (currently empty)
-│                         # Prefer inline #[cfg(test)] modules — see Writing Unit Tests
-├── module/               # Module-level tests (currently empty)
-│                         # Used for multi-component round-trip tests
 └── installation/
     ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
     └── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
 ```
 
-Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing. The `tests/unit/` directory is available for cases where keeping tests outside the source tree is preferable.
+Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing.
 
 ---
 
@@ -152,9 +148,9 @@ Both `NamedTempFile` and `TempDir` are dropped at the end of the test, cleaning 
 
 The failover/replacement coverage currently lives in:
 
-- `tests/integration/cli_drives.rs` for planned replacement workflows and rebuild completion
+- `tests/integration/cli_drives.rs` for planned replacement workflows and rebuild completion via the CLI
 - `tests/integration/cli_folders.rs` for active-secondary folder scanning and change detection
-- `src/api/server.rs` for API route coverage of mark/cancel/confirm/assign
+- `src/api/server.rs` (inline `#[cfg(test)]` module) for API route coverage of mark/cancel/confirm/assign
 
 ### Auth / API Integration Tests
 
@@ -271,11 +267,6 @@ mod tests {
     }
 }
 ```
-
-**When to use `tests/unit/` or `tests/module/`:**
-
-- `tests/unit/` — for test files that need to test multiple modules together but still at unit granularity, or when the test file would be too large to embed inline.
-- `tests/module/` — for multi-component round-trip tests that cross module boundaries (e.g., track a file → run integrity check → verify queue entry). These are larger than unit tests but do not invoke the binary.
 
 ---
 

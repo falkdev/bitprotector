@@ -67,7 +67,7 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
 | `virtual_path.rs` | Map a tracked file to a user-visible virtual path. Creates and removes symlinks in the `symlink_base` directory and refreshes them whenever `active_role` changes. |
 | `tracker.rs` | Track or untrack individual files and folders. On track: compute initial checksum, store metadata, enqueue mirroring, and operate on the pair's current active side rather than assuming primary is always live. |
-| `scheduler.rs` | Manage cron- and interval-based task schedules using `tokio-cron-scheduler`. Runs sync and integrity check jobs on configured intervals. |
+| `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
 
 ### src/api/
@@ -76,7 +76,7 @@ HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, an
 
 | File | Responsibility |
 |---|---|
-| `server.rs` | Build and start the actix-web server. Mounts all route groups, configures TLS via rustls, and injects shared state (`DbPool`, `JwtSecret`) as `web::Data`. |
+| `server.rs` | Build and start the actix-web server. Mounts all route groups, configures TLS via rustls, and injects shared state (`Repository`, `JwtSecret`) as `web::Data`. |
 | `auth.rs` | PAM authentication (`pam` crate) to verify system credentials. Issues and validates JWT tokens (`jsonwebtoken` crate). Provides `JwtAuth` as an actix-web extractor for protecting routes. |
 | `models.rs` | Request and response DTOs (`serde::Deserialize` / `Serialize`). Kept separate from the database structs in `src/db/`. |
 | `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. See [API.md](API.md) for the full endpoint reference. |
@@ -101,7 +101,7 @@ Data persistence. All SQLite access goes through this module.
 | `repository.rs` | Data access object (DAO). One method per database operation. The trait is annotated with `#[cfg_attr(test, mockall::automock)]` so unit tests can inject a mock. |
 | `backup.rs` | Copy the live database file to each configured backup destination, rotating old copies when `max_copies` is exceeded. |
 
-Connection pooling is provided by `r2d2` + `r2d2_sqlite`. The pool is shared across all actix-web workers via `web::Data<DbPool>`.
+Connection pooling is provided by `r2d2` + `r2d2_sqlite`. The pool is wrapped inside `Repository` which is shared across all actix-web workers via `web::Data<Repository>`.
 
 ### src/logging/
 
@@ -181,7 +181,7 @@ CREATE TABLE event_log (
                         'both_corrupted', 'change_detected',
                         'sync_completed', 'sync_failed'
                     )),
-    tracked_file_id INTEGER REFERENCES tracked_files(id),
+    tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
     message         TEXT    NOT NULL,
     details         TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -205,7 +205,7 @@ CREATE TABLE db_backup_config (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     backup_path TEXT    NOT NULL,
     drive_label TEXT,
-    max_copies  INTEGER NOT NULL DEFAULT 3,
+    max_copies  INTEGER NOT NULL DEFAULT 5,
     enabled     INTEGER NOT NULL DEFAULT 1,
     last_backup TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -240,6 +240,6 @@ Each drive pair now tracks `primary_state`, `secondary_state`, and `active_role`
 
 Even though SQLite serialises writes, using a pool with `r2d2_sqlite` allows read operations across actix-web worker threads without acquiring a global lock.
 
-**tokio-cron-scheduler for task scheduling**
+**Background task scheduling via OS threads**
 
-Background tasks (scheduled sync, scheduled integrity check) run inside the same tokio runtime as the actix-web server. Each schedule entry in the database corresponds to a registered job. On startup, all enabled schedule entries are loaded and registered with the scheduler.
+Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement.
