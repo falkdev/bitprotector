@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use anyhow::Context;
 use crate::db::repository::Repository;
+use anyhow::Context;
+use std::fs;
+use std::path::PathBuf;
 
 /// Represents a virtual path mapping.
 #[derive(Debug, Clone)]
@@ -21,7 +21,10 @@ pub fn set_virtual_path(
 ) -> anyhow::Result<()> {
     // Validate the virtual path format (must be absolute)
     if !virtual_path.starts_with('/') {
-        anyhow::bail!("Virtual path must be absolute (start with /): {}", virtual_path);
+        anyhow::bail!(
+            "Virtual path must be absolute (start with /): {}",
+            virtual_path
+        );
     }
 
     repo.update_tracked_file_virtual_path(file_id, Some(virtual_path))?;
@@ -42,7 +45,11 @@ pub fn remove_virtual_path(
 }
 
 /// Create a symlink at `symlink_base/virtual_path` -> `real_path`.
-pub fn create_symlink(symlink_base: &str, virtual_path: &str, real_path: &str) -> anyhow::Result<()> {
+pub fn create_symlink(
+    symlink_base: &str,
+    virtual_path: &str,
+    real_path: &str,
+) -> anyhow::Result<()> {
     let link_path = build_symlink_path(symlink_base, virtual_path);
 
     if let Some(parent) = link_path.parent() {
@@ -54,8 +61,7 @@ pub fn create_symlink(symlink_base: &str, virtual_path: &str, real_path: &str) -
         fs::remove_file(&link_path).context("Failed to remove old symlink")?;
     }
 
-    std::os::unix::fs::symlink(real_path, &link_path)
-        .context("Failed to create symlink")?;
+    std::os::unix::fs::symlink(real_path, &link_path).context("Failed to create symlink")?;
 
     Ok(())
 }
@@ -82,14 +88,14 @@ pub fn refresh_all_symlinks(
     drive_pairs: &std::collections::HashMap<i64, crate::db::repository::DrivePair>,
 ) -> anyhow::Result<SymlinkRefreshResult> {
     let mut created = 0u32;
-    let mut removed = 0u32;
+    let removed = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
     let (files, _) = repo.list_tracked_files(None, None, None, 1, i64::MAX)?;
     for file in &files {
         if let Some(vp) = &file.virtual_path {
             if let Some(pair) = drive_pairs.get(&file.drive_pair_id) {
-                let real_path = PathBuf::from(&pair.primary_path).join(&file.relative_path);
+                let real_path = PathBuf::from(pair.active_path()).join(&file.relative_path);
                 match create_symlink(symlink_base, vp, real_path.to_str().unwrap_or("")) {
                     Ok(()) => created += 1,
                     Err(e) => errors.push(format!("File {}: {}", file.id, e)),
@@ -98,7 +104,11 @@ pub fn refresh_all_symlinks(
         }
     }
 
-    Ok(SymlinkRefreshResult { created, removed, errors })
+    Ok(SymlinkRefreshResult {
+        created,
+        removed,
+        errors,
+    })
 }
 
 #[derive(Debug)]
@@ -111,10 +121,9 @@ pub struct SymlinkRefreshResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use crate::db::repository::{create_memory_pool, Repository, DrivePair};
+    use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use std::io::Write;
+    use tempfile::TempDir;
 
     fn setup_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -123,17 +132,6 @@ mod tests {
             initialize_schema(&conn).unwrap();
         }
         Repository::new(pool)
-    }
-
-    fn make_pair_record(primary: &str, secondary: &str) -> DrivePair {
-        DrivePair {
-            id: 1,
-            name: "test".to_string(),
-            primary_path: primary.to_string(),
-            secondary_path: secondary.to_string(),
-            created_at: "".to_string(),
-            updated_at: "".to_string(),
-        }
     }
 
     #[test]
@@ -179,13 +177,15 @@ mod tests {
         let repo = setup_repo();
         let symlink_base = TempDir::new().unwrap();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", "hash", 1, None).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", "hash", 1, None)
+            .unwrap();
 
         let result = set_virtual_path(
             &repo,
             symlink_base.path().to_str().unwrap(),
             file.id,
-            "relative/path",   // not absolute
+            "relative/path", // not absolute
             "/real/path",
         );
         assert!(result.is_err());

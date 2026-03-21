@@ -82,7 +82,7 @@ Check whether the current token is valid.
 
 ## Drive Pairs
 
-A drive pair binds a **primary** directory to a **secondary** (mirror) directory. All file tracking and mirroring is scoped to a drive pair.
+A drive pair binds a **primary** directory to a **secondary** (mirror) directory. All file tracking and mirroring is scoped to a drive pair. Each pair also exposes runtime state so clients can tell whether the system is active, quiescing for replacement, failed over, or rebuilding.
 
 ### GET `/drives`
 
@@ -90,19 +90,22 @@ List all configured drive pairs.
 
 **Response `200`:**
 ```json
-{
-    "drive_pairs": [
-        {
-            "id": 1,
-            "name": "mybackup",
-            "primary_path": "/mnt/primary",
-            "secondary_path": "/mnt/mirror",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z"
-        }
-    ]
-}
+[
+    {
+        "id": 1,
+        "name": "mybackup",
+        "primary_path": "/mnt/primary",
+        "secondary_path": "/mnt/mirror",
+        "primary_state": "active",
+        "secondary_state": "active",
+        "active_role": "primary",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z"
+    }
+]
 ```
+
+`primary_state` and `secondary_state` are one of `active`, `quiescing`, `failed`, or `rebuilding`. `active_role` is either `primary` or `secondary`.
 
 ---
 
@@ -160,6 +163,91 @@ Remove a drive pair. Fails if any tracked files still reference it.
 
 ---
 
+### POST `/drives/{id}/replacement/mark`
+
+Start a planned replacement workflow by moving one slot into `quiescing`.
+
+**Request body:**
+```json
+{
+    "role": "primary"
+}
+```
+
+`role` is `primary` or `secondary`.
+
+**Response `200`:** Updated drive pair object.  
+**Errors:** `400 Bad Request`, `404 Not Found`
+
+---
+
+### POST `/drives/{id}/replacement/cancel`
+
+Cancel a planned replacement and return a `quiescing` slot to `active`.
+
+**Request body:**
+```json
+{
+    "role": "primary"
+}
+```
+
+**Response `200`:** Updated drive pair object.  
+**Errors:** `400 Bad Request`, `404 Not Found`
+
+---
+
+### POST `/drives/{id}/replacement/confirm`
+
+Confirm that the quiesced drive is now failed. If the failed slot was active, BitProtector switches `active_role` to the surviving side and refreshes virtual paths.
+
+**Request body:**
+```json
+{
+    "role": "primary"
+}
+```
+
+**Response `200`:** Updated drive pair object.  
+**Errors:** `400 Bad Request`, `404 Not Found`
+
+---
+
+### POST `/drives/{id}/replacement/assign`
+
+Assign a new mounted path to a failed slot and queue rebuild work.
+
+**Request body:**
+```json
+{
+    "role": "primary",
+    "new_path": "/mnt/replacement-primary",
+    "skip_validation": false
+}
+```
+
+**Response `200`:**
+```json
+{
+    "drive_pair": {
+        "id": 1,
+        "name": "mybackup",
+        "primary_path": "/mnt/replacement-primary",
+        "secondary_path": "/mnt/mirror",
+        "primary_state": "rebuilding",
+        "secondary_state": "active",
+        "active_role": "secondary",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:05:00Z"
+    },
+    "queued_rebuild_items": 42
+}
+```
+
+BitProtector queues rebuild work but does not process it automatically. Run the sync processor or let the scheduler handle it later.
+
+---
+
 ## File Tracking
 
 ### GET `/files`
@@ -203,7 +291,7 @@ List tracked files with optional filtering and pagination.
 
 ### POST `/files`
 
-Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an initial mirror.
+Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an initial mirror from the pair's current active side.
 
 **Request body:**
 ```json
@@ -447,45 +535,57 @@ Stop tracking the folder. Already-tracked files are **not** removed.
 
 ## Integrity Checks
 
-### POST `/integrity/check`
+### POST `/integrity/check/{id}`
 
-Start a full system integrity check (asynchronous).
-
-**Response `202`:**
-```json
-{
-    "job_id": "550e8400-e29b-41d4-a716-446655440000",
-    "status": "started",
-    "total_files": 150
-}
-```
-
----
-
-### GET `/integrity/check/{job_id}`
-
-Poll the status of a running or completed integrity check.
+Run an integrity check for one tracked file. Add `?recover=true` to attempt automatic recovery where the healthy counterpart still exists.
 
 **Response `200`:**
 ```json
 {
-    "job_id": "550e8400-e29b-41d4-a716-446655440000",
-    "status": "completed",
-    "progress": {
-        "checked": 150,
-        "total":   150
-    },
-    "results": {
-        "passed":           145,
-        "master_corrupted":   2,
-        "mirror_corrupted":   1,
-        "both_corrupted":     0,
-        "auto_recovered":     3
-    }
+    "file_id": 1,
+    "status": "ok",
+    "master_valid": true,
+    "mirror_valid": true,
+    "recovered": false
 }
 ```
 
-`status` is one of: `running` | `completed` | `failed`.
+`status` is one of:
+
+- `ok`
+- `master_corrupted`
+- `mirror_corrupted`
+- `both_corrupted`
+- `master_missing`
+- `mirror_missing`
+- `primary_drive_unavailable`
+- `secondary_drive_unavailable`
+
+---
+
+### GET `/integrity/check-all`
+
+Run integrity checks across all tracked files, or limit them to one drive pair with `?drive_id=<id>`. Add `&recover=true` to enable auto-recovery where possible.
+
+**Response `200`:**
+```json
+{
+    "results": [
+        {
+            "file_id": 1,
+            "status": "ok",
+            "recovered": false
+        },
+        {
+            "file_id": 2,
+            "status": "secondary_drive_unavailable",
+            "recovered": false
+        }
+    ]
+}
+```
+
+When a slot is deliberately failed or rebuilding, integrity checks validate the surviving active side and avoid generating a restore storm for the unavailable slot.
 
 ---
 
@@ -746,10 +846,11 @@ Return a summary of the system state. This endpoint is also consumed by the SSH 
     "files_mirrored": 148,
     "pending_sync": 2,
     "integrity_issues": 0,
-    "files_changed": 1,
-    "last_integrity_check": "2026-03-15T03:00:00Z",
-    "last_sync": "2026-03-15T02:00:00Z",
-    "drive_pairs": 3
+    "drive_pairs": 3,
+    "degraded_pairs": 1,
+    "active_secondary_pairs": 1,
+    "rebuilding_pairs": 0,
+    "quiescing_pairs": 0
 }
 ```
 
@@ -761,8 +862,10 @@ All error responses follow the same shape:
 
 ```json
 {
-    "error": "Short description",
-    "details": "Optional longer explanation"
+    "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Short description"
+    }
 }
 ```
 

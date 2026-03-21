@@ -340,6 +340,69 @@ The frontend must be implemented using **React**.
 
 ---
 
+# 26. Drive Failure and Replacement Requirements
+
+The system must support **planned drive replacement** and **unexpected drive failure** handling.
+
+The system must:
+
+- Track the runtime state of each drive slot
+- Support the states `active`, `quiescing`, `failed`, and `rebuilding`
+- Track which slot is currently the **active role**
+
+For planned replacement, users must be able to:
+
+- Mark a drive slot for replacement
+- Confirm the failure after external I/O has been quiesced
+- Cancel the replacement workflow before confirmation
+- Assign a new mounted path to the failed slot
+
+The system must preserve:
+
+- The logical drive pair
+- Relative file paths
+- Tracked file metadata
+- Virtual path mappings
+
+---
+
+# 27. Live Failover Requirements
+
+If the currently active drive becomes unavailable, the system must support **live failover** to the surviving slot.
+
+The system must:
+
+- Continue serving future file access from the surviving active slot
+- Retarget virtual-path symlinks to the new active slot
+- Allow reads and writes on the surviving slot while degraded
+- Update stored checksum and file-size metadata from the surviving active copy
+- Keep files marked as not fully mirrored until rebuild completes
+
+The system must not claim to preserve already-open operating-system file handles after sudden disk loss.
+
+The system must support rebuilding the failed slot from the surviving slot once replacement media is mounted.
+
+---
+
+# 28. Failover Test Coverage Requirements
+
+The project must include automated test coverage for failover and replacement behavior.
+
+The test suite must include:
+
+- Unit tests for drive-state transitions and active/standby path resolution
+- Integration tests for CLI and API replacement flows
+- QEMU end-to-end tests using multiple virtual drives
+
+The QEMU tests must cover:
+
+- Planned primary failover
+- Replacement rebuild onto a new drive
+- Virtual-path retargeting during failover and after rebuild
+- Emergency failover after hot-removing the active disk through a QMP control socket
+
+---
+
 # 26. CLI Configuration Requirements
 
 All system functionality must be configurable through the **CLI interface**.

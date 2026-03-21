@@ -1,8 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use anyhow::Context;
 use crate::core::checksum;
-use crate::db::repository::{Repository, TrackedFile, DrivePair};
+use crate::core::drive::{self, DriveRole, DriveState};
+use crate::db::repository::{DrivePair, TrackedFile};
+use std::path::PathBuf;
 
 /// The result of verifying a tracked file's integrity.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +18,10 @@ pub enum IntegrityStatus {
     MirrorMissing,
     /// Master file does not exist.
     MasterMissing,
+    /// The primary drive root is unavailable while the pair still expects it to be active.
+    PrimaryDriveUnavailable,
+    /// The secondary drive root is unavailable while the pair still expects it to be active.
+    SecondaryDriveUnavailable,
 }
 
 /// Detailed result of an integrity check on a single file.
@@ -40,14 +43,42 @@ pub fn check_file_integrity(
 ) -> anyhow::Result<IntegrityCheckResult> {
     let master_path = PathBuf::from(&drive_pair.primary_path).join(&file.relative_path);
     let mirror_path = PathBuf::from(&drive_pair.secondary_path).join(&file.relative_path);
+    let primary_root_available = drive::path_is_available(&drive_pair.primary_path);
+    let secondary_root_available = drive::path_is_available(&drive_pair.secondary_path);
 
-    let master_checksum = if master_path.exists() {
+    if drive_pair.role_state(DriveRole::Primary) == DriveState::Active && !primary_root_available {
+        return Ok(IntegrityCheckResult {
+            file_id: file.id,
+            stored_checksum: file.checksum.clone(),
+            master_checksum: None,
+            mirror_checksum: None,
+            master_valid: false,
+            mirror_valid: false,
+            status: IntegrityStatus::PrimaryDriveUnavailable,
+        });
+    }
+
+    if drive_pair.role_state(DriveRole::Secondary) == DriveState::Active
+        && !secondary_root_available
+    {
+        return Ok(IntegrityCheckResult {
+            file_id: file.id,
+            stored_checksum: file.checksum.clone(),
+            master_checksum: None,
+            mirror_checksum: None,
+            master_valid: false,
+            mirror_valid: false,
+            status: IntegrityStatus::SecondaryDriveUnavailable,
+        });
+    }
+
+    let master_checksum = if primary_root_available && master_path.exists() {
         Some(checksum::checksum_file(&master_path)?)
     } else {
         None
     };
 
-    let mirror_checksum = if mirror_path.exists() {
+    let mirror_checksum = if secondary_root_available && mirror_path.exists() {
         Some(checksum::checksum_file(&mirror_path)?)
     } else {
         None
@@ -56,14 +87,37 @@ pub fn check_file_integrity(
     let master_valid = master_checksum.as_deref() == Some(&file.checksum);
     let mirror_valid = mirror_checksum.as_deref() == Some(&file.checksum);
 
-    let status = match (master_checksum.is_some(), mirror_checksum.is_some(), master_valid, mirror_valid) {
-        (false, _, _, _) => IntegrityStatus::MasterMissing,
-        (_, false, _, _) => IntegrityStatus::MirrorMissing,
-        (true, true, true, true) => IntegrityStatus::Ok,
-        (true, true, false, true) => IntegrityStatus::MasterCorrupted,
-        (true, true, true, false) => IntegrityStatus::MirrorCorrupted,
-        (true, true, false, false) => IntegrityStatus::BothCorrupted,
-        _ => IntegrityStatus::BothCorrupted,
+    let status = if drive_pair.is_degraded() {
+        match drive_pair.active_role_enum() {
+            DriveRole::Primary => {
+                if master_valid {
+                    IntegrityStatus::Ok
+                } else {
+                    IntegrityStatus::BothCorrupted
+                }
+            }
+            DriveRole::Secondary => {
+                if mirror_valid {
+                    IntegrityStatus::Ok
+                } else {
+                    IntegrityStatus::BothCorrupted
+                }
+            }
+        }
+    } else {
+        match (
+            master_checksum.is_some(),
+            mirror_checksum.is_some(),
+            master_valid,
+            mirror_valid,
+        ) {
+            (false, _, _, _) => IntegrityStatus::MasterMissing,
+            (_, false, _, _) => IntegrityStatus::MirrorMissing,
+            (true, true, true, true) => IntegrityStatus::Ok,
+            (true, true, false, true) => IntegrityStatus::MasterCorrupted,
+            (true, true, true, false) => IntegrityStatus::MirrorCorrupted,
+            (true, true, false, false) => IntegrityStatus::BothCorrupted,
+        }
     };
 
     Ok(IntegrityCheckResult {
@@ -84,25 +138,40 @@ pub fn attempt_recovery(
     file: &TrackedFile,
     result: &IntegrityCheckResult,
 ) -> anyhow::Result<bool> {
+    if drive_pair.is_degraded() {
+        return Ok(false);
+    }
+
     match &result.status {
         IntegrityStatus::MasterCorrupted => {
-            crate::core::mirror::restore_from_mirror(drive_pair, &file.relative_path, &file.checksum)?;
+            crate::core::mirror::restore_from_mirror(
+                drive_pair,
+                &file.relative_path,
+                &file.checksum,
+            )?;
             Ok(true)
         }
         IntegrityStatus::MirrorCorrupted | IntegrityStatus::MirrorMissing => {
-            crate::core::mirror::restore_mirror_from_master(drive_pair, &file.relative_path, &file.checksum)?;
+            crate::core::mirror::restore_mirror_from_master(
+                drive_pair,
+                &file.relative_path,
+                &file.checksum,
+            )?;
             Ok(true)
         }
         IntegrityStatus::Ok => Ok(false),
-        IntegrityStatus::BothCorrupted | IntegrityStatus::MasterMissing => Ok(false),
+        IntegrityStatus::BothCorrupted
+        | IntegrityStatus::MasterMissing
+        | IntegrityStatus::PrimaryDriveUnavailable
+        | IntegrityStatus::SecondaryDriveUnavailable => Ok(false),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
-    use std::io::Write;
 
     fn make_pair(primary: &TempDir, secondary: &TempDir) -> DrivePair {
         DrivePair {
@@ -110,6 +179,9 @@ mod tests {
             name: "test".to_string(),
             primary_path: primary.path().to_str().unwrap().to_string(),
             secondary_path: secondary.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         }
@@ -231,6 +303,37 @@ mod tests {
 
         let result = check_file_integrity(&pair, &file).unwrap();
         assert_eq!(result.status, IntegrityStatus::MasterMissing);
+    }
+
+    #[test]
+    fn test_integrity_primary_drive_unavailable() {
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let hash = write_file(&secondary, "f.txt", b"content");
+        std::fs::remove_dir_all(primary.path()).unwrap();
+
+        let pair = make_pair(&primary, &secondary);
+        let file = make_tracked_file(1, "f.txt", &hash);
+
+        let result = check_file_integrity(&pair, &file).unwrap();
+        assert_eq!(result.status, IntegrityStatus::PrimaryDriveUnavailable);
+    }
+
+    #[test]
+    fn test_integrity_degraded_pair_ignores_failed_primary_root() {
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let hash = write_file(&secondary, "f.txt", b"content");
+        std::fs::remove_dir_all(primary.path()).unwrap();
+
+        let mut pair = make_pair(&primary, &secondary);
+        pair.primary_state = "failed".to_string();
+        pair.active_role = "secondary".to_string();
+        let file = make_tracked_file(1, "f.txt", &hash);
+
+        let result = check_file_integrity(&pair, &file).unwrap();
+        assert_eq!(result.status, IntegrityStatus::Ok);
+        assert!(result.mirror_valid);
     }
 
     #[test]

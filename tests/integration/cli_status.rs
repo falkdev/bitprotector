@@ -34,7 +34,9 @@ fn test_status_shows_drive_and_file_counts() {
     // Add a drive pair using real directories
     cmd(db_path)
         .args([
-            "drives", "add", "test",
+            "drives",
+            "add",
+            "test",
             primary.path().to_str().unwrap(),
             secondary.path().to_str().unwrap(),
         ])

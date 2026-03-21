@@ -1,7 +1,7 @@
+use crate::core::{scheduler, sync_queue};
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use crate::db::repository::Repository;
-use crate::core::{sync_queue, scheduler};
 
 #[derive(Deserialize)]
 pub struct AddQueueItem {
@@ -73,7 +73,10 @@ async fn run_task(repo: web::Data<Repository>, path: web::Path<String>) -> HttpR
         other => return HttpResponse::BadRequest().body(format!("Unknown task: {}", other)),
     };
     match scheduler::run_task(&task, &repo) {
-        Ok(count) => HttpResponse::Ok().json(TaskResult { task: task.as_str().to_string(), count }),
+        Ok(count) => HttpResponse::Ok().json(TaskResult {
+            task: task.as_str().to_string(),
+            count,
+        }),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }

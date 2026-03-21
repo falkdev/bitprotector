@@ -1,7 +1,7 @@
+use crate::db::backup;
+use crate::db::repository::{DbBackupConfig, Repository};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use crate::db::repository::{Repository, DbBackupConfig};
-use crate::db::backup;
 
 #[derive(Serialize)]
 struct BackupConfigResponse {
@@ -38,8 +38,12 @@ struct CreateBackupBody {
     enabled: bool,
 }
 
-fn default_max_copies() -> i64 { 5 }
-fn default_enabled() -> bool { true }
+fn default_max_copies() -> i64 {
+    5
+}
+fn default_enabled() -> bool {
+    true
+}
 
 #[derive(Deserialize)]
 struct UpdateBackupBody {
@@ -61,7 +65,12 @@ async fn create_backup(
     data: web::Data<Repository>,
     body: web::Json<CreateBackupBody>,
 ) -> HttpResponse {
-    match data.create_db_backup_config(&body.backup_path, body.drive_label.as_deref(), body.max_copies, body.enabled) {
+    match data.create_db_backup_config(
+        &body.backup_path,
+        body.drive_label.as_deref(),
+        body.max_copies,
+        body.enabled,
+    ) {
         Ok(cfg) => HttpResponse::Created().json(BackupConfigResponse::from(cfg)),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
@@ -103,14 +112,17 @@ async fn run_backups(
 ) -> HttpResponse {
     match backup::run_all_backups(&data, &query.db_path) {
         Ok(results) => {
-            let body: Vec<serde_json::Value> = results.iter().map(|r| {
-                serde_json::json!({
-                    "backup_config_id": r.backup_config_id,
-                    "backup_path": r.backup_path,
-                    "status": r.status,
-                    "error": r.error,
+            let body: Vec<serde_json::Value> = results
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "backup_config_id": r.backup_config_id,
+                        "backup_path": r.backup_path,
+                        "status": r.status,
+                        "error": r.error,
+                    })
                 })
-            }).collect();
+                .collect();
             HttpResponse::Ok().json(body)
         }
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),

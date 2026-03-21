@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use anyhow::Context;
-use crate::core::{checksum, mirror};
-use crate::db::repository::{Repository, DrivePair, TrackedFolder, TrackedFile};
+use crate::core::{checksum, drive, mirror};
+use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
+use anyhow::Context;
+use std::fs;
+use std::path::PathBuf;
 
 /// Track a new file: compute checksum, record in database, and mirror it.
 pub fn track_file(
@@ -12,14 +12,24 @@ pub fn track_file(
     relative_path: &str,
     virtual_path: Option<&str>,
 ) -> anyhow::Result<crate::db::repository::TrackedFile> {
-    let master_path = PathBuf::from(&drive_pair.primary_path).join(relative_path);
-
-    if !master_path.exists() {
-        anyhow::bail!("File does not exist on primary drive: {}", master_path.display());
+    drive::require_pair_mutation_allowed(drive_pair)?;
+    drive::ensure_drive_root_marker(drive_pair.active_path())?;
+    if drive::path_is_available(drive_pair.standby_path()) {
+        let _ = drive::ensure_drive_root_marker(drive_pair.standby_path());
     }
 
-    let file_checksum = checksum::checksum_file(&master_path)
-        .context("Failed to compute file checksum")?;
+    let master_path = PathBuf::from(drive_pair.active_path()).join(relative_path);
+
+    if !master_path.exists() {
+        anyhow::bail!(
+            "File does not exist on active {} drive: {}",
+            drive_pair.active_role,
+            master_path.display()
+        );
+    }
+
+    let file_checksum =
+        checksum::checksum_file(&master_path).context("Failed to compute file checksum")?;
     let file_size = master_path.metadata()?.len() as i64;
 
     let tracked = repo.create_tracked_file(
@@ -42,11 +52,22 @@ pub fn track_folder(
     auto_virtual_path: bool,
     default_virtual_base: Option<&str>,
 ) -> anyhow::Result<TrackedFolder> {
-    let full_path = PathBuf::from(&drive_pair.primary_path).join(folder_path);
+    drive::require_pair_mutation_allowed(drive_pair)?;
+    drive::ensure_drive_root_marker(drive_pair.active_path())?;
+
+    let full_path = PathBuf::from(drive_pair.active_path()).join(folder_path);
     if !full_path.is_dir() {
-        anyhow::bail!("Folder does not exist on primary drive: {}", full_path.display());
+        anyhow::bail!(
+            "Folder does not exist on active drive: {}",
+            full_path.display()
+        );
     }
-    repo.create_tracked_folder(drive_pair.id, folder_path, auto_virtual_path, default_virtual_base)
+    repo.create_tracked_folder(
+        drive_pair.id,
+        folder_path,
+        auto_virtual_path,
+        default_virtual_base,
+    )
 }
 
 /// Compute the virtual path for a file being auto-tracked inside a folder.
@@ -57,7 +78,9 @@ fn compute_virtual_path(folder: &TrackedFolder, relative_path: &str) -> Option<S
     }
     let base = folder.default_virtual_base.as_deref().unwrap_or("/virtual");
     let folder_prefix = format!("{}/", folder.folder_path.trim_end_matches('/'));
-    let within_folder = relative_path.strip_prefix(&folder_prefix).unwrap_or(relative_path);
+    let within_folder = relative_path
+        .strip_prefix(&folder_prefix)
+        .unwrap_or(relative_path);
     Some(format!("{}/{}", base.trim_end_matches('/'), within_folder))
 }
 
@@ -68,7 +91,9 @@ pub fn auto_track_folder_files(
     drive_pair: &DrivePair,
     folder: &TrackedFolder,
 ) -> anyhow::Result<Vec<TrackedFile>> {
-    let folder_full_path = PathBuf::from(&drive_pair.primary_path).join(&folder.folder_path);
+    drive::require_pair_mutation_allowed(drive_pair)?;
+
+    let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
     let (existing, _) = repo.list_tracked_files(Some(drive_pair.id), None, None, 1, i64::MAX)?;
 
     let mut newly_tracked = Vec::new();
@@ -83,8 +108,8 @@ pub fn auto_track_folder_files(
         }
 
         let relative_path = path
-            .strip_prefix(&drive_pair.primary_path)
-            .context("Path outside primary drive")?
+            .strip_prefix(drive_pair.active_path())
+            .context("Path outside active drive")?
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))?
             .to_string();
@@ -95,8 +120,12 @@ pub fn auto_track_folder_files(
 
         let virtual_path = compute_virtual_path(folder, &relative_path);
         let file = track_file(repo, drive_pair, &relative_path, virtual_path.as_deref())?;
-        mirror::mirror_file(drive_pair, &relative_path)?;
-        repo.update_tracked_file_mirror_status(file.id, true)?;
+        if drive_pair.standby_accepts_sync() {
+            mirror::mirror_file(drive_pair, &relative_path)?;
+            repo.update_tracked_file_mirror_status(file.id, true)?;
+        } else {
+            repo.update_tracked_file_mirror_status(file.id, false)?;
+        }
         newly_tracked.push(repo.get_tracked_file(file.id)?);
     }
 
@@ -106,9 +135,9 @@ pub fn auto_track_folder_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::db::repository::create_memory_pool;
     use crate::db::schema::initialize_schema;
+    use tempfile::TempDir;
 
     fn setup() -> (TempDir, TempDir, Repository) {
         let primary = TempDir::new().unwrap();
@@ -123,7 +152,12 @@ mod tests {
     }
 
     fn make_pair(primary: &TempDir, secondary: &TempDir, repo: &Repository) -> DrivePair {
-        repo.create_drive_pair("test", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap()
+        repo.create_drive_pair(
+            "test",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -220,6 +254,10 @@ mod tests {
 
         let folder = track_folder(&repo, &pair, "data", false, None).unwrap();
         let newly_tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
-        assert_eq!(newly_tracked.len(), 0, "Already-tracked file should be skipped");
+        assert_eq!(
+            newly_tracked.len(),
+            0,
+            "Already-tracked file should be skipped"
+        );
     }
 }

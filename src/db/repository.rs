@@ -7,7 +7,9 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 /// Create a connection pool for the given database path.
 pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
+        )?;
         Ok(())
     });
     let pool = Pool::builder().max_size(10).build(manager)?;
@@ -17,7 +19,9 @@ pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
 /// Create a single-connection pool for CLI commands that share the DB with a running service.
 pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
+        )?;
         Ok(())
     });
     let pool = Pool::builder().max_size(1).build(manager)?;
@@ -41,6 +45,9 @@ pub struct DrivePair {
     pub name: String,
     pub primary_path: String,
     pub secondary_path: String,
+    pub primary_state: String,
+    pub secondary_state: String,
+    pub active_role: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -137,11 +144,18 @@ impl Repository {
 
     // ─── Drive Pairs ────────────────────────────────────────────────────────────
 
-    pub fn create_drive_pair(&self, name: &str, primary: &str, secondary: &str) -> anyhow::Result<DrivePair> {
+    pub fn create_drive_pair(
+        &self,
+        name: &str,
+        primary: &str,
+        secondary: &str,
+    ) -> anyhow::Result<DrivePair> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO drive_pairs (name, primary_path, secondary_path) VALUES (?1, ?2, ?3)",
+                "INSERT INTO drive_pairs (
+                    name, primary_path, secondary_path, primary_state, secondary_state, active_role
+                 ) VALUES (?1, ?2, ?3, 'active', 'active', 'primary')",
                 rusqlite::params![name, primary, secondary],
             )?;
             conn.last_insert_rowid()
@@ -152,7 +166,8 @@ impl Repository {
     pub fn get_drive_pair(&self, id: i64) -> anyhow::Result<DrivePair> {
         let conn = self.conn()?;
         let pair = conn.query_row(
-            "SELECT id, name, primary_path, secondary_path, created_at, updated_at
+            "SELECT id, name, primary_path, secondary_path, primary_state, secondary_state,
+                    active_role, created_at, updated_at
              FROM drive_pairs WHERE id = ?1",
             rusqlite::params![id],
             |row| {
@@ -161,8 +176,11 @@ impl Repository {
                     name: row.get(1)?,
                     primary_path: row.get(2)?,
                     secondary_path: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    primary_state: row.get(4)?,
+                    secondary_state: row.get(5)?,
+                    active_role: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )?;
@@ -172,7 +190,8 @@ impl Repository {
     pub fn list_drive_pairs(&self) -> anyhow::Result<Vec<DrivePair>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, primary_path, secondary_path, created_at, updated_at
+            "SELECT id, name, primary_path, secondary_path, primary_state, secondary_state,
+                    active_role, created_at, updated_at
              FROM drive_pairs ORDER BY id",
         )?;
         let pairs = stmt
@@ -182,8 +201,11 @@ impl Repository {
                     name: row.get(1)?,
                     primary_path: row.get(2)?,
                     secondary_path: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    primary_state: row.get(4)?,
+                    secondary_state: row.get(5)?,
+                    active_role: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -200,13 +222,61 @@ impl Repository {
         {
             let conn = self.conn()?;
             if let Some(n) = name {
-                conn.execute("UPDATE drive_pairs SET name=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![n, id])?;
+                conn.execute(
+                    "UPDATE drive_pairs SET name=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![n, id],
+                )?;
             }
             if let Some(p) = primary {
                 conn.execute("UPDATE drive_pairs SET primary_path=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![p, id])?;
             }
             if let Some(s) = secondary {
                 conn.execute("UPDATE drive_pairs SET secondary_path=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![s, id])?;
+            }
+        }
+        self.get_drive_pair(id)
+    }
+
+    pub fn update_drive_pair_runtime(
+        &self,
+        id: i64,
+        primary_path: Option<&str>,
+        secondary_path: Option<&str>,
+        primary_state: Option<&str>,
+        secondary_state: Option<&str>,
+        active_role: Option<&str>,
+    ) -> anyhow::Result<DrivePair> {
+        {
+            let conn = self.conn()?;
+            if let Some(path) = primary_path {
+                conn.execute(
+                    "UPDATE drive_pairs SET primary_path=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![path, id],
+                )?;
+            }
+            if let Some(path) = secondary_path {
+                conn.execute(
+                    "UPDATE drive_pairs SET secondary_path=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![path, id],
+                )?;
+            }
+            if let Some(state) = primary_state {
+                conn.execute(
+                    "UPDATE drive_pairs SET primary_state=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![state, id],
+                )?;
+            }
+            if let Some(state) = secondary_state {
+                conn.execute(
+                    "UPDATE drive_pairs SET secondary_state=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![state, id],
+                )?;
+            }
+            if let Some(role) = active_role {
+                conn.execute(
+                    "UPDATE drive_pairs SET active_role=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![role, id],
+                )?;
             }
         }
         self.get_drive_pair(id)
@@ -220,10 +290,32 @@ impl Repository {
             |r| r.get(0),
         )?;
         if count > 0 {
-            anyhow::bail!("Cannot delete drive pair: {} files are still tracked", count);
+            anyhow::bail!(
+                "Cannot delete drive pair: {} files are still tracked",
+                count
+            );
         }
         conn.execute("DELETE FROM drive_pairs WHERE id=?1", rusqlite::params![id])?;
         Ok(())
+    }
+
+    pub fn mark_drive_pair_unmirrored(&self, drive_pair_id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_files SET is_mirrored=0, updated_at=datetime('now') WHERE drive_pair_id=?1",
+            rusqlite::params![drive_pair_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_tracked_files_for_drive_pair(&self, drive_pair_id: i64) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let count = conn.query_row(
+            "SELECT COUNT(*) FROM tracked_files WHERE drive_pair_id=?1",
+            rusqlite::params![drive_pair_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     // ─── Tracked Files ──────────────────────────────────────────────────────────
@@ -273,7 +365,11 @@ impl Repository {
         Ok(file)
     }
 
-    pub fn get_tracked_file_by_path(&self, drive_pair_id: i64, relative_path: &str) -> anyhow::Result<TrackedFile> {
+    pub fn get_tracked_file_by_path(
+        &self,
+        drive_pair_id: i64,
+        relative_path: &str,
+    ) -> anyhow::Result<TrackedFile> {
         let conn = self.conn()?;
         let file = conn.query_row(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
@@ -324,7 +420,11 @@ impl Repository {
             conditions.push(format!("is_mirrored = ?{}", params.len() + 1));
             params.push(Value::Integer(mirrored as i64));
         }
-        let where_clause = if conditions.is_empty() { String::new() } else { format!("WHERE {}", conditions.join(" AND ")) };
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
 
         let query = format!(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
@@ -333,9 +433,9 @@ impl Repository {
         );
         let count_query = format!("SELECT COUNT(*) FROM tracked_files {where_clause}");
 
-        let files = conn.prepare(&query)?.query_map(
-            rusqlite::params_from_iter(params.iter()),
-            |row| {
+        let files = conn
+            .prepare(&query)?
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
                 Ok(TrackedFile {
                     id: row.get(0)?,
                     drive_pair_id: row.get(1)?,
@@ -348,14 +448,23 @@ impl Repository {
                     created_at: row.get(8)?,
                     updated_at: row.get(9)?,
                 })
-            },
-        )?.collect::<Result<Vec<_>, _>>()?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let total: i64 = conn.query_row(&count_query, rusqlite::params_from_iter(params.iter()), |r| r.get(0))?;
+        let total: i64 = conn.query_row(
+            &count_query,
+            rusqlite::params_from_iter(params.iter()),
+            |r| r.get(0),
+        )?;
         Ok((files, total))
     }
 
-    pub fn update_tracked_file_checksum(&self, id: i64, checksum: &str, file_size: i64) -> anyhow::Result<()> {
+    pub fn update_tracked_file_checksum(
+        &self,
+        id: i64,
+        checksum: &str,
+        file_size: i64,
+    ) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE tracked_files SET checksum=?1, file_size=?2, updated_at=datetime('now') WHERE id=?3",
@@ -364,7 +473,11 @@ impl Repository {
         Ok(())
     }
 
-    pub fn update_tracked_file_mirror_status(&self, id: i64, is_mirrored: bool) -> anyhow::Result<()> {
+    pub fn update_tracked_file_mirror_status(
+        &self,
+        id: i64,
+        is_mirrored: bool,
+    ) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE tracked_files SET is_mirrored=?1, updated_at=datetime('now') WHERE id=?2",
@@ -382,7 +495,11 @@ impl Repository {
         Ok(())
     }
 
-    pub fn update_tracked_file_virtual_path(&self, id: i64, virtual_path: Option<&str>) -> anyhow::Result<()> {
+    pub fn update_tracked_file_virtual_path(
+        &self,
+        id: i64,
+        virtual_path: Option<&str>,
+    ) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE tracked_files SET virtual_path=?1, updated_at=datetime('now') WHERE id=?2",
@@ -393,7 +510,10 @@ impl Repository {
 
     pub fn delete_tracked_file(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM tracked_files WHERE id=?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM tracked_files WHERE id=?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
@@ -444,16 +564,18 @@ impl Repository {
             "SELECT id, drive_pair_id, folder_path, auto_virtual_path, default_virtual_base, created_at
              FROM tracked_folders ORDER BY id",
         )?;
-        let folders = stmt.query_map([], |row| {
-            Ok(TrackedFolder {
-                id: row.get(0)?,
-                drive_pair_id: row.get(1)?,
-                folder_path: row.get(2)?,
-                auto_virtual_path: row.get::<_, i64>(3)? != 0,
-                default_virtual_base: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let folders = stmt
+            .query_map([], |row| {
+                Ok(TrackedFolder {
+                    id: row.get(0)?,
+                    drive_pair_id: row.get(1)?,
+                    folder_path: row.get(2)?,
+                    auto_virtual_path: row.get::<_, i64>(3)? != 0,
+                    default_virtual_base: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(folders)
     }
 
@@ -483,13 +605,20 @@ impl Repository {
 
     pub fn delete_tracked_folder(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM tracked_folders WHERE id=?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM tracked_folders WHERE id=?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
     // ─── Sync Queue ───────────────────────────────────────────────────────────────
 
-    pub fn create_sync_queue_item(&self, tracked_file_id: i64, action: &str) -> anyhow::Result<SyncQueueItem> {
+    pub fn create_sync_queue_item(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+    ) -> anyhow::Result<SyncQueueItem> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
@@ -499,6 +628,39 @@ impl Repository {
             conn.last_insert_rowid()
         };
         self.get_sync_queue_item(id)
+    }
+
+    pub fn create_sync_queue_item_dedup(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+    ) -> anyhow::Result<Option<SyncQueueItem>> {
+        self.create_sync_queue_item_dedup_with_created(tracked_file_id, action)
+            .map(|(item, _created)| Some(item))
+    }
+
+    pub fn create_sync_queue_item_dedup_with_created(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+    ) -> anyhow::Result<(SyncQueueItem, bool)> {
+        let conn = self.conn()?;
+        let existing: Result<i64, _> = conn.query_row(
+            "SELECT id FROM sync_queue
+             WHERE tracked_file_id=?1 AND action=?2 AND status IN ('pending', 'in_progress')
+             ORDER BY id LIMIT 1",
+            rusqlite::params![tracked_file_id, action],
+            |row| row.get(0),
+        );
+        match existing {
+            Ok(id) => Ok((self.get_sync_queue_item(id)?, false)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                drop(conn);
+                self.create_sync_queue_item(tracked_file_id, action)
+                    .map(|item| (item, true))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn get_sync_queue_item(&self, id: i64) -> anyhow::Result<SyncQueueItem> {
@@ -541,17 +703,20 @@ impl Repository {
         );
         let count_query = format!("SELECT COUNT(*) FROM sync_queue {where_clause}");
 
-        let items = conn.prepare(&query)?.query_map([], |row| {
-            Ok(SyncQueueItem {
-                id: row.get(0)?,
-                tracked_file_id: row.get(1)?,
-                action: row.get(2)?,
-                status: row.get(3)?,
-                error_message: row.get(4)?,
-                created_at: row.get(5)?,
-                completed_at: row.get(6)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let items = conn
+            .prepare(&query)?
+            .query_map([], |row| {
+                Ok(SyncQueueItem {
+                    id: row.get(0)?,
+                    tracked_file_id: row.get(1)?,
+                    action: row.get(2)?,
+                    status: row.get(3)?,
+                    error_message: row.get(4)?,
+                    created_at: row.get(5)?,
+                    completed_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         let _ = params_status; // suppress unused warning
 
         let total: i64 = conn.query_row(&count_query, [], |r| r.get(0))?;
@@ -578,6 +743,52 @@ impl Repository {
             rusqlite::params![status, error_message, id],
         )?;
         Ok(())
+    }
+
+    pub fn fail_pending_sync_queue_for_drive_pair(
+        &self,
+        drive_pair_id: i64,
+        error_message: &str,
+    ) -> anyhow::Result<u64> {
+        let conn = self.conn()?;
+        let affected = conn.execute(
+            "UPDATE sync_queue
+             SET status='failed', error_message=?1, completed_at=datetime('now')
+             WHERE status IN ('pending', 'in_progress')
+               AND tracked_file_id IN (
+                   SELECT id FROM tracked_files WHERE drive_pair_id=?2
+               )",
+            rusqlite::params![error_message, drive_pair_id],
+        )?;
+        Ok(affected as u64)
+    }
+
+    pub fn count_sync_queue_items_for_drive_pair_action(
+        &self,
+        drive_pair_id: i64,
+        action: &str,
+        statuses: &[&str],
+    ) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let mut sql = format!(
+            "SELECT COUNT(*) FROM sync_queue
+             WHERE action='{}'
+               AND tracked_file_id IN (
+                   SELECT id FROM tracked_files WHERE drive_pair_id={}
+               )",
+            action.replace('\'', "''"),
+            drive_pair_id
+        );
+        if !statuses.is_empty() {
+            let joined = statuses
+                .iter()
+                .map(|status| format!("'{}'", status.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql.push_str(&format!(" AND status IN ({joined})"));
+        }
+        let count = conn.query_row(&sql, [], |row| row.get(0))?;
+        Ok(count)
     }
 
     // ─── Event Log ────────────────────────────────────────────────────────────────
@@ -633,11 +844,23 @@ impl Repository {
         let conn = self.conn()?;
         let offset = (page - 1) * per_page;
         let mut conditions = Vec::new();
-        if let Some(et) = event_type { conditions.push(format!("event_type='{}'", et.replace('\'', "''"))); }
-        if let Some(fid) = tracked_file_id { conditions.push(format!("tracked_file_id={}", fid)); }
-        if let Some(f) = from { conditions.push(format!("created_at>='{}'", f.replace('\'', "''"))); }
-        if let Some(t) = to { conditions.push(format!("created_at<='{}'", t.replace('\'', "''"))); }
-        let where_clause = if conditions.is_empty() { String::new() } else { format!("WHERE {}", conditions.join(" AND ")) };
+        if let Some(et) = event_type {
+            conditions.push(format!("event_type='{}'", et.replace('\'', "''")));
+        }
+        if let Some(fid) = tracked_file_id {
+            conditions.push(format!("tracked_file_id={}", fid));
+        }
+        if let Some(f) = from {
+            conditions.push(format!("created_at>='{}'", f.replace('\'', "''")));
+        }
+        if let Some(t) = to {
+            conditions.push(format!("created_at<='{}'", t.replace('\'', "''")));
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
 
         let query = format!(
             "SELECT id, event_type, tracked_file_id, message, details, created_at
@@ -645,16 +868,19 @@ impl Repository {
         );
         let count_query = format!("SELECT COUNT(*) FROM event_log {where_clause}");
 
-        let entries = conn.prepare(&query)?.query_map([], |row| {
-            Ok(EventLogEntry {
-                id: row.get(0)?,
-                event_type: row.get(1)?,
-                tracked_file_id: row.get(2)?,
-                message: row.get(3)?,
-                details: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let entries = conn
+            .prepare(&query)?
+            .query_map([], |row| {
+                Ok(EventLogEntry {
+                    id: row.get(0)?,
+                    event_type: row.get(1)?,
+                    tracked_file_id: row.get(2)?,
+                    message: row.get(3)?,
+                    details: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         let total: i64 = conn.query_row(&count_query, [], |r| r.get(0))?;
         Ok((entries, total))
@@ -710,19 +936,21 @@ impl Repository {
             "SELECT id, task_type, cron_expr, interval_seconds, enabled, last_run, next_run, created_at, updated_at
              FROM schedule_config ORDER BY id",
         )?;
-        let cfgs = stmt.query_map([], |row| {
-            Ok(ScheduleConfig {
-                id: row.get(0)?,
-                task_type: row.get(1)?,
-                cron_expr: row.get(2)?,
-                interval_seconds: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
-                last_run: row.get(5)?,
-                next_run: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let cfgs = stmt
+            .query_map([], |row| {
+                Ok(ScheduleConfig {
+                    id: row.get(0)?,
+                    task_type: row.get(1)?,
+                    cron_expr: row.get(2)?,
+                    interval_seconds: row.get(3)?,
+                    enabled: row.get::<_, i64>(4)? != 0,
+                    last_run: row.get(5)?,
+                    next_run: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(cfgs)
     }
 
@@ -742,7 +970,10 @@ impl Repository {
                 conn.execute("UPDATE schedule_config SET interval_seconds=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![is, id])?;
             }
             if let Some(en) = enabled {
-                conn.execute("UPDATE schedule_config SET enabled=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![en as i64, id])?;
+                conn.execute(
+                    "UPDATE schedule_config SET enabled=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![en as i64, id],
+                )?;
             }
         }
         self.get_schedule_config(id)
@@ -750,7 +981,10 @@ impl Repository {
 
     pub fn delete_schedule_config(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM schedule_config WHERE id=?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM schedule_config WHERE id=?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
@@ -802,17 +1036,19 @@ impl Repository {
             "SELECT id, backup_path, drive_label, max_copies, enabled, last_backup, created_at
              FROM db_backup_config ORDER BY id",
         )?;
-        let cfgs = stmt.query_map([], |row| {
-            Ok(DbBackupConfig {
-                id: row.get(0)?,
-                backup_path: row.get(1)?,
-                drive_label: row.get(2)?,
-                max_copies: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
-                last_backup: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let cfgs = stmt
+            .query_map([], |row| {
+                Ok(DbBackupConfig {
+                    id: row.get(0)?,
+                    backup_path: row.get(1)?,
+                    drive_label: row.get(2)?,
+                    max_copies: row.get(3)?,
+                    enabled: row.get::<_, i64>(4)? != 0,
+                    last_backup: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(cfgs)
     }
 
@@ -825,10 +1061,16 @@ impl Repository {
         {
             let conn = self.conn()?;
             if let Some(mc) = max_copies {
-                conn.execute("UPDATE db_backup_config SET max_copies=?1 WHERE id=?2", rusqlite::params![mc, id])?;
+                conn.execute(
+                    "UPDATE db_backup_config SET max_copies=?1 WHERE id=?2",
+                    rusqlite::params![mc, id],
+                )?;
             }
             if let Some(en) = enabled {
-                conn.execute("UPDATE db_backup_config SET enabled=?1 WHERE id=?2", rusqlite::params![en as i64, id])?;
+                conn.execute(
+                    "UPDATE db_backup_config SET enabled=?1 WHERE id=?2",
+                    rusqlite::params![en as i64, id],
+                )?;
             }
         }
         self.get_db_backup_config(id)
@@ -836,7 +1078,10 @@ impl Repository {
 
     pub fn delete_db_backup_config(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM db_backup_config WHERE id=?1", rusqlite::params![id])?;
+        conn.execute(
+            "DELETE FROM db_backup_config WHERE id=?1",
+            rusqlite::params![id],
+        )?;
         Ok(())
     }
 
@@ -853,15 +1098,31 @@ impl Repository {
 
     pub fn get_system_status(&self) -> anyhow::Result<SystemStatus> {
         let conn = self.conn()?;
-        let files_tracked: i64 = conn.query_row("SELECT COUNT(*) FROM tracked_files", [], |r| r.get(0))?;
-        let files_mirrored: i64 = conn.query_row("SELECT COUNT(*) FROM tracked_files WHERE is_mirrored=1", [], |r| r.get(0))?;
-        let pending_sync: i64 = conn.query_row("SELECT COUNT(*) FROM sync_queue WHERE status='pending'", [], |r| r.get(0))?;
+        let files_tracked: i64 =
+            conn.query_row("SELECT COUNT(*) FROM tracked_files", [], |r| r.get(0))?;
+        let files_mirrored: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tracked_files WHERE is_mirrored=1",
+            [],
+            |r| r.get(0),
+        )?;
+        let pending_sync: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE status='pending'",
+            [],
+            |r| r.get(0),
+        )?;
         let integrity_issues: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sync_queue WHERE action IN ('user_action_required') AND status='pending'",
             [], |r| r.get(0)
         )?;
-        let drive_pairs: i64 = conn.query_row("SELECT COUNT(*) FROM drive_pairs", [], |r| r.get(0))?;
-        Ok(SystemStatus { files_tracked, files_mirrored, pending_sync, integrity_issues, drive_pairs })
+        let drive_pairs: i64 =
+            conn.query_row("SELECT COUNT(*) FROM drive_pairs", [], |r| r.get(0))?;
+        Ok(SystemStatus {
+            files_tracked,
+            files_mirrored,
+            pending_sync,
+            integrity_issues,
+            drive_pairs,
+        })
     }
 }
 
@@ -895,7 +1156,9 @@ mod tests {
         let repo = make_repo();
 
         // Create
-        let pair = repo.create_drive_pair("test-pair", "/primary", "/secondary").unwrap();
+        let pair = repo
+            .create_drive_pair("test-pair", "/primary", "/secondary")
+            .unwrap();
         assert_eq!(pair.name, "test-pair");
         assert_eq!(pair.primary_path, "/primary");
         assert_eq!(pair.secondary_path, "/secondary");
@@ -909,7 +1172,9 @@ mod tests {
         assert_eq!(fetched.id, pair.id);
 
         // Update
-        let updated = repo.update_drive_pair(pair.id, Some("new-name"), None, None).unwrap();
+        let updated = repo
+            .update_drive_pair(pair.id, Some("new-name"), None, None)
+            .unwrap();
         assert_eq!(updated.name, "new-name");
 
         // Delete (no files tracked)
@@ -922,7 +1187,8 @@ mod tests {
     fn test_delete_drive_pair_with_files_fails() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        repo.create_tracked_file(pair.id, "file.txt", "abc123", 100, None).unwrap();
+        repo.create_tracked_file(pair.id, "file.txt", "abc123", 100, None)
+            .unwrap();
         let result = repo.delete_drive_pair(pair.id);
         assert!(result.is_err(), "Delete should fail when files are tracked");
     }
@@ -934,18 +1200,28 @@ mod tests {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
 
-        let file = repo.create_tracked_file(pair.id, "docs/report.pdf", "blake3hex", 1024, Some("/docs/report.pdf")).unwrap();
+        let file = repo
+            .create_tracked_file(
+                pair.id,
+                "docs/report.pdf",
+                "blake3hex",
+                1024,
+                Some("/docs/report.pdf"),
+            )
+            .unwrap();
         assert_eq!(file.relative_path, "docs/report.pdf");
         assert_eq!(file.checksum, "blake3hex");
         assert_eq!(file.file_size, 1024);
         assert!(file.virtual_path.is_some());
         assert!(!file.is_mirrored);
 
-        repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+        repo.update_tracked_file_mirror_status(file.id, true)
+            .unwrap();
         let updated = repo.get_tracked_file(file.id).unwrap();
         assert!(updated.is_mirrored);
 
-        repo.update_tracked_file_checksum(file.id, "newhash", 2048).unwrap();
+        repo.update_tracked_file_checksum(file.id, "newhash", 2048)
+            .unwrap();
         let updated2 = repo.get_tracked_file(file.id).unwrap();
         assert_eq!(updated2.checksum, "newhash");
         assert_eq!(updated2.file_size, 2048);
@@ -959,7 +1235,8 @@ mod tests {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
         for i in 0..5 {
-            repo.create_tracked_file(pair.id, &format!("file{}.txt", i), "hash", 100, None).unwrap();
+            repo.create_tracked_file(pair.id, &format!("file{}.txt", i), "hash", 100, None)
+                .unwrap();
         }
         let (files, total) = repo.list_tracked_files(None, None, None, 1, 3).unwrap();
         assert_eq!(files.len(), 3);
@@ -976,11 +1253,15 @@ mod tests {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
 
-        let folder = repo.create_tracked_folder(pair.id, "documents/", true, Some("/docs")).unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "documents/", true, Some("/docs"))
+            .unwrap();
         assert_eq!(folder.folder_path, "documents/");
         assert!(folder.auto_virtual_path);
 
-        let updated = repo.update_tracked_folder(folder.id, Some(false), None).unwrap();
+        let updated = repo
+            .update_tracked_folder(folder.id, Some(false), None)
+            .unwrap();
         assert!(!updated.auto_virtual_path);
 
         repo.delete_tracked_folder(folder.id).unwrap();
@@ -993,13 +1274,16 @@ mod tests {
     fn test_sync_queue_crud() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", "h", 1, None).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", "h", 1, None)
+            .unwrap();
 
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
         assert_eq!(item.action, "mirror");
         assert_eq!(item.status, "pending");
 
-        repo.update_sync_queue_status(item.id, "completed", None).unwrap();
+        repo.update_sync_queue_status(item.id, "completed", None)
+            .unwrap();
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
         assert!(updated.completed_at.is_some());
@@ -1010,7 +1294,9 @@ mod tests {
     #[test]
     fn test_event_log_crud() {
         let repo = make_repo();
-        let entry = repo.create_event_log("integrity_pass", None, "Check passed", Some("details")).unwrap();
+        let entry = repo
+            .create_event_log("integrity_pass", None, "Check passed", Some("details"))
+            .unwrap();
         assert_eq!(entry.event_type, "integrity_pass");
         assert_eq!(entry.message, "Check passed");
 
@@ -1024,11 +1310,15 @@ mod tests {
     #[test]
     fn test_schedule_config_crud() {
         let repo = make_repo();
-        let cfg = repo.create_schedule_config("sync", Some("0 2 * * *"), None, true).unwrap();
+        let cfg = repo
+            .create_schedule_config("sync", Some("0 2 * * *"), None, true)
+            .unwrap();
         assert_eq!(cfg.task_type, "sync");
         assert_eq!(cfg.cron_expr, Some("0 2 * * *".to_string()));
 
-        let updated = repo.update_schedule_config(cfg.id, None, Some(Some(3600)), Some(false)).unwrap();
+        let updated = repo
+            .update_schedule_config(cfg.id, None, Some(Some(3600)), Some(false))
+            .unwrap();
         assert!(!updated.enabled);
         assert_eq!(updated.interval_seconds, Some(3600));
 
@@ -1041,7 +1331,9 @@ mod tests {
     #[test]
     fn test_db_backup_config_crud() {
         let repo = make_repo();
-        let cfg = repo.create_db_backup_config("/mnt/backup/", Some("backup-1"), 3, true).unwrap();
+        let cfg = repo
+            .create_db_backup_config("/mnt/backup/", Some("backup-1"), 3, true)
+            .unwrap();
         assert_eq!(cfg.backup_path, "/mnt/backup/");
         assert_eq!(cfg.max_copies, 3);
 
@@ -1058,8 +1350,11 @@ mod tests {
     fn test_system_status() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", "h", 1, None).unwrap();
-        repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", "h", 1, None)
+            .unwrap();
+        repo.update_tracked_file_mirror_status(file.id, true)
+            .unwrap();
 
         let status = repo.get_system_status().unwrap();
         assert_eq!(status.files_tracked, 1);

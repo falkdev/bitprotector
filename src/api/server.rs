@@ -1,16 +1,16 @@
+use crate::api::auth::JwtSecret;
+use crate::api::models::ApiError;
+use crate::db::repository::{create_pool, Repository};
 use actix_cors::Cors;
 use actix_web::{
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     body::{BoxBody, EitherBody, MessageBody},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     middleware, web, App, Error, HttpResponse, HttpServer,
 };
 use futures_util::future::{ready, LocalBoxFuture, Ready};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use crate::api::auth::JwtSecret;
-use crate::api::models::ApiError;
-use crate::db::repository::{create_pool, Repository};
 
 // ---------------------------------------------------------------------------
 // Rate limiter
@@ -96,9 +96,9 @@ where
             let (req, _) = req.into_parts();
             let resp = HttpResponse::TooManyRequests()
                 .json(ApiError::new("too_many_requests", "Rate limit exceeded"));
-            return Box::pin(async move {
-                Ok(ServiceResponse::new(req, resp).map_into_right_body())
-            });
+            return Box::pin(
+                async move { Ok(ServiceResponse::new(req, resp).map_into_right_body()) },
+            );
         }
 
         let fut = self.service.call(req);
@@ -116,7 +116,8 @@ where
 /// Register all API routes under `/api/v1`.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     use crate::api::routes::{
-        auth, database, drives, files, folders, integrity, logs, scheduler, sync, virtual_paths,
+        auth, database, drives, files, folders, integrity, logs, scheduler, status, sync,
+        virtual_paths,
     };
     cfg.service(
         web::scope("/api/v1")
@@ -129,7 +130,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(sync::configure)
             .configure(logs::configure)
             .configure(database::configure)
-            .configure(scheduler::configure),
+            .configure(scheduler::configure)
+            .configure(status::configure),
     );
 }
 
@@ -138,10 +140,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(test))]
-fn load_tls_config(
-    cert_path: &str,
-    key_path: &str,
-) -> anyhow::Result<rustls::ServerConfig> {
+fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::ServerConfig> {
     use rustls_pemfile::{certs, private_key};
     use std::fs::File;
     use std::io::BufReader;
@@ -200,7 +199,10 @@ pub async fn run_server(
     #[cfg(not(test))]
     if let (Some(cert), Some(key)) = (tls_cert, tls_key) {
         let tls_config = load_tls_config(cert, key)?;
-        server.bind_rustls_0_23(&bind_addr, tls_config)?.run().await?;
+        server
+            .bind_rustls_0_23(&bind_addr, tls_config)?
+            .run()
+            .await?;
         return Ok(());
     }
     let _ = (tls_cert, tls_key);
@@ -216,10 +218,12 @@ pub async fn run_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, App};
+    use crate::api::auth::{issue_token, JwtSecret};
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use crate::api::auth::{issue_token, JwtSecret};
+    use actix_web::{test, App};
+    use std::fs;
+    use tempfile::TempDir;
 
     const SECRET: &[u8] = b"test_secret_key";
 
@@ -236,7 +240,8 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
         let resp = test::call_service(&app, req).await;
@@ -250,9 +255,12 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/nonexistent").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/nonexistent")
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
     }
@@ -264,7 +272,8 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get().uri("/api/v1/logs").to_request();
         let resp = test::call_service(&app, req).await;
@@ -278,9 +287,12 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/database/backups").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/database/backups")
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }
@@ -292,9 +304,12 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/auth/validate").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/auth/validate")
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);
     }
@@ -307,7 +322,8 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/api/v1/auth/validate")
@@ -324,16 +340,28 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
-        let req = test::TestRequest::get().uri("/api/v1/drives/999").to_request();
+        let req = test::TestRequest::get()
+            .uri("/api/v1/drives/999")
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
 
         let body: serde_json::Value = test::read_body_json(resp).await;
-        assert!(body["error"].is_object(), "Error response must have 'error' object");
-        assert!(body["error"]["code"].is_string(), "Error must have 'code' field");
-        assert!(body["error"]["message"].is_string(), "Error must have 'message' field");
+        assert!(
+            body["error"].is_object(),
+            "Error response must have 'error' object"
+        );
+        assert!(
+            body["error"]["code"].is_string(),
+            "Error must have 'code' field"
+        );
+        assert!(
+            body["error"]["message"].is_string(),
+            "Error must have 'message' field"
+        );
     }
 
     #[actix_rt::test]
@@ -349,7 +377,8 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/api/v1/drives")
@@ -378,7 +407,10 @@ mod tests {
         assert!(limiter.is_allowed("192.168.1.1"));
         assert!(limiter.is_allowed("192.168.1.1"));
         assert!(limiter.is_allowed("192.168.1.1"));
-        assert!(!limiter.is_allowed("192.168.1.1"), "Should block when over limit");
+        assert!(
+            !limiter.is_allowed("192.168.1.1"),
+            "Should block when over limit"
+        );
     }
 
     #[actix_rt::test]
@@ -388,7 +420,8 @@ mod tests {
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .configure(configure_routes),
-        ).await;
+        )
+        .await;
 
         // Unversioned path should 404
         let req = test::TestRequest::get().uri("/drives").to_request();
@@ -399,5 +432,101 @@ mod tests {
         let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_rt::test]
+    async fn test_status_route_returns_extended_drive_state_fields() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(make_repo()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/v1/status").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert!(body["degraded_pairs"].is_number());
+        assert!(body["active_secondary_pairs"].is_number());
+    }
+
+    #[actix_rt::test]
+    async fn test_drive_replacement_api_flow() {
+        let repo = make_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let replacement = TempDir::new().unwrap();
+        fs::write(primary.path().join("api.txt"), b"api").unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "pair",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let tracked = repo
+            .create_tracked_file(pair.id, "api.txt", "ignored", 3, None)
+            .unwrap();
+        let checksum = crate::core::checksum::checksum_bytes(b"api");
+        repo.update_tracked_file_checksum(tracked.id, &checksum, 3)
+            .unwrap();
+        fs::write(secondary.path().join("api.txt"), b"api").unwrap();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(repo.clone()))
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .configure(configure_routes),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/v1/drives/{}/replacement/mark", pair.id))
+            .set_json(serde_json::json!({ "role": "primary" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["primary_state"], "quiescing");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/v1/drives/{}/replacement/cancel", pair.id))
+            .set_json(serde_json::json!({ "role": "primary" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["primary_state"], "active");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/v1/drives/{}/replacement/mark", pair.id))
+            .set_json(serde_json::json!({ "role": "primary" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/v1/drives/{}/replacement/confirm", pair.id))
+            .set_json(serde_json::json!({ "role": "primary" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["active_role"], "secondary");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/v1/drives/{}/replacement/assign", pair.id))
+            .set_json(serde_json::json!({
+                "role": "primary",
+                "new_path": replacement.path().to_str().unwrap(),
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["drive_pair"]["primary_state"], "rebuilding");
+        assert_eq!(body["queued_rebuild_items"], 1);
     }
 }

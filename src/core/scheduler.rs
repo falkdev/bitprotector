@@ -1,7 +1,10 @@
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use std::thread;
+use crate::core::{drive, integrity, sync_queue};
 use crate::db::repository::Repository;
-use crate::core::{sync_queue, integrity};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
 
 /// Represents a scheduled task type.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,11 +30,27 @@ pub fn run_task(task: &TaskType, repo: &Repository) -> anyhow::Result<u32> {
             let pairs = repo.list_drive_pairs()?;
             let mut count = 0u32;
             for pair in pairs {
+                let pair = match drive::load_operational_pair(repo, pair.id) {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to load drive pair {} for integrity task: {}",
+                            pair.id,
+                            e
+                        );
+                        continue;
+                    }
+                };
+                if pair.is_quiescing() {
+                    continue;
+                }
                 let (files, _) = repo.list_tracked_files(Some(pair.id), None, None, 1, i64::MAX)?;
                 for file in files {
                     let result = integrity::check_file_integrity(&pair, &file)?;
                     if result.status != integrity::IntegrityStatus::Ok {
-                        if let Some(_item) = sync_queue::create_from_integrity_failure(repo, &file, &result)? {
+                        if let Some(_item) =
+                            sync_queue::create_from_integrity_failure(repo, &file, &result)?
+                        {
                             count += 1;
                         }
                     }
@@ -90,11 +109,11 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::fs;
+    use crate::core::checksum;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use crate::core::checksum;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn setup() -> (TempDir, TempDir, Repository) {
         let primary = TempDir::new().unwrap();
@@ -113,14 +132,25 @@ mod tests {
         let hash = checksum::checksum_bytes(content);
         fs::write(primary.path().join("sched.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "sched.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "sched.txt", &hash, content.len() as i64, None)
+            .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
         let processed = run_task(&TaskType::Sync, &repo).unwrap();
         assert_eq!(processed, 1, "Should process one pending item");
 
-        assert!(secondary.path().join("sched.txt").exists(), "File should be mirrored");
+        assert!(
+            secondary.path().join("sched.txt").exists(),
+            "File should be mirrored"
+        );
     }
 
     #[test]
@@ -131,8 +161,15 @@ mod tests {
         fs::write(primary.path().join("integ.txt"), content).unwrap();
         // No secondary file → mirror missing
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None)
+            .unwrap();
 
         let queued = run_task(&TaskType::IntegrityCheck, &repo).unwrap();
         assert_eq!(queued, 1, "Should enqueue one integrity failure");
@@ -148,8 +185,16 @@ mod tests {
         let hash = checksum::checksum_bytes(content);
         fs::write(primary.path().join("bg.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "bg.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "bg.txt", &hash, content.len() as i64, None)
+            .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
         let repo_arc = Arc::new(repo);
@@ -158,7 +203,10 @@ mod tests {
         scheduler.stop();
         handle.join().unwrap();
 
-        assert!(secondary.path().join("bg.txt").exists(), "Background scheduler should mirror the file");
+        assert!(
+            secondary.path().join("bg.txt").exists(),
+            "Background scheduler should mirror the file"
+        );
     }
 
     #[test]

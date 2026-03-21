@@ -1,6 +1,6 @@
+use crate::api::auth::{issue_token, JwtAuth, JwtSecret};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use crate::api::auth::{issue_token, JwtAuth, JwtSecret};
 
 #[derive(Deserialize)]
 struct LoginRequest {
@@ -23,10 +23,7 @@ struct ValidateResponse {
 
 const TOKEN_EXPIRES_SECS: i64 = 86400; // 24 hours
 
-async fn login(
-    secret: web::Data<JwtSecret>,
-    body: web::Json<LoginRequest>,
-) -> HttpResponse {
+async fn login(secret: web::Data<JwtSecret>, body: web::Json<LoginRequest>) -> HttpResponse {
     if !crate::api::auth::authenticate_user(&body.username, &body.password) {
         return HttpResponse::Unauthorized().body("Invalid credentials");
     }

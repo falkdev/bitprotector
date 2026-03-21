@@ -1,6 +1,6 @@
-use clap::{Args, Subcommand};
+use crate::core::{scheduler, sync_queue};
 use crate::db::repository::Repository;
-use crate::core::{sync_queue, scheduler};
+use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
 pub enum SyncCommand {
@@ -44,12 +44,18 @@ pub struct RunArgs {
 pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         SyncCommand::List(args) => {
-            let (items, total) = repo.list_sync_queue(args.status.as_deref(), args.page, args.per_page)?;
-            println!("{:<6} {:<10} {:<16} {:<12} {}", "ID", "File", "Action", "Status", "Created");
+            let (items, total) =
+                repo.list_sync_queue(args.status.as_deref(), args.page, args.per_page)?;
+            println!(
+                "{:<6} {:<10} {:<16} {:<12} {}",
+                "ID", "File", "Action", "Status", "Created"
+            );
             println!("{}", "-".repeat(70));
             for item in &items {
-                println!("{:<6} {:<10} {:<16} {:<12} {}",
-                    item.id, item.tracked_file_id, item.action, item.status, item.created_at);
+                println!(
+                    "{:<6} {:<10} {:<16} {:<12} {}",
+                    item.id, item.tracked_file_id, item.action, item.status, item.created_at
+                );
             }
             println!("Total: {}", total);
         }
@@ -69,7 +75,10 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
         }
         SyncCommand::Add(args) => {
             let item = repo.create_sync_queue_item(args.file_id, &args.action)?;
-            println!("Enqueued item #{}: {} for file #{}", item.id, item.action, item.tracked_file_id);
+            println!(
+                "Enqueued item #{}: {} for file #{}",
+                item.id, item.action, item.tracked_file_id
+            );
         }
         SyncCommand::Process => {
             let count = sync_queue::process_all_pending(repo)?;
@@ -79,10 +88,17 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             let task = match args.task.as_str() {
                 "sync" => scheduler::TaskType::Sync,
                 "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
-                other => anyhow::bail!("Unknown task type '{}'. Use 'sync' or 'integrity-check'", other),
+                other => anyhow::bail!(
+                    "Unknown task type '{}'. Use 'sync' or 'integrity-check'",
+                    other
+                ),
             };
             let count = scheduler::run_task(&task, repo)?;
-            println!("Task '{}' completed: {} items processed", task.as_str(), count);
+            println!(
+                "Task '{}' completed: {} items processed",
+                task.as_str(),
+                count
+            );
         }
     }
     Ok(())
@@ -93,8 +109,8 @@ mod tests {
     use super::*;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -102,20 +118,44 @@ mod tests {
         Repository::new(pool)
     }
 
-    fn setup_file(repo: &Repository, primary: &TempDir, secondary: &TempDir, name: &str) -> (crate::db::repository::DrivePair, crate::db::repository::TrackedFile) {
+    fn setup_file(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+        name: &str,
+    ) -> (
+        crate::db::repository::DrivePair,
+        crate::db::repository::TrackedFile,
+    ) {
         use crate::core::checksum;
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
         let content = b"sync test content";
         fs::write(primary.path().join(name), content).unwrap();
         let hash = checksum::checksum_bytes(content);
-        let file = repo.create_tracked_file(pair.id, name, &hash, content.len() as i64, None).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, name, &hash, content.len() as i64, None)
+            .unwrap();
         (pair, file)
     }
 
     #[test]
     fn test_sync_list_empty() {
         let repo = make_repo();
-        handle(SyncCommand::List(ListArgs { status: None, page: 1, per_page: 50 }), &repo).unwrap();
+        handle(
+            SyncCommand::List(ListArgs {
+                status: None,
+                page: 1,
+                per_page: 50,
+            }),
+            &repo,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -125,8 +165,23 @@ mod tests {
         let secondary = TempDir::new().unwrap();
         let (_, file) = setup_file(&repo, &primary, &secondary, "s.txt");
 
-        handle(SyncCommand::Add(AddArgs { file_id: file.id, action: "verify".to_string() }), &repo).unwrap();
-        handle(SyncCommand::List(ListArgs { status: Some("pending".to_string()), page: 1, per_page: 10 }), &repo).unwrap();
+        handle(
+            SyncCommand::Add(AddArgs {
+                file_id: file.id,
+                action: "verify".to_string(),
+            }),
+            &repo,
+        )
+        .unwrap();
+        handle(
+            SyncCommand::List(ListArgs {
+                status: Some("pending".to_string()),
+                page: 1,
+                per_page: 10,
+            }),
+            &repo,
+        )
+        .unwrap();
 
         let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
         assert_eq!(items.len(), 1);
@@ -160,15 +215,28 @@ mod tests {
         let repo = make_repo();
         let primary = TempDir::new().unwrap();
         let secondary = TempDir::new().unwrap();
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
         let content = b"integrity content";
         fs::write(primary.path().join("i.txt"), content).unwrap();
         use crate::core::checksum;
         let hash = checksum::checksum_bytes(content);
-        repo.create_tracked_file(pair.id, "i.txt", &hash, content.len() as i64, None).unwrap();
+        repo.create_tracked_file(pair.id, "i.txt", &hash, content.len() as i64, None)
+            .unwrap();
 
         // No mirror exists → integrity check queues a restore_mirror action
-        handle(SyncCommand::Run(RunArgs { task: "integrity-check".to_string() }), &repo).unwrap();
+        handle(
+            SyncCommand::Run(RunArgs {
+                task: "integrity-check".to_string(),
+            }),
+            &repo,
+        )
+        .unwrap();
 
         let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
         assert_eq!(items.len(), 1);

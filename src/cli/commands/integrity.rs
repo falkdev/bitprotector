@@ -1,6 +1,7 @@
-use clap::{Args, Subcommand};
-use crate::db::repository::Repository;
+use crate::core::drive;
 use crate::core::integrity::{self, IntegrityStatus};
+use crate::db::repository::Repository;
+use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
 pub enum IntegrityCommand {
@@ -44,15 +45,22 @@ fn status_label(status: &IntegrityStatus) -> &'static str {
         IntegrityStatus::BothCorrupted => "BOTH_CORRUPTED",
         IntegrityStatus::MirrorMissing => "MIRROR_MISSING",
         IntegrityStatus::MasterMissing => "MASTER_MISSING",
+        IntegrityStatus::PrimaryDriveUnavailable => "PRIMARY_DRIVE_UNAVAILABLE",
+        IntegrityStatus::SecondaryDriveUnavailable => "SECONDARY_DRIVE_UNAVAILABLE",
     }
 }
 
 fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(file_id)?;
-    let pair = repo.get_drive_pair(file.drive_pair_id)?;
+    let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
     let result = integrity::check_file_integrity(&pair, &file)?;
 
-    println!("File #{}: {} — {}", file.id, file.relative_path, status_label(&result.status));
+    println!(
+        "File #{}: {} — {}",
+        file.id,
+        file.relative_path,
+        status_label(&result.status)
+    );
 
     if result.status == IntegrityStatus::Ok {
         repo.update_tracked_file_last_verified(file_id)?;
@@ -66,7 +74,9 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
             println!("  Recovery: successful");
             return Ok(());
         } else {
-            println!("  Recovery: manual action required (both copies corrupted or master missing)");
+            println!(
+                "  Recovery: manual action required (both copies corrupted or master missing)"
+            );
         }
     }
 
@@ -88,7 +98,10 @@ fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow:
         }
 
         for file in &files {
-            let pair = repo.get_drive_pair(file.drive_pair_id)?;
+            let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
+            if pair.is_quiescing() {
+                continue;
+            }
             let result = integrity::check_file_integrity(&pair, file)?;
 
             match result.status {
@@ -97,7 +110,12 @@ fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow:
                     repo.update_tracked_file_last_verified(file.id)?;
                 }
                 ref status => {
-                    println!("  ISSUE #{}: {} — {}", file.id, file.relative_path, status_label(status));
+                    println!(
+                        "  ISSUE #{}: {} — {}",
+                        file.id,
+                        file.relative_path,
+                        status_label(status)
+                    );
                     if recover {
                         match integrity::attempt_recovery(&pair, file, &result)? {
                             true => {
@@ -121,8 +139,10 @@ fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow:
         page += 1;
     }
 
-    println!("Integrity check complete: {} OK, {} recovered, {} failed, {} require manual action",
-             ok, recovered_count, failed, manual);
+    println!(
+        "Integrity check complete: {} OK, {} recovered, {} failed, {} require manual action",
+        ok, recovered_count, failed, manual
+    );
     if failed > 0 || manual > 0 {
         anyhow::bail!("{} files failed integrity check", failed + manual);
     }
@@ -132,11 +152,11 @@ fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::tracker;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use crate::core::{tracker};
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -144,8 +164,17 @@ mod tests {
         Repository::new(pool)
     }
 
-    fn setup(repo: &Repository, primary: &TempDir, secondary: &TempDir) -> crate::db::repository::DrivePair {
-        repo.create_drive_pair("t", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap()
+    fn setup(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+    ) -> crate::db::repository::DrivePair {
+        repo.create_drive_pair(
+            "t",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -160,7 +189,14 @@ mod tests {
         fs::write(secondary.path().join("f.txt"), content).unwrap();
         let tracked = tracker::track_file(&repo, &pair, "f.txt", None).unwrap();
 
-        handle(IntegrityCommand::Check(CheckArgs { file_id: tracked.id, recover: false }), &repo).unwrap();
+        handle(
+            IntegrityCommand::Check(CheckArgs {
+                file_id: tracked.id,
+                recover: false,
+            }),
+            &repo,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -173,7 +209,13 @@ mod tests {
         fs::write(primary.path().join("nm.txt"), b"data").unwrap();
         let tracked = tracker::track_file(&repo, &pair, "nm.txt", None).unwrap();
 
-        let result = handle(IntegrityCommand::Check(CheckArgs { file_id: tracked.id, recover: false }), &repo);
+        let result = handle(
+            IntegrityCommand::Check(CheckArgs {
+                file_id: tracked.id,
+                recover: false,
+            }),
+            &repo,
+        );
         assert!(result.is_err());
     }
 
@@ -191,7 +233,14 @@ mod tests {
         // Corrupt the mirror
         fs::write(secondary.path().join("g.txt"), b"corrupted").unwrap();
 
-        handle(IntegrityCommand::Check(CheckArgs { file_id: tracked.id, recover: true }), &repo).unwrap();
+        handle(
+            IntegrityCommand::Check(CheckArgs {
+                file_id: tracked.id,
+                recover: true,
+            }),
+            &repo,
+        )
+        .unwrap();
 
         // Mirror should be restored
         let restored = fs::read(secondary.path().join("g.txt")).unwrap();
@@ -211,7 +260,14 @@ mod tests {
             tracker::track_file(&repo, &pair, name, None).unwrap();
         }
 
-        handle(IntegrityCommand::CheckAll(CheckAllArgs { drive_id: Some(pair.id), recover: false }), &repo).unwrap();
+        handle(
+            IntegrityCommand::CheckAll(CheckAllArgs {
+                drive_id: Some(pair.id),
+                recover: false,
+            }),
+            &repo,
+        )
+        .unwrap();
     }
 
     #[test]

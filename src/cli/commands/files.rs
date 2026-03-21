@@ -1,6 +1,6 @@
-use clap::{Args, Subcommand};
+use crate::core::{drive, mirror, tracker};
 use crate::db::repository::Repository;
-use crate::core::{tracker, mirror};
+use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
 pub enum FilesCommand {
@@ -61,17 +61,26 @@ pub struct ListArgs {
 pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         FilesCommand::Track(args) => {
-            let pair = repo.get_drive_pair(args.drive_pair_id)?;
-            let tracked = tracker::track_file(repo, &pair, &args.relative_path, args.virtual_path.as_deref())?;
+            let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
+            let tracked = tracker::track_file(
+                repo,
+                &pair,
+                &args.relative_path,
+                args.virtual_path.as_deref(),
+            )?;
             println!("Tracked file #{}: {}", tracked.id, tracked.relative_path);
             println!("  Checksum:  {}", tracked.checksum);
             println!("  Size:      {} bytes", tracked.file_size);
 
             if args.mirror {
-                let pair = repo.get_drive_pair(args.drive_pair_id)?;
-                mirror::mirror_file(&pair, &tracked.relative_path)?;
-                repo.update_tracked_file_mirror_status(tracked.id, true)?;
-                println!("  Mirrored:  yes");
+                let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
+                if pair.standby_accepts_sync() {
+                    mirror::mirror_file(&pair, &tracked.relative_path)?;
+                    repo.update_tracked_file_mirror_status(tracked.id, true)?;
+                    println!("  Mirrored:  yes");
+                } else {
+                    println!("  Mirrored:  no (standby drive unavailable)");
+                }
             }
         }
         FilesCommand::List(args) => {
@@ -82,8 +91,16 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 args.page,
                 args.per_page,
             )?;
-            println!("Showing {} of {} tracked files (page {})", files.len(), total, args.page);
-            println!("{:<6} {:<8} {:<40} {:<8} {}", "ID", "Drive", "Path", "Mirrored", "Checksum");
+            println!(
+                "Showing {} of {} tracked files (page {})",
+                files.len(),
+                total,
+                args.page
+            );
+            println!(
+                "{:<6} {:<8} {:<40} {:<8} {}",
+                "ID", "Drive", "Path", "Mirrored", "Checksum"
+            );
             println!("{}", "-".repeat(90));
             for f in files {
                 println!(
@@ -103,14 +120,23 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Path:          {}", file.relative_path);
             println!("  Checksum:      {}", file.checksum);
             println!("  Size:          {} bytes", file.file_size);
-            println!("  Virtual Path:  {}", file.virtual_path.as_deref().unwrap_or("-"));
-            println!("  Mirrored:      {}", if file.is_mirrored { "yes" } else { "no" });
-            println!("  Last Verified: {}", file.last_verified.as_deref().unwrap_or("never"));
+            println!(
+                "  Virtual Path:  {}",
+                file.virtual_path.as_deref().unwrap_or("-")
+            );
+            println!(
+                "  Mirrored:      {}",
+                if file.is_mirrored { "yes" } else { "no" }
+            );
+            println!(
+                "  Last Verified: {}",
+                file.last_verified.as_deref().unwrap_or("never")
+            );
             println!("  Created:       {}", file.created_at);
         }
         FilesCommand::Mirror { id } => {
             let file = repo.get_tracked_file(id)?;
-            let pair = repo.get_drive_pair(file.drive_pair_id)?;
+            let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
             mirror::mirror_file(&pair, &file.relative_path)?;
             repo.update_tracked_file_mirror_status(id, true)?;
             println!("Mirrored file #{}: {}", id, file.relative_path);
@@ -128,8 +154,8 @@ mod tests {
     use super::*;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -137,12 +163,17 @@ mod tests {
         Repository::new(pool)
     }
 
-    fn setup_pair(repo: &Repository, primary: &TempDir, secondary: &TempDir) -> crate::db::repository::DrivePair {
+    fn setup_pair(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+    ) -> crate::db::repository::DrivePair {
         repo.create_drive_pair(
             "test",
             primary.path().to_str().unwrap(),
             secondary.path().to_str().unwrap(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     #[test]
@@ -161,7 +192,8 @@ mod tests {
                 mirror: false,
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         let (files, total) = repo.list_tracked_files(None, None, None, 1, 50).unwrap();
         assert_eq!(total, 1);
@@ -184,7 +216,8 @@ mod tests {
                 mirror: true,
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(secondary.path().join("b.txt").exists());
         let (files, _) = repo.list_tracked_files(None, None, None, 1, 50).unwrap();
@@ -199,10 +232,13 @@ mod tests {
         let pair = setup_pair(&repo, &primary, &secondary);
 
         fs::write(primary.path().join("c.txt"), b"content").unwrap();
-        let tracked = repo.create_tracked_file(pair.id, "c.txt", "hash", 7, None).unwrap();
+        let tracked = repo
+            .create_tracked_file(pair.id, "c.txt", "hash", 7, None)
+            .unwrap();
         // update checksum properly
         let checksum = crate::core::checksum::checksum_bytes(b"content");
-        repo.update_tracked_file_checksum(tracked.id, &checksum, 7).unwrap();
+        repo.update_tracked_file_checksum(tracked.id, &checksum, 7)
+            .unwrap();
 
         handle(FilesCommand::Mirror { id: tracked.id }, &repo).unwrap();
 
@@ -215,7 +251,9 @@ mod tests {
     fn test_untrack_file() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", "hash", 1, None).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", "hash", 1, None)
+            .unwrap();
         handle(FilesCommand::Untrack { id: file.id }, &repo).unwrap();
         assert!(repo.get_tracked_file(file.id).is_err());
     }
@@ -238,12 +276,13 @@ mod tests {
 
         // Mirror
         mirror::mirror_file(&pair, "rt.txt").unwrap();
-        repo.update_tracked_file_mirror_status(tracked.id, true).unwrap();
+        repo.update_tracked_file_mirror_status(tracked.id, true)
+            .unwrap();
 
         // Verify mirror is byte-identical
-        let mirror_checksum = checksum::checksum_file(
-            &std::path::PathBuf::from(&pair.secondary_path).join("rt.txt")
-        ).unwrap();
+        let mirror_checksum =
+            checksum::checksum_file(&std::path::PathBuf::from(&pair.secondary_path).join("rt.txt"))
+                .unwrap();
         assert_eq!(mirror_checksum, tracked.checksum);
 
         // Integrity check passes

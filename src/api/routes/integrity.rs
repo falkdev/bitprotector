@@ -1,8 +1,9 @@
+use crate::api::models::ApiError;
+use crate::core::drive;
+use crate::core::integrity::{self, IntegrityStatus};
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
-use crate::db::repository::Repository;
-use crate::core::integrity::{self, IntegrityStatus};
-use crate::api::models::ApiError;
 
 #[derive(Debug, Deserialize)]
 pub struct CheckAllQuery {
@@ -18,6 +19,8 @@ fn status_str(status: &IntegrityStatus) -> &'static str {
         IntegrityStatus::BothCorrupted => "both_corrupted",
         IntegrityStatus::MirrorMissing => "mirror_missing",
         IntegrityStatus::MasterMissing => "master_missing",
+        IntegrityStatus::PrimaryDriveUnavailable => "primary_drive_unavailable",
+        IntegrityStatus::SecondaryDriveUnavailable => "secondary_drive_unavailable",
     }
 }
 
@@ -32,18 +35,26 @@ pub async fn check_file(
 
     let file = match repo.get_tracked_file(id) {
         Ok(f) => f,
-        Err(_) => return HttpResponse::NotFound()
-            .json(ApiError::new("RESOURCE_NOT_FOUND", &format!("Tracked file {} not found", id))),
+        Err(_) => {
+            return HttpResponse::NotFound().json(ApiError::new(
+                "RESOURCE_NOT_FOUND",
+                &format!("Tracked file {} not found", id),
+            ))
+        }
     };
-    let pair = match repo.get_drive_pair(file.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, file.drive_pair_id) {
         Ok(p) => p,
-        Err(e) => return HttpResponse::InternalServerError()
-            .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+        }
     };
     let result = match integrity::check_file_integrity(&pair, &file) {
         Ok(r) => r,
-        Err(e) => return HttpResponse::InternalServerError()
-            .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+        }
     };
 
     let mut recovered = false;
@@ -51,10 +62,14 @@ pub async fn check_file(
         match integrity::attempt_recovery(&pair, &file, &result) {
             Ok(r) => {
                 recovered = r;
-                if r { let _ = repo.update_tracked_file_last_verified(id); }
+                if r {
+                    let _ = repo.update_tracked_file_last_verified(id);
+                }
             }
-            Err(e) => return HttpResponse::InternalServerError()
-                .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+            }
         }
     } else if result.status == IntegrityStatus::Ok {
         let _ = repo.update_tracked_file_last_verified(id);
@@ -81,16 +96,23 @@ pub async fn check_all(
     loop {
         let (files, total) = match repo.list_tracked_files(query.drive_id, None, None, page, 100) {
             Ok(r) => r,
-            Err(e) => return HttpResponse::InternalServerError()
-                .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+            }
         };
-        if files.is_empty() { break; }
+        if files.is_empty() {
+            break;
+        }
 
         for file in &files {
-            let pair = match repo.get_drive_pair(file.drive_pair_id) {
+            let pair = match drive::load_operational_pair(&repo, file.drive_pair_id) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
+            if pair.is_quiescing() {
+                continue;
+            }
             let result = match integrity::check_file_integrity(&pair, file) {
                 Ok(r) => r,
                 Err(_) => continue,
@@ -98,7 +120,9 @@ pub async fn check_all(
             let mut recovered = false;
             if recover && result.status != IntegrityStatus::Ok {
                 recovered = integrity::attempt_recovery(&pair, file, &result).unwrap_or(false);
-                if recovered { let _ = repo.update_tracked_file_last_verified(file.id); }
+                if recovered {
+                    let _ = repo.update_tracked_file_last_verified(file.id);
+                }
             } else if result.status == IntegrityStatus::Ok {
                 let _ = repo.update_tracked_file_last_verified(file.id);
             }
@@ -109,7 +133,9 @@ pub async fn check_all(
             }));
         }
 
-        if (page * 100) >= total { break; }
+        if (page * 100) >= total {
+            break;
+        }
         page += 1;
     }
 

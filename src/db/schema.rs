@@ -1,5 +1,16 @@
 use rusqlite::{Connection, Result};
 
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for col in columns {
+        if col? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Create all database tables and apply migrations.
 pub fn initialize_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -13,10 +24,35 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             name            TEXT NOT NULL UNIQUE,
             primary_path    TEXT NOT NULL,
             secondary_path  TEXT NOT NULL,
+            primary_state   TEXT NOT NULL DEFAULT 'active' CHECK(primary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
+            secondary_state TEXT NOT NULL DEFAULT 'active' CHECK(secondary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
+            active_role     TEXT NOT NULL DEFAULT 'primary' CHECK(active_role IN ('primary', 'secondary')),
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )?;
+
+    if !column_exists(conn, "drive_pairs", "primary_state")? {
+        conn.execute_batch(
+            "ALTER TABLE drive_pairs
+             ADD COLUMN primary_state TEXT NOT NULL DEFAULT 'active'
+             CHECK(primary_state IN ('active', 'quiescing', 'failed', 'rebuilding'));",
+        )?;
+    }
+    if !column_exists(conn, "drive_pairs", "secondary_state")? {
+        conn.execute_batch(
+            "ALTER TABLE drive_pairs
+             ADD COLUMN secondary_state TEXT NOT NULL DEFAULT 'active'
+             CHECK(secondary_state IN ('active', 'quiescing', 'failed', 'rebuilding'));",
+        )?;
+    }
+    if !column_exists(conn, "drive_pairs", "active_role")? {
+        conn.execute_batch(
+            "ALTER TABLE drive_pairs
+             ADD COLUMN active_role TEXT NOT NULL DEFAULT 'primary'
+             CHECK(active_role IN ('primary', 'secondary'));",
+        )?;
+    }
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracked_files (
@@ -219,6 +255,35 @@ mod tests {
             "INSERT INTO sync_queue (tracked_file_id, action) VALUES (?1, 'invalid_action')",
             rusqlite::params![file_id],
         );
-        assert!(result.is_err(), "Invalid action check constraint should fail");
+        assert!(
+            result.is_err(),
+            "Invalid action check constraint should fail"
+        );
+    }
+
+    #[test]
+    fn test_drive_pair_state_columns_migrate_legacy_schema() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE drive_pairs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL UNIQUE,
+                primary_path    TEXT NOT NULL,
+                secondary_path  TEXT NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .unwrap();
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        for column in ["primary_state", "secondary_state", "active_role"] {
+            assert!(
+                column_exists(&conn, "drive_pairs", column).unwrap(),
+                "Column '{}' should be added during migration",
+                column
+            );
+        }
     }
 }

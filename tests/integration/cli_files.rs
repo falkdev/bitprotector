@@ -1,7 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use tempfile::{NamedTempFile, TempDir};
 use std::fs;
+use tempfile::{NamedTempFile, TempDir};
 
 fn cmd(db: &str) -> Command {
     let mut c = Command::cargo_bin("bitprotector").unwrap();
@@ -17,7 +17,9 @@ fn temp_db() -> NamedTempFile {
 fn create_pair(db: &str, primary: &TempDir, secondary: &TempDir) {
     cmd(db)
         .args([
-            "drives", "add", "--no-validate",
+            "drives",
+            "add",
+            "--no-validate",
             "test_pair",
             primary.path().to_str().unwrap(),
             secondary.path().to_str().unwrap(),

@@ -1,6 +1,7 @@
-use clap::{Args, Subcommand};
-use crate::db::repository::Repository;
+use crate::core::drive;
 use crate::core::mirror::validate_drive_pair;
+use crate::db::repository::Repository;
+use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Subcommand, Debug)]
 pub enum DrivesCommand {
@@ -20,6 +21,38 @@ pub enum DrivesCommand {
         /// Drive pair ID
         id: i64,
     },
+    /// Manage drive replacement and failover workflow
+    Replace {
+        #[command(subcommand)]
+        action: ReplaceCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReplaceCommand {
+    /// Start a planned failover by marking a drive as quiescing
+    Mark(ReplaceRoleArgs),
+    /// Confirm the quiesced drive is now failed and switch active role if needed
+    Confirm(ReplaceRoleArgs),
+    /// Cancel a quiescing replacement workflow
+    Cancel(ReplaceRoleArgs),
+    /// Assign a new path to a failed drive and queue rebuild work
+    Assign(AssignArgs),
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum DriveRoleArg {
+    Primary,
+    Secondary,
+}
+
+impl From<DriveRoleArg> for drive::DriveRole {
+    fn from(value: DriveRoleArg) -> Self {
+        match value {
+            DriveRoleArg::Primary => drive::DriveRole::Primary,
+            DriveRoleArg::Secondary => drive::DriveRole::Secondary,
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -50,6 +83,41 @@ pub struct UpdateArgs {
     pub secondary: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct ReplaceRoleArgs {
+    /// Drive pair ID
+    pub id: i64,
+    /// Which drive slot to act on
+    #[arg(long, value_enum)]
+    pub role: DriveRoleArg,
+}
+
+#[derive(Args, Debug)]
+pub struct AssignArgs {
+    /// Drive pair ID
+    pub id: i64,
+    /// Which failed drive slot to replace
+    #[arg(long, value_enum)]
+    pub role: DriveRoleArg,
+    /// New mounted path for the replacement drive
+    pub new_path: String,
+    /// Skip path validation
+    #[arg(long)]
+    pub no_validate: bool,
+}
+
+fn print_pair(pair: &crate::db::repository::DrivePair) {
+    println!("Drive Pair #{}", pair.id);
+    println!("  Name:            {}", pair.name);
+    println!("  Primary:         {}", pair.primary_path);
+    println!("  Secondary:       {}", pair.secondary_path);
+    println!("  Primary State:   {}", pair.primary_state);
+    println!("  Secondary State: {}", pair.secondary_state);
+    println!("  Active Role:     {}", pair.active_role);
+    println!("  Created:         {}", pair.created_at);
+    println!("  Updated:         {}", pair.updated_at);
+}
+
 pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         DrivesCommand::Add(args) => {
@@ -66,21 +134,34 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
             if pairs.is_empty() {
                 println!("No drive pairs registered.");
             } else {
-                println!("{:<6} {:<20} {:<40} {}", "ID", "Name", "Primary", "Secondary");
-                println!("{}", "-".repeat(100));
+                println!(
+                    "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} {}",
+                    "ID",
+                    "Name",
+                    "Active",
+                    "Primary",
+                    "Secondary",
+                    "Primary Path",
+                    "Secondary Path"
+                );
+                println!("{}", "-".repeat(136));
                 for p in pairs {
-                    println!("{:<6} {:<20} {:<40} {}", p.id, p.name, p.primary_path, p.secondary_path);
+                    println!(
+                        "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} {}",
+                        p.id,
+                        p.name,
+                        p.active_role,
+                        p.primary_state,
+                        p.secondary_state,
+                        p.primary_path,
+                        p.secondary_path
+                    );
                 }
             }
         }
         DrivesCommand::Show { id } => {
             let pair = repo.get_drive_pair(id)?;
-            println!("Drive Pair #{}", pair.id);
-            println!("  Name:      {}", pair.name);
-            println!("  Primary:   {}", pair.primary_path);
-            println!("  Secondary: {}", pair.secondary_path);
-            println!("  Created:   {}", pair.created_at);
-            println!("  Updated:   {}", pair.updated_at);
+            print_pair(&pair);
         }
         DrivesCommand::Update(args) => {
             let pair = repo.update_drive_pair(
@@ -95,6 +176,56 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
             repo.delete_drive_pair(id)?;
             println!("Removed drive pair #{}", id);
         }
+        DrivesCommand::Replace { action } => match action {
+            ReplaceCommand::Mark(args) => {
+                let role = drive::DriveRole::from(args.role);
+                let pair = drive::mark_drive_quiescing(repo, args.id, role)?;
+                println!(
+                    "Drive pair #{} marked quiescing for {} replacement",
+                    pair.id,
+                    role.as_str()
+                );
+                print_pair(&pair);
+            }
+            ReplaceCommand::Confirm(args) => {
+                let role = drive::DriveRole::from(args.role);
+                let pair = drive::confirm_drive_failure(repo, args.id, role)?;
+                println!(
+                    "Drive pair #{} confirmed failed on {}",
+                    pair.id,
+                    role.as_str()
+                );
+                print_pair(&pair);
+            }
+            ReplaceCommand::Cancel(args) => {
+                let pair = drive::cancel_drive_quiescing(repo, args.id, args.role.into())?;
+                println!("Cancelled replacement workflow for drive pair #{}", pair.id);
+                print_pair(&pair);
+            }
+            ReplaceCommand::Assign(args) => {
+                let role = drive::DriveRole::from(args.role);
+                let pair = repo.get_drive_pair(args.id)?;
+                if !args.no_validate {
+                    match role {
+                        drive::DriveRole::Primary => {
+                            validate_drive_pair(&args.new_path, &pair.secondary_path)?
+                        }
+                        drive::DriveRole::Secondary => {
+                            validate_drive_pair(&pair.primary_path, &args.new_path)?
+                        }
+                    }
+                }
+                let (pair, queued) =
+                    drive::assign_replacement_drive(repo, args.id, role, &args.new_path)?;
+                println!(
+                    "Assigned replacement {} drive for pair #{} and queued {} rebuild item(s)",
+                    role.as_str(),
+                    pair.id,
+                    queued
+                );
+                print_pair(&pair);
+            }
+        },
     }
     Ok(())
 }

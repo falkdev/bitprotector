@@ -5,6 +5,8 @@ use crate::db::schema::initialize_schema;
 #[derive(Debug, Default)]
 pub struct StatusReport {
     pub drive_pairs: usize,
+    pub degraded_pairs: usize,
+    pub active_secondary_pairs: usize,
     pub tracked_files: usize,
     pub pending_sync: usize,
     pub recent_integrity_failures: usize,
@@ -13,7 +15,13 @@ pub struct StatusReport {
 
 /// Gather system status from the repository (fast DB queries only).
 pub fn gather_status(repo: &Repository) -> anyhow::Result<StatusReport> {
-    let drive_pairs = repo.list_drive_pairs()?.len();
+    let pairs = repo.list_drive_pairs()?;
+    let drive_pairs = pairs.len();
+    let degraded_pairs = pairs.iter().filter(|pair| pair.is_degraded()).count();
+    let active_secondary_pairs = pairs
+        .iter()
+        .filter(|pair| pair.active_role == "secondary")
+        .count();
 
     // Use pagination count return value to get total tracked files
     let (_, total_files) = repo.list_tracked_files(None, None, None, 1, 1)?;
@@ -28,14 +36,8 @@ pub fn gather_status(repo: &Repository) -> anyhow::Result<StatusReport> {
         .checked_sub_signed(chrono::Duration::hours(24))
         .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_default();
-    let (_, total_failures) = repo.list_event_logs(
-        Some("integrity_fail"),
-        None,
-        Some(&since),
-        None,
-        1,
-        1,
-    )?;
+    let (_, total_failures) =
+        repo.list_event_logs(Some("integrity_fail"), None, Some(&since), None, 1, 1)?;
     let recent_integrity_failures = total_failures as usize;
 
     // Get most recent successful backup time
@@ -48,6 +50,8 @@ pub fn gather_status(repo: &Repository) -> anyhow::Result<StatusReport> {
 
     Ok(StatusReport {
         drive_pairs,
+        degraded_pairs,
+        active_secondary_pairs,
         tracked_files,
         pending_sync,
         recent_integrity_failures,
@@ -63,9 +67,20 @@ pub fn format_status(report: &StatusReport) -> String {
         "│  Drives: {}   Files: {}",
         report.drive_pairs, report.tracked_files,
     ));
+    if report.degraded_pairs > 0 {
+        lines.push(format!(
+            "│  ⚠  {} degraded pair(s), {} running from secondary",
+            report.degraded_pairs, report.active_secondary_pairs
+        ));
+    } else {
+        lines.push("│  ✓  All drive pairs fully mirrored".to_string());
+    }
 
     if report.pending_sync > 0 {
-        lines.push(format!("│  ⚠  {} file(s) pending sync", report.pending_sync));
+        lines.push(format!(
+            "│  ⚠  {} file(s) pending sync",
+            report.pending_sync
+        ));
     } else {
         lines.push("│  ✓  Sync queue empty".to_string());
     }
@@ -128,6 +143,8 @@ mod tests {
         let repo = make_repo();
         let report = gather_status(&repo).unwrap();
         assert_eq!(report.drive_pairs, 0);
+        assert_eq!(report.degraded_pairs, 0);
+        assert_eq!(report.active_secondary_pairs, 0);
         assert_eq!(report.tracked_files, 0);
         assert_eq!(report.pending_sync, 0);
         assert_eq!(report.recent_integrity_failures, 0);
@@ -138,6 +155,8 @@ mod tests {
     fn test_format_status_all_ok() {
         let report = StatusReport {
             drive_pairs: 2,
+            degraded_pairs: 0,
+            active_secondary_pairs: 0,
             tracked_files: 50,
             pending_sync: 0,
             recent_integrity_failures: 0,
@@ -146,6 +165,7 @@ mod tests {
         let output = format_status(&report);
         assert!(output.contains("Drives: 2"));
         assert!(output.contains("Files: 50"));
+        assert!(output.contains("All drive pairs fully mirrored"));
         assert!(output.contains("✓  Sync queue empty"));
         assert!(output.contains("✓  No integrity failures"));
         assert!(output.contains("2024-01-15"));
@@ -155,12 +175,15 @@ mod tests {
     fn test_format_status_with_issues() {
         let report = StatusReport {
             drive_pairs: 1,
+            degraded_pairs: 1,
+            active_secondary_pairs: 1,
             tracked_files: 10,
             pending_sync: 3,
             recent_integrity_failures: 2,
             last_backup: None,
         };
         let output = format_status(&report);
+        assert!(output.contains("1 degraded pair(s), 1 running from secondary"));
         assert!(output.contains("⚠  3 file(s) pending sync"));
         assert!(output.contains("✗  2 integrity failure(s)"));
         assert!(output.contains("No backups configured"));
@@ -170,8 +193,10 @@ mod tests {
     fn test_status_with_data() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("test", "/tmp/p", "/tmp/s").unwrap();
-        repo.create_tracked_file(pair.id, "/p/a.txt", "abc", 100, None).unwrap();
-        repo.create_tracked_file(pair.id, "/p/b.txt", "def", 200, None).unwrap();
+        repo.create_tracked_file(pair.id, "/p/a.txt", "abc", 100, None)
+            .unwrap();
+        repo.create_tracked_file(pair.id, "/p/b.txt", "def", 200, None)
+            .unwrap();
 
         let report = gather_status(&repo).unwrap();
         assert_eq!(report.drive_pairs, 1);
@@ -183,7 +208,9 @@ mod tests {
     fn test_status_with_pending_sync() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("test", "/tmp/p", "/tmp/s").unwrap();
-        let file = repo.create_tracked_file(pair.id, "a.txt", "abc", 100, None).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "a.txt", "abc", 100, None)
+            .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
         let report = gather_status(&repo).unwrap();
@@ -194,8 +221,16 @@ mod tests {
     fn test_status_with_integrity_failure() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("test", "/tmp/p", "/tmp/s").unwrap();
-        let file = repo.create_tracked_file(pair.id, "a.txt", "abc", 100, None).unwrap();
-        crate::logging::event_logger::log_integrity_fail(&repo, file.id, "a.txt", "MirrorCorrupted").unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "a.txt", "abc", 100, None)
+            .unwrap();
+        crate::logging::event_logger::log_integrity_fail(
+            &repo,
+            file.id,
+            "a.txt",
+            "MirrorCorrupted",
+        )
+        .unwrap();
 
         let report = gather_status(&repo).unwrap();
         assert_eq!(report.recent_integrity_failures, 1);

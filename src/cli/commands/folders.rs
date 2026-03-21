@@ -1,6 +1,6 @@
-use clap::{Args, Subcommand};
+use crate::core::{change_detection, drive, tracker};
 use crate::db::repository::Repository;
-use crate::core::{tracker, change_detection};
+use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
 pub enum FoldersCommand {
@@ -47,7 +47,7 @@ pub struct WatchArgs {
 pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         FoldersCommand::Add(args) => {
-            let pair = repo.get_drive_pair(args.drive_pair_id)?;
+            let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
             let folder = tracker::track_folder(
                 repo,
                 &pair,
@@ -55,14 +55,20 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 args.auto_virtual_path,
                 args.virtual_base.as_deref(),
             )?;
-            println!("Registered folder #{}: {} (drive pair #{})", folder.id, folder.folder_path, folder.drive_pair_id);
+            println!(
+                "Registered folder #{}: {} (drive pair #{})",
+                folder.id, folder.folder_path, folder.drive_pair_id
+            );
         }
         FoldersCommand::List => {
             let folders = repo.list_tracked_folders()?;
             if folders.is_empty() {
                 println!("No tracked folders.");
             } else {
-                println!("{:<6} {:<8} {:<40} {:<14} {}", "ID", "Drive", "Folder Path", "Auto VP", "VP Base");
+                println!(
+                    "{:<6} {:<8} {:<40} {:<14} {}",
+                    "ID", "Drive", "Folder Path", "Auto VP", "VP Base"
+                );
                 println!("{}", "-".repeat(80));
                 for f in folders {
                     println!(
@@ -82,7 +88,10 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Drive Pair:        #{}", folder.drive_pair_id);
             println!("  Path:              {}", folder.folder_path);
             println!("  Auto Virtual Path: {}", folder.auto_virtual_path);
-            println!("  VP Base:           {}", folder.default_virtual_base.as_deref().unwrap_or("(none)"));
+            println!(
+                "  VP Base:           {}",
+                folder.default_virtual_base.as_deref().unwrap_or("(none)")
+            );
             println!("  Created:           {}", folder.created_at);
         }
         FoldersCommand::Remove { id } => {
@@ -91,7 +100,7 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
         }
         FoldersCommand::Scan(args) => {
             let folder = repo.get_tracked_folder(args.id)?;
-            let pair = repo.get_drive_pair(folder.drive_pair_id)?;
+            let pair = drive::load_operational_pair(repo, folder.drive_pair_id)?;
 
             // Auto-track new files
             let new_files = tracker::auto_track_folder_files(repo, &pair, &folder)?;
@@ -101,10 +110,13 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             }
 
             // Detect changes in existing files
-            let changes = change_detection::scan_all_changes(repo, &pair)?;
+            let changes = change_detection::scan_and_record_changes(repo, &pair)?;
             let folder_changes: Vec<_> = changes
                 .iter()
-                .filter(|(f, _)| f.relative_path.starts_with(&format!("{}/", folder.folder_path)))
+                .filter(|(f, _)| {
+                    f.relative_path
+                        .starts_with(&format!("{}/", folder.folder_path))
+                })
                 .collect();
 
             if folder_changes.is_empty() {
@@ -112,21 +124,31 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             } else {
                 println!("Changed files: {}", folder_changes.len());
                 for (f, new_hash) in &folder_changes {
-                    println!("  ~ {} (stored: {}..., current: {}...)", f.relative_path, &f.checksum[..8], &new_hash[..8]);
+                    println!(
+                        "  ~ {} (stored: {}..., current: {}...)",
+                        f.relative_path,
+                        &f.checksum[..8],
+                        &new_hash[..8]
+                    );
                 }
             }
         }
         FoldersCommand::Watch(args) => {
             let folder = repo.get_tracked_folder(args.id)?;
-            let pair = repo.get_drive_pair(folder.drive_pair_id)?;
-            let full_path = std::path::PathBuf::from(&pair.primary_path).join(&folder.folder_path);
+            let pair = drive::load_operational_pair(repo, folder.drive_pair_id)?;
+            let full_path = std::path::PathBuf::from(pair.active_path()).join(&folder.folder_path);
 
             println!("Watching {} (press Ctrl+C to stop)...", full_path.display());
 
             let (tx, rx) = std::sync::mpsc::channel();
-            let _watcher = change_detection::watch_folder(full_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?, move |event| {
-                let _ = tx.send(event);
-            })?;
+            let _watcher = change_detection::watch_folder(
+                full_path
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid path"))?,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            )?;
 
             for event in rx {
                 println!("  Event: {:?}", event.kind);
@@ -141,8 +163,8 @@ mod tests {
     use super::*;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -150,8 +172,17 @@ mod tests {
         Repository::new(pool)
     }
 
-    fn setup_pair(repo: &Repository, primary: &TempDir, secondary: &TempDir) -> crate::db::repository::DrivePair {
-        repo.create_drive_pair("test", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap()
+    fn setup_pair(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+    ) -> crate::db::repository::DrivePair {
+        repo.create_drive_pair(
+            "test",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -162,12 +193,16 @@ mod tests {
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("docs")).unwrap();
 
-        handle(FoldersCommand::Add(AddArgs {
-            drive_pair_id: pair.id,
-            folder_path: "docs".to_string(),
-            auto_virtual_path: false,
-            virtual_base: None,
-        }), &repo).unwrap();
+        handle(
+            FoldersCommand::Add(AddArgs {
+                drive_pair_id: pair.id,
+                folder_path: "docs".to_string(),
+                auto_virtual_path: false,
+                virtual_base: None,
+            }),
+            &repo,
+        )
+        .unwrap();
 
         let folders = repo.list_tracked_folders().unwrap();
         assert_eq!(folders.len(), 1);
@@ -187,7 +222,9 @@ mod tests {
         let secondary = TempDir::new().unwrap();
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("proj")).unwrap();
-        let folder = repo.create_tracked_folder(pair.id, "proj", false, None).unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "proj", false, None)
+            .unwrap();
         handle(FoldersCommand::Show { id: folder.id }, &repo).unwrap();
     }
 
@@ -198,7 +235,9 @@ mod tests {
         let secondary = TempDir::new().unwrap();
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("tmp")).unwrap();
-        let folder = repo.create_tracked_folder(pair.id, "tmp", false, None).unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "tmp", false, None)
+            .unwrap();
         handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
         assert!(repo.list_tracked_folders().unwrap().is_empty());
     }
@@ -211,11 +250,15 @@ mod tests {
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("incoming")).unwrap();
         fs::write(primary.path().join("incoming/new.txt"), b"new file").unwrap();
-        let folder = repo.create_tracked_folder(pair.id, "incoming", false, None).unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "incoming", false, None)
+            .unwrap();
 
         handle(FoldersCommand::Scan(ScanArgs { id: folder.id }), &repo).unwrap();
 
-        let (files, _) = repo.list_tracked_files(Some(pair.id), None, None, 1, 100).unwrap();
+        let (files, _) = repo
+            .list_tracked_files(Some(pair.id), None, None, 1, 100)
+            .unwrap();
         assert_eq!(files.len(), 1, "New file should be auto-tracked by scan");
     }
 }

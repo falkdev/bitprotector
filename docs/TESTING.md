@@ -1,6 +1,6 @@
 # Testing Guide
 
-This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the full QEMU-based installation tests.
+This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the QEMU-based installation and failover suites.
 
 ---
 
@@ -38,7 +38,8 @@ tests/
 ├── module/               # Module-level tests (currently empty)
 │                         # Used for multi-component round-trip tests
 └── installation/
-    └── qemu_test.sh      # Full install test on Ubuntu 24 via QEMU
+    ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
+    └── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
 ```
 
 Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing. The `tests/unit/` directory is available for cases where keeping tests outside the source tree is preferable.
@@ -58,6 +59,7 @@ cargo test
 ```bash
 cargo test --test cli_drives
 cargo test --test cli_auth
+cargo test --test packaging
 ```
 
 ### Run inline unit tests only (from `src/` `#[cfg(test)]` blocks)
@@ -147,6 +149,12 @@ cmd(db.path().to_str().unwrap())
 ```
 
 Both `NamedTempFile` and `TempDir` are dropped at the end of the test, cleaning up all temporary files automatically.
+
+The failover/replacement coverage currently lives in:
+
+- `tests/integration/cli_drives.rs` for planned replacement workflows and rebuild completion
+- `tests/integration/cli_folders.rs` for active-secondary folder scanning and change detection
+- `src/api/server.rs` for API route coverage of mark/cancel/confirm/assign
 
 ### Auth / API Integration Tests
 
@@ -273,7 +281,10 @@ mod tests {
 
 ## QEMU Installation Tests
 
-The script `tests/installation/qemu_test.sh` boots a fresh Ubuntu 24 VM, installs the `.deb` package produced by `cargo deb`, and runs smoke tests against the installed system.
+There are two QEMU suites:
+
+- `tests/installation/qemu_test.sh` is the fast package/install smoke test.
+- `tests/installation/qemu_failover_test.sh` is the heavier end-to-end failover suite with extra virtio disks and QMP hot-remove.
 
 ### Prerequisites
 
@@ -282,7 +293,9 @@ The script `tests/installation/qemu_test.sh` boots a fresh Ubuntu 24 VM, install
 | `qemu-system-x86_64` | `sudo apt install qemu-system-x86_64` |
 | KVM acceleration | Verify with `kvm-ok`. The script passes `-enable-kvm`; remove that flag if KVM is unavailable (slower). |
 | `cloud-image-utils` | `sudo apt install cloud-image-utils` |
+| `socat` | `sudo apt install socat` (required for QMP hot-remove in the failover suite) |
 | Ubuntu 24 noble cloud image | See download step below |
+| SSH public key | Either `~/.ssh/id_ed25519.pub` / `~/.ssh/id_rsa.pub`, or `BITPROTECTOR_QEMU_SSH_KEY` |
 
 ### Setup (one-time)
 
@@ -311,15 +324,21 @@ The package is written to `target/debian/bitprotector_*.deb`.
 ### Running the tests
 
 ```bash
+# Fast smoke test
 ./tests/installation/qemu_test.sh
 
 # Or pass the .deb path explicitly
 ./tests/installation/qemu_test.sh /path/to/bitprotector_0.1.0_amd64.deb
+
+# Full failover / replacement suite
+./tests/installation/qemu_failover_test.sh
 ```
 
-The script streams serial console lines to your terminal as the VM boots (up to 600 seconds timeout).
+Both scripts stream serial console lines to your terminal as the VM boots. The failover suite uses a longer default timeout because it provisions and mounts extra disks inside the guest.
 
 ### What gets tested
+
+### Smoke test coverage
 
 | Test | Description |
 |---|---|
@@ -327,6 +346,16 @@ The script streams serial console lines to your terminal as the VM boots (up to 
 | Service status | `systemctl is-active bitprotector` (NOTE: requires TLS certs to be present for full start) |
 | CLI smoke tests | `bitprotector --db /tmp/test.db drives list` and `status` succeed |
 | SSH login hook | `/etc/profile.d/bitprotector-status.sh` is present |
+
+### Failover suite coverage
+
+| Test | Description |
+|---|---|
+| Planned failover | Marks the primary slot `quiescing`, confirms failure, and verifies `active_role` switches to `secondary` |
+| Virtual-path retargeting | Confirms symlinks move from `/mnt/primary/...` to `/mnt/mirror/...` during failover |
+| Degraded writes | Writes through the virtual path while secondary is active, then runs folder scan to update checksums and mirror metadata |
+| Replacement rebuild | Assigns `/mnt/replacement-primary`, runs `sync process`, and verifies files are rebuilt and virtual paths switch back |
+| Emergency failover | Uses a QMP control socket plus `device_del` to hot-remove the active disk, then verifies a follow-up BitProtector operation fails over future opens to the surviving mirror |
 
 ### Exit codes
 
@@ -338,6 +367,8 @@ The script streams serial console lines to your terminal as the VM boots (up to 
 | `3` | CLI smoke tests failed |
 | `4` | API not accessible |
 
+The failover suite currently exits non-zero on the first failed assertion and prints the failing scenario step directly from the script output.
+
 ### TLS for full service startup
 
-During the QEMU test the service may not start cleanly because no TLS certificate is provisioned. This is expected — the CLI smoke tests use `--db /tmp/test.db` and do not require the daemon to be running. To test the full service (including the API), add a self-signed cert to the cloud-init `runcmd` block in the script. See [docs/CONFIGURATION.md](CONFIGURATION.md#generating-a-self-signed-certificate) for a suitable `openssl` command.
+During the QEMU tests the service may not start cleanly because no TLS certificate is provisioned. This is expected — the smoke and failover checks use CLI commands with an explicit `--db` path and do not require the daemon to be running. To test the full service (including the API), add a self-signed cert to the cloud-init `runcmd` block in the script. See [docs/CONFIGURATION.md](CONFIGURATION.md#generating-a-self-signed-certificate) for a suitable `openssl` command.

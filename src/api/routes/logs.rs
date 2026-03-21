@@ -1,6 +1,6 @@
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::Deserialize;
-use crate::db::repository::Repository;
 
 #[derive(Deserialize)]
 pub struct ListLogsQuery {

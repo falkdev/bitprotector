@@ -1,10 +1,17 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::fs;
 use tempfile::{NamedTempFile, TempDir};
 
 fn cmd(db: &str) -> Command {
     let mut c = Command::cargo_bin("bitprotector").unwrap();
     c.arg("--db").arg(db);
+    c
+}
+
+fn cmd_with_symlink_base(db: &str, symlink_base: &str) -> Command {
+    let mut c = cmd(db);
+    c.env("BITPROTECTOR_SYMLINK_BASE", symlink_base);
     c
 }
 
@@ -101,9 +108,7 @@ fn test_drives_show() {
     let s = TempDir::new().unwrap();
 
     cmd(db.path().to_str().unwrap())
-        .args([
-            "drives", "add", "--no-validate", "showme", "/p", "/s",
-        ])
+        .args(["drives", "add", "--no-validate", "showme", "/p", "/s"])
         .assert()
         .success();
 
@@ -165,4 +170,155 @@ fn test_drives_show_nonexistent_fails() {
         .args(["drives", "show", "999"])
         .assert()
         .failure();
+}
+
+#[test]
+fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
+    let db = temp_db();
+    let db_path = db.path().to_str().unwrap();
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let replacement = TempDir::new().unwrap();
+    let symlink_dir = TempDir::new().unwrap();
+
+    fs::write(primary.path().join("report.txt"), b"report").unwrap();
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args([
+            "drives",
+            "add",
+            "pair",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args(["files", "track", "1", "report.txt", "--mirror"])
+        .assert()
+        .success();
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args([
+            "virtual-paths",
+            "set",
+            "1",
+            "/docs/report.txt",
+            "--symlink-base",
+            symlink_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        primary.path().join("report.txt"),
+    );
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args(["drives", "replace", "mark", "1", "--role", "primary"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("quiescing"));
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args(["drives", "replace", "confirm", "1", "--role", "primary"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("confirmed failed on primary"));
+
+    assert_eq!(
+        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        secondary.path().join("report.txt"),
+    );
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args([
+            "drives",
+            "replace",
+            "assign",
+            "1",
+            "--role",
+            "primary",
+            replacement.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("queued 1 rebuild item"));
+
+    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+        .args(["sync", "process"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read(replacement.path().join("report.txt")).unwrap(),
+        b"report"
+    );
+    assert_eq!(
+        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        replacement.path().join("report.txt"),
+    );
+}
+
+#[test]
+fn test_secondary_replacement_rebuilds_without_switching_active_role() {
+    let db = temp_db();
+    let db_path = db.path().to_str().unwrap();
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let replacement = TempDir::new().unwrap();
+
+    fs::write(primary.path().join("data.bin"), b"payload").unwrap();
+
+    cmd(db_path)
+        .args([
+            "drives",
+            "add",
+            "pair",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    cmd(db_path)
+        .args(["files", "track", "1", "data.bin", "--mirror"])
+        .assert()
+        .success();
+
+    cmd(db_path)
+        .args(["drives", "replace", "mark", "1", "--role", "secondary"])
+        .assert()
+        .success();
+    cmd(db_path)
+        .args(["drives", "replace", "confirm", "1", "--role", "secondary"])
+        .assert()
+        .success();
+    cmd(db_path)
+        .args([
+            "drives",
+            "replace",
+            "assign",
+            "1",
+            "--role",
+            "secondary",
+            replacement.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    cmd(db_path).args(["sync", "process"]).assert().success();
+
+    assert_eq!(
+        fs::read(replacement.path().join("data.bin")).unwrap(),
+        b"payload"
+    );
+
+    cmd(db_path)
+        .args(["drives", "show", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Active Role:     primary"))
+        .stdout(predicate::str::contains("Secondary State: active"));
 }

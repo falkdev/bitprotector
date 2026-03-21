@@ -1,5 +1,5 @@
-use bitprotector_lib::api::auth::{issue_token, validate_token, JwtSecret, JwtAuth};
 use actix_web::{test, web, App, HttpResponse};
+use bitprotector_lib::api::auth::{issue_token, validate_token, JwtAuth, JwtSecret};
 
 const SECRET: &[u8] = b"integration_test_secret_key";
 
@@ -13,7 +13,8 @@ async fn test_auth_middleware_rejects_no_header() {
         App::new()
             .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
             .route("/secret", web::get().to(protected_handler)),
-    ).await;
+    )
+    .await;
 
     let req = test::TestRequest::get().uri("/secret").to_request();
     let resp = test::call_service(&app, req).await;
@@ -26,7 +27,8 @@ async fn test_auth_middleware_rejects_bad_token() {
         App::new()
             .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
             .route("/secret", web::get().to(protected_handler)),
-    ).await;
+    )
+    .await;
 
     let req = test::TestRequest::get()
         .uri("/secret")
@@ -43,7 +45,8 @@ async fn test_auth_middleware_accepts_valid_token() {
         App::new()
             .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
             .route("/secret", web::get().to(protected_handler)),
-    ).await;
+    )
+    .await;
 
     let req = test::TestRequest::get()
         .uri("/secret")
@@ -62,7 +65,8 @@ async fn test_expired_token_rejected() {
         App::new()
             .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
             .route("/secret", web::get().to(protected_handler)),
-    ).await;
+    )
+    .await;
 
     let req = test::TestRequest::get()
         .uri("/secret")
@@ -83,7 +87,7 @@ async fn test_full_token_lifecycle() {
     // Wrong secret fails
     assert!(validate_token(&token, b"wrong").is_err());
 
-    // Expired fails  
+    // Expired fails
     let expired = issue_token("user", SECRET, -7200).unwrap();
     assert!(validate_token(&expired, SECRET).is_err());
 }

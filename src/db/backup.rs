@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use chrono::Utc;
+use crate::db::repository::{DbBackupConfig, Repository};
 use anyhow::Context;
-use crate::db::repository::{Repository, DbBackupConfig};
+use chrono::Utc;
+use std::fs;
+use std::path::Path;
 
 /// Result of a single backup operation.
 #[derive(Debug)]
@@ -14,10 +14,7 @@ pub struct BackupResult {
 }
 
 /// Execute a backup of the database to a specific destination.
-pub fn backup_to_destination(
-    db_path: &str,
-    config: &DbBackupConfig,
-) -> anyhow::Result<String> {
+pub fn backup_to_destination(db_path: &str, config: &DbBackupConfig) -> anyhow::Result<String> {
     let dest_dir = Path::new(&config.backup_path);
     if !dest_dir.exists() {
         fs::create_dir_all(dest_dir).context("Failed to create backup directory")?;
@@ -58,10 +55,7 @@ fn rotate_backups(backup_dir: &Path, max_copies: i64) -> anyhow::Result<()> {
 }
 
 /// Run backups to all enabled destinations.
-pub fn run_all_backups(
-    repo: &Repository,
-    db_path: &str,
-) -> anyhow::Result<Vec<BackupResult>> {
+pub fn run_all_backups(repo: &Repository, db_path: &str) -> anyhow::Result<Vec<BackupResult>> {
     let configs = repo.list_db_backup_configs()?;
     let mut results = Vec::new();
 
@@ -96,10 +90,10 @@ pub fn run_all_backups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::{TempDir, NamedTempFile};
-    use std::io::Write;
-    use crate::db::repository::{create_memory_pool, Repository, DbBackupConfig};
+    use crate::db::repository::{create_memory_pool, DbBackupConfig, Repository};
     use crate::db::schema::initialize_schema;
+    use std::io::Write;
+    use tempfile::{NamedTempFile, TempDir};
 
     fn make_config(id: i64, backup_path: &str, max_copies: i64) -> DbBackupConfig {
         DbBackupConfig {
@@ -147,7 +141,12 @@ mod tests {
         let entries: Vec<_> = fs::read_dir(backup_dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_str().map(|n| n.ends_with(".db")).unwrap_or(false))
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.ends_with(".db"))
+                    .unwrap_or(false)
+            })
             .collect();
 
         assert_eq!(entries.len(), 2, "Should keep only max_copies=2 backups");
@@ -164,8 +163,10 @@ mod tests {
 
         let dest1 = TempDir::new().unwrap();
         let dest2 = TempDir::new().unwrap();
-        repo.create_db_backup_config(dest1.path().to_str().unwrap(), None, 3, true).unwrap();
-        repo.create_db_backup_config(dest2.path().to_str().unwrap(), None, 3, true).unwrap();
+        repo.create_db_backup_config(dest1.path().to_str().unwrap(), None, 3, true)
+            .unwrap();
+        repo.create_db_backup_config(dest2.path().to_str().unwrap(), None, 3, true)
+            .unwrap();
 
         let mut db_file = NamedTempFile::new().unwrap();
         db_file.write_all(b"db").unwrap();

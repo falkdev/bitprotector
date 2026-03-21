@@ -1,11 +1,12 @@
 #!/bin/bash
 # tests/installation/qemu_test.sh
-# QEMU-based installation test for BitProtector on Ubuntu 24.
+# QEMU-based installation smoke test for BitProtector on Ubuntu 24.
 #
 # Prerequisites:
 #   - qemu-system-x86_64 installed
 #   - Ubuntu 24 cloud image (noble-server-cloudimg-amd64.img)
 #   - cloud-image-utils (for cloud-init)
+#   - an SSH public key in ~/.ssh, or BITPROTECTOR_QEMU_SSH_KEY set
 #   - bitprotector.deb built via: cargo deb
 #
 # Usage:
@@ -28,8 +29,44 @@ UBUNTU_IMAGE="${UBUNTU_IMAGE:-${HOME}/images/noble-server-cloudimg-amd64.img}"
 SSH_PORT=2222
 TIMEOUT=600
 
+require_commands() {
+    local missing=()
+    for cmd in qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen; do
+        if ! command -v "${cmd}" >/dev/null 2>&1; then
+            missing+=("${cmd}")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "ERROR: missing required commands: ${missing[*]}"
+        echo "Install with: sudo apt install qemu-system-x86 cloud-image-utils openssh-client"
+        exit 1
+    fi
+}
+
+resolve_ssh_key() {
+    if [[ -n "${BITPROTECTOR_QEMU_SSH_KEY:-}" ]]; then
+        printf '%s\n' "${BITPROTECTOR_QEMU_SSH_KEY}"
+        return 0
+    fi
+
+    local key
+    for key in "${HOME}/.ssh/id_ed25519.pub" "${HOME}/.ssh/id_rsa.pub"; do
+        if [[ -f "${key}" ]]; then
+            cat "${key}"
+            return 0
+        fi
+    done
+
+    echo "ERROR: no SSH public key found. Generate one with: ssh-keygen -t ed25519" >&2
+    echo "       or set BITPROTECTOR_QEMU_SSH_KEY to the public key text." >&2
+    exit 1
+}
+
+require_commands
+SSH_KEY="$(resolve_ssh_key)"
+
 # Resolve glob
-DEB_FILE=$(ls -1 ${DEB_PATH} 2>/dev/null | head -1)
+DEB_FILE=$(ls -1 ${DEB_PATH} 2>/dev/null | head -1 || true)
 if [[ -z "${DEB_FILE}" ]]; then
     echo "ERROR: .deb file not found at ${DEB_PATH}"
     echo "Build with: cargo deb"
@@ -42,17 +79,14 @@ if [[ ! -f "${UBUNTU_IMAGE}" ]]; then
     exit 1
 fi
 
-WORKDIR=$(mktemp -d)
-trap 'rm -rf "${WORKDIR}"; kill "${QEMU_PID}" 2>/dev/null || true' EXIT
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
 
-# Clear any stale host key for localhost:2222 from previous runs
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 
-# Create a copy of the image (copy-on-write)
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/test.qcow2"
 
-# Cloud-init user-data
-cat > "${WORKDIR}/user-data" << 'CLOUDINIT'
+cat > "${WORKDIR}/user-data" <<CLOUDINIT
 #cloud-config
 users:
   - default
@@ -61,19 +95,19 @@ users:
     shell: /bin/bash
     lock_passwd: true
     ssh_authorized_keys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHEPbXkhD9lZI3FPrTsBc1mibunoeoQ8iWbDFkO3mLS4 alexander.falk@outlook.com
+      - ${SSH_KEY}
 
 runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
   - apt-get update -q
   - apt-get install -y -q /mnt/debpkg/bitprotector*.deb
-  - systemctl enable bitprotector
+  - systemctl enable bitprotector || true
   - systemctl start bitprotector || true
   - touch /tmp/install-done
 CLOUDINIT
 
-cat > "${WORKDIR}/meta-data" << 'CLOUDINIT'
+cat > "${WORKDIR}/meta-data" <<'CLOUDINIT'
 instance-id: bitprotector-test
 local-hostname: bitprotector-test
 CLOUDINIT
@@ -99,7 +133,6 @@ QEMU_PID=$!
 echo "Waiting for VM to boot (up to ${TIMEOUT}s)..."
 LAST_SERIAL_LINE=""
 for i in $(seq 1 ${TIMEOUT}); do
-    # Show new serial console lines as they appear (strip kernel timestamps)
     if [[ -f "${WORKDIR}/serial.log" ]]; then
         NEW_LINE=$(tail -1 "${WORKDIR}/serial.log" | sed 's/^\[[ 0-9.]*\] //')
         if [[ "${NEW_LINE}" != "${LAST_SERIAL_LINE}" && -n "${NEW_LINE}" ]]; then

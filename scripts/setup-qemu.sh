@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/setup-qemu.sh
-# Install prerequisites for qemu_manual.sh and tests/installation/qemu_test.sh.
+# Install prerequisites for qemu_manual.sh, tests/installation/qemu_test.sh,
+# and tests/installation/qemu_failover_test.sh.
 #
 # Usage:
 #   ./scripts/setup-qemu.sh
@@ -12,14 +13,14 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 UBUNTU_IMAGE="${UBUNTU_IMAGE:-${HOME}/images/noble-server-cloudimg-amd64.img}"
 UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 
-# ── 1. System packages ────────────────────────────────────────────────────────
-
 echo "=== Installing system packages ==="
 
 MISSING_PKGS=()
 command -v qemu-system-x86_64 &>/dev/null || MISSING_PKGS+=(qemu-system-x86)
 command -v qemu-img            &>/dev/null || MISSING_PKGS+=(qemu-utils)
 command -v cloud-localds       &>/dev/null || MISSING_PKGS+=(cloud-image-utils)
+command -v socat               &>/dev/null || MISSING_PKGS+=(socat)
+command -v ssh                 &>/dev/null || MISSING_PKGS+=(openssh-client)
 
 if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
     echo "Installing: ${MISSING_PKGS[*]}"
@@ -28,8 +29,6 @@ if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
 else
     echo "All required packages already installed."
 fi
-
-# ── 2. cargo-deb ─────────────────────────────────────────────────────────────
 
 echo ""
 echo "=== cargo-deb ==="
@@ -40,8 +39,6 @@ else
     echo "Installing cargo-deb..."
     cargo install cargo-deb
 fi
-
-# ── 3. Ubuntu 24 cloud image ─────────────────────────────────────────────────
 
 echo ""
 echo "=== Ubuntu 24 cloud image ==="
@@ -55,8 +52,6 @@ else
     mv "${UBUNTU_IMAGE}.tmp" "${UBUNTU_IMAGE}"
     echo "Download complete."
 fi
-
-# ── 4. SSH key ───────────────────────────────────────────────────────────────
 
 echo ""
 echo "=== SSH key ==="
@@ -80,31 +75,17 @@ else
     echo "Using existing key: ${SSH_KEY_FILE}.pub"
 fi
 
-# ── 5. Fix placeholder key in qemu_test.sh ───────────────────────────────────
-
-echo ""
-echo "=== Patching SSH key placeholder in qemu_test.sh ==="
-
-QEMU_TEST="${PROJECT_ROOT}/tests/installation/qemu_test.sh"
-PLACEHOLDER="ssh-ed25519 AAAA... (replace with test key)"
-ACTUAL_KEY="$(cat "${SSH_KEY_FILE}.pub")"
-
-if grep -qF "${PLACEHOLDER}" "${QEMU_TEST}"; then
-    sed -i "s|${PLACEHOLDER}|${ACTUAL_KEY}|" "${QEMU_TEST}"
-    echo "Patched ${QEMU_TEST} with key from ${SSH_KEY_FILE}.pub"
-else
-    echo "Already patched (no placeholder found)."
-fi
-
-# ── 6. Summary ───────────────────────────────────────────────────────────────
-
 echo ""
 echo "========================================="
 echo "  Setup complete. You can now run:"
 echo ""
 echo "  Manual VM:"
 echo "    ./scripts/qemu_manual.sh"
+echo "    ENABLE_QMP=1 ./scripts/qemu_manual.sh"
 echo ""
-echo "  Installation test:"
+echo "  Installation smoke test:"
 echo "    ./tests/installation/qemu_test.sh"
+echo ""
+echo "  Failover / replacement QEMU test:"
+echo "    ./tests/installation/qemu_failover_test.sh"
 echo "========================================="

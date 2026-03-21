@@ -1,13 +1,13 @@
-use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
+use bitprotector_lib::cli::commands::database::DatabaseCommand;
 use bitprotector_lib::cli::commands::drives::DrivesCommand;
 use bitprotector_lib::cli::commands::files::FilesCommand;
-use bitprotector_lib::cli::commands::integrity::IntegrityCommand;
-use bitprotector_lib::cli::commands::virtual_paths::VirtualPathsCommand;
 use bitprotector_lib::cli::commands::folders::FoldersCommand;
-use bitprotector_lib::cli::commands::sync::SyncCommand;
+use bitprotector_lib::cli::commands::integrity::IntegrityCommand;
 use bitprotector_lib::cli::commands::logs::LogsCommand;
-use bitprotector_lib::cli::commands::database::DatabaseCommand;
+use bitprotector_lib::cli::commands::sync::SyncCommand;
+use bitprotector_lib::cli::commands::virtual_paths::VirtualPathsCommand;
+use clap::{Parser, Subcommand};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "bitprotector")]
@@ -18,7 +18,11 @@ struct Cli {
     command: Commands,
 
     /// Path to the database file
-    #[arg(long, default_value = "/var/lib/bitprotector/bitprotector.db", global = true)]
+    #[arg(
+        long,
+        default_value = "/var/lib/bitprotector/bitprotector.db",
+        global = true
+    )]
     db: String,
 }
 
@@ -89,6 +93,10 @@ enum Commands {
 
 fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::Repository> {
     let pool = bitprotector_lib::db::repository::create_cli_pool(db_path)?;
+    {
+        let conn = pool.get()?;
+        bitprotector_lib::db::schema::initialize_schema(&conn)?;
+    }
     Ok(bitprotector_lib::db::repository::Repository::new(pool))
 }
 
@@ -106,7 +114,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Commands::Serve { host, port, jwt_secret, tls_cert, tls_key, rate_limit_rps } => {
+        Commands::Serve {
+            host,
+            port,
+            jwt_secret,
+            tls_cert,
+            tls_key,
+            rate_limit_rps,
+        } => {
             tracing::info!("Starting BitProtector server on {}:{}", host, port);
             bitprotector_lib::api::server::run_server(
                 &host,
@@ -116,7 +131,8 @@ async fn main() -> anyhow::Result<()> {
                 tls_cert.as_deref(),
                 tls_key.as_deref(),
                 rate_limit_rps,
-            ).await?;
+            )
+            .await?;
         }
         Commands::Status => {
             bitprotector_lib::cli::ssh_status::print_status(&cli.db);

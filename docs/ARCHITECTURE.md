@@ -61,13 +61,14 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | File | Responsibility |
 |---|---|
 | `checksum.rs` | Compute and verify BLAKE3 hashes for files. Provides the canonical checksum function used everywhere. |
+| `drive.rs` | Drive-role state machine and path resolution helpers. Owns planned quiesce/failover, emergency failover, replacement assignment, rebuild completion, and virtual-path retargeting. |
 | `mirror.rs` | Copy a file from the primary path to the secondary path, verifying the copy with a post-write checksum. Also responsible for restoring a corrupted copy from its healthy counterpart. |
-| `integrity.rs` | Orchestrate integrity checks: re-hash master and mirror, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted), trigger automatic recovery where possible, and enqueue `user_action_required` otherwise. |
+| `integrity.rs` | Orchestrate integrity checks: re-hash the current active and standby copies, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted / drive\_unavailable), and trigger automatic recovery only when a healthy counterpart exists. |
 | `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
-| `virtual_path.rs` | Map a tracked file to a user-visible virtual path. Creates and removes symlinks in the `symlink_base` directory. Also handles bulk assignment and symlink refresh. |
-| `tracker.rs` | Track or untrack individual files and folders. On track: compute initial checksum, store metadata, enqueue mirroring. |
+| `virtual_path.rs` | Map a tracked file to a user-visible virtual path. Creates and removes symlinks in the `symlink_base` directory and refreshes them whenever `active_role` changes. |
+| `tracker.rs` | Track or untrack individual files and folders. On track: compute initial checksum, store metadata, enqueue mirroring, and operate on the pair's current active side rather than assuming primary is always live. |
 | `scheduler.rs` | Manage cron- and interval-based task schedules using `tokio-cron-scheduler`. Runs sync and integrity check jobs on configured intervals. |
-| `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, enqueues a re-mirror or re-verify action. |
+| `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
 
 ### src/api/
 
@@ -121,6 +122,9 @@ CREATE TABLE drive_pairs (
     name           TEXT    NOT NULL UNIQUE,
     primary_path   TEXT    NOT NULL,
     secondary_path TEXT    NOT NULL,
+    primary_state  TEXT    NOT NULL DEFAULT 'active',
+    secondary_state TEXT   NOT NULL DEFAULT 'active',
+    active_role    TEXT    NOT NULL DEFAULT 'primary',
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -226,7 +230,11 @@ BLAKE3 is faster than SHA-256/SHA-512 on modern hardware and provides sufficient
 
 **Virtual paths are symlinks on disk**
 
-The virtual path system does not intercept file I/O. Instead it creates regular symlinks in a dedicated directory (`symlink_base`). This makes virtual paths transparent to any tool that can follow symlinks, requires no kernel module or FUSE, and is straightforward to regenerate from the database (`POST /virtual-paths/refresh-symlinks`).
+The virtual path system does not intercept file I/O. Instead it creates regular symlinks in a dedicated directory (`symlink_base`). This makes virtual paths transparent to any tool that can follow symlinks, requires no kernel module or FUSE, and is straightforward to regenerate from the database (`POST /virtual-paths/refresh`). During drive failover, the symlink target is refreshed from the pair's `active_role`, so future opens move to the surviving side.
+
+**Drive failover is stateful, not path-swapping in place**
+
+Each drive pair now tracks `primary_state`, `secondary_state`, and `active_role`. Planned replacements move a slot through `active -> quiescing -> failed -> rebuilding -> active`. Unexpected loss of the active root can trigger emergency failover to the healthy side. The logical pair and relative paths stay stable; only the operational source/target root changes.
 
 **r2d2 connection pool for SQLite**
 

@@ -1,7 +1,7 @@
+use crate::core::{drive, virtual_path};
+use crate::db::repository::Repository;
 use clap::{Args, Subcommand};
 use std::collections::HashMap;
-use crate::db::repository::Repository;
-use crate::core::virtual_path;
 
 #[derive(Subcommand, Debug)]
 pub enum VirtualPathsCommand {
@@ -46,21 +46,32 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
     match cmd {
         VirtualPathsCommand::Set(args) => {
             let file = repo.get_tracked_file(args.file_id)?;
-            let pair = repo.get_drive_pair(file.drive_pair_id)?;
-            let real_path = std::path::PathBuf::from(&pair.primary_path).join(&file.relative_path);
+            let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
+            let real_path = std::path::PathBuf::from(pair.active_path()).join(&file.relative_path);
             virtual_path::set_virtual_path(
                 repo,
                 &args.symlink_base,
                 args.file_id,
                 &args.virtual_path,
-                real_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid real path"))?,
+                real_path
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid real path"))?,
             )?;
-            println!("Set virtual path for file #{}: {} -> {}", args.file_id, args.virtual_path, real_path.display());
+            println!(
+                "Set virtual path for file #{}: {} -> {}",
+                args.file_id,
+                args.virtual_path,
+                real_path.display()
+            );
         }
         VirtualPathsCommand::Remove(args) => {
             let file = repo.get_tracked_file(args.file_id)?;
-            let vp = file.virtual_path.as_deref()
-                .ok_or_else(|| anyhow::anyhow!("File #{} has no virtual path assigned", args.file_id))?
+            let vp = file
+                .virtual_path
+                .as_deref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("File #{} has no virtual path assigned", args.file_id)
+                })?
                 .to_string();
             virtual_path::remove_virtual_path(repo, &args.symlink_base, args.file_id, &vp)?;
             println!("Removed virtual path for file #{}", args.file_id);
@@ -74,9 +85,14 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
                 println!("{:<6} {:<40} {}", "ID", "Virtual Path", "Real Path");
                 println!("{}", "-".repeat(90));
                 for f in with_vp {
-                    let pair = repo.get_drive_pair(f.drive_pair_id)?;
-                    let real = std::path::PathBuf::from(&pair.primary_path).join(&f.relative_path);
-                    println!("{:<6} {:<40} {}", f.id, f.virtual_path.as_deref().unwrap(), real.display());
+                    let pair = drive::load_operational_pair(repo, f.drive_pair_id)?;
+                    let real = std::path::PathBuf::from(pair.active_path()).join(&f.relative_path);
+                    println!(
+                        "{:<6} {:<40} {}",
+                        f.id,
+                        f.virtual_path.as_deref().unwrap(),
+                        real.display()
+                    );
                 }
             }
         }
@@ -84,8 +100,12 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
             let pairs_vec = repo.list_drive_pairs()?;
             let pairs: HashMap<i64, _> = pairs_vec.into_iter().map(|p| (p.id, p)).collect();
             let result = virtual_path::refresh_all_symlinks(repo, &args.symlink_base, &pairs)?;
-            println!("Refresh complete: {} symlinks created, {} removed, {} errors",
-                     result.created, result.removed, result.errors.len());
+            println!(
+                "Refresh complete: {} symlinks created, {} removed, {} errors",
+                result.created,
+                result.removed,
+                result.errors.len()
+            );
             for err in &result.errors {
                 eprintln!("  ERROR: {}", err);
             }
@@ -97,11 +117,11 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::tracker;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use crate::core::tracker;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
@@ -109,8 +129,22 @@ mod tests {
         Repository::new(pool)
     }
 
-    fn setup_with_file(repo: &Repository, primary: &TempDir, secondary: &TempDir, name: &str) -> (crate::db::repository::DrivePair, crate::db::repository::TrackedFile) {
-        let pair = repo.create_drive_pair("t", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
+    fn setup_with_file(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+        name: &str,
+    ) -> (
+        crate::db::repository::DrivePair,
+        crate::db::repository::TrackedFile,
+    ) {
+        let pair = repo
+            .create_drive_pair(
+                "t",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
         fs::write(primary.path().join(name), b"content").unwrap();
         let tracked = tracker::track_file(repo, &pair, name, None).unwrap();
         (pair, tracked)
@@ -131,7 +165,8 @@ mod tests {
                 symlink_base: symlink_base.path().to_str().unwrap().to_string(),
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         let link = symlink_base.path().join("docs/a.txt");
         assert!(link.is_symlink(), "Symlink should be created");
@@ -155,7 +190,8 @@ mod tests {
                 symlink_base: symlink_base.path().to_str().unwrap().to_string(),
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         handle(
             VirtualPathsCommand::Remove(RemoveArgs {
@@ -163,7 +199,8 @@ mod tests {
                 symlink_base: symlink_base.path().to_str().unwrap().to_string(),
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         let link = symlink_base.path().join("vpath/b.txt");
         assert!(!link.is_symlink(), "Symlink should be removed");
@@ -186,14 +223,16 @@ mod tests {
         let (_, file) = setup_with_file(&repo, &primary, &secondary, "c.txt");
 
         // Assign virtual path in DB without creating symlink
-        repo.update_tracked_file_virtual_path(file.id, Some("/refresh/c.txt")).unwrap();
+        repo.update_tracked_file_virtual_path(file.id, Some("/refresh/c.txt"))
+            .unwrap();
 
         handle(
             VirtualPathsCommand::Refresh(RefreshArgs {
                 symlink_base: symlink_base.path().to_str().unwrap().to_string(),
             }),
             &repo,
-        ).unwrap();
+        )
+        .unwrap();
 
         let link = symlink_base.path().join("refresh/c.txt");
         assert!(link.is_symlink(), "Symlink should be created by refresh");

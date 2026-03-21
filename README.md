@@ -2,7 +2,7 @@
 
 **Distributed File Mirror and Integrity Protection System**
 
-Monitors files across redundant storage, detects bit-decay and silent corruption using BLAKE3 checksums, and automatically recovers from mirror copies. Operates as a background daemon with both a CLI tool and a HTTPS REST API.
+Monitors files across redundant storage, detects bit-decay and silent corruption using BLAKE3 checksums, automatically recovers from mirror copies, and supports live drive failover plus replacement rebuilds. Operates as a background daemon with both a CLI tool and a HTTPS REST API.
 
 ---
 
@@ -27,7 +27,9 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
    - Mirror corrupted → restore from primary.
    - Primary corrupted → restore from mirror.
    - Both corrupted → flag for user action.
-4. A **virtual path** layer exposes tracked files as a unified symlink tree regardless of their physical location.
+4. If the active drive fails, BitProtector can fail over to the surviving side and retarget virtual paths to it.
+5. When a replacement drive is mounted, BitProtector can queue a rebuild back onto that slot and return the pair to a fully mirrored state.
+6. A **virtual path** layer exposes tracked files as a unified symlink tree regardless of their current active physical location.
 
 ---
 
@@ -106,7 +108,15 @@ bitprotector status
 
 # 6. Assign a virtual path (creates a symlink)
 bitprotector virtual-paths set <file-id> /docs/report.pdf
+
+# 7. Planned primary replacement workflow
+bitprotector drives replace mark <drive-pair-id> --role primary
+bitprotector drives replace confirm <drive-pair-id> --role primary
+bitprotector drives replace assign <drive-pair-id> --role primary /mnt/new-primary
+bitprotector sync process
 ```
+
+During failover, virtual paths automatically follow the pair's current `active_role`. Planned replacements use `mark` then `confirm` so you can quiesce external I/O before switching over.
 
 For a full list of commands and flags, run:
 
@@ -167,7 +177,7 @@ bitprotector --db /tmp/test.db drives list
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module breakdown, and database schema |
 | [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |
-| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, writing new tests, and QEMU installation tests |
+| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, and the QEMU smoke plus failover suites |
 
 ---
 

@@ -1,5 +1,4 @@
 /// API request/response model types.
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

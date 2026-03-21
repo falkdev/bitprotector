@@ -1,7 +1,7 @@
-use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
-use serde::{Deserialize, Serialize};
-use chrono::{Utc, Duration};
 use actix_web::{web, FromRequest, HttpRequest};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -27,7 +27,11 @@ impl FromRequest for JwtAuth {
     fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
         let secret = match req.app_data::<web::Data<JwtSecret>>() {
             Some(s) => s.0.clone(),
-            None => return ready(Err(actix_web::error::ErrorInternalServerError("JWT secret not configured"))),
+            None => {
+                return ready(Err(actix_web::error::ErrorInternalServerError(
+                    "JWT secret not configured",
+                )))
+            }
         };
 
         let token = match req
@@ -37,12 +41,18 @@ impl FromRequest for JwtAuth {
             .and_then(|h| h.strip_prefix("Bearer "))
         {
             Some(t) => t.to_string(),
-            None => return ready(Err(actix_web::error::ErrorUnauthorized("Missing or invalid authorization header"))),
+            None => {
+                return ready(Err(actix_web::error::ErrorUnauthorized(
+                    "Missing or invalid authorization header",
+                )))
+            }
         };
 
         match validate_token(&token, &secret) {
             Ok(claims) => ready(Ok(JwtAuth { claims })),
-            Err(_) => ready(Err(actix_web::error::ErrorUnauthorized("Invalid or expired token"))),
+            Err(_) => ready(Err(actix_web::error::ErrorUnauthorized(
+                "Invalid or expired token",
+            ))),
         }
     }
 }
@@ -53,8 +63,16 @@ pub fn issue_token(username: &str, secret: &[u8], expires_in_secs: i64) -> anyho
     let exp = (now + Duration::seconds(expires_in_secs)).timestamp() as usize;
     let iat = now.timestamp() as usize;
 
-    let claims = Claims { sub: username.to_string(), exp, iat };
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret))?;
+    let claims = Claims {
+        sub: username.to_string(),
+        exp,
+        iat,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret),
+    )?;
     Ok(token)
 }
 
@@ -72,7 +90,9 @@ pub fn authenticate_user(username: &str, password: &str) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    client.conversation_mut().set_credentials(username, password);
+    client
+        .conversation_mut()
+        .set_credentials(username, password);
     client.authenticate().is_ok()
 }
 
@@ -115,7 +135,8 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .route("/protected", web::get().to(protected_route)),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get().uri("/protected").to_request();
         let resp = test::call_service(&app, req).await;
@@ -128,7 +149,8 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .route("/protected", web::get().to(protected_route)),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/protected")
@@ -145,7 +167,8 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
                 .route("/protected", web::get().to(protected_route)),
-        ).await;
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/protected")

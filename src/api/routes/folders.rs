@@ -1,7 +1,7 @@
+use crate::core::{change_detection, drive, tracker};
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use crate::db::repository::Repository;
-use crate::core::{tracker, change_detection};
 
 #[derive(Deserialize)]
 pub struct AddFolderRequest {
@@ -30,7 +30,7 @@ async fn add_folder(
     repo: web::Data<Repository>,
     body: web::Json<AddFolderRequest>,
 ) -> HttpResponse {
-    let pair = match repo.get_drive_pair(body.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, body.drive_pair_id) {
         Ok(p) => p,
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
@@ -68,7 +68,7 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         Ok(f) => f,
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
-    let pair = match repo.get_drive_pair(folder.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, folder.drive_pair_id) {
         Ok(p) => p,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
@@ -76,13 +76,16 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
-    let changes = match change_detection::scan_all_changes(&repo, &pair) {
+    let changes = match change_detection::scan_and_record_changes(&repo, &pair) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
     let folder_changes = changes
         .iter()
-        .filter(|(f, _)| f.relative_path.starts_with(&format!("{}/", folder.folder_path)))
+        .filter(|(f, _)| {
+            f.relative_path
+                .starts_with(&format!("{}/", folder.folder_path))
+        })
         .count();
 
     HttpResponse::Ok().json(ScanResult {

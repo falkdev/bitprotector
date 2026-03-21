@@ -1,8 +1,8 @@
+use crate::api::models::ApiError;
+use crate::core::{drive, mirror, tracker};
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
-use crate::db::repository::Repository;
-use crate::core::{tracker, mirror};
-use crate::api::models::ApiError;
 
 #[derive(Debug, Deserialize)]
 pub struct TrackFileRequest {
@@ -26,24 +26,35 @@ pub async fn track_file(
     repo: web::Data<Repository>,
     body: web::Json<TrackFileRequest>,
 ) -> impl Responder {
-    let pair = match repo.get_drive_pair(body.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, body.drive_pair_id) {
         Ok(p) => p,
-        Err(_) => return HttpResponse::NotFound()
-            .json(ApiError::new("RESOURCE_NOT_FOUND", "Drive pair not found")),
+        Err(_) => {
+            return HttpResponse::NotFound()
+                .json(ApiError::new("RESOURCE_NOT_FOUND", "Drive pair not found"))
+        }
     };
-    let tracked = match tracker::track_file(&repo, &pair, &body.relative_path, body.virtual_path.as_deref()) {
+    let tracked = match tracker::track_file(
+        &repo,
+        &pair,
+        &body.relative_path,
+        body.virtual_path.as_deref(),
+    ) {
         Ok(t) => t,
-        Err(e) => return HttpResponse::BadRequest()
-            .json(ApiError::new("VALIDATION_ERROR", &e.to_string())),
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
+        }
     };
     if body.mirror.unwrap_or(false) {
-        if let Err(e) = mirror::mirror_file(&pair, &tracked.relative_path) {
-            return HttpResponse::InternalServerError()
-                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
-        }
-        if let Err(e) = repo.update_tracked_file_mirror_status(tracked.id, true) {
-            return HttpResponse::InternalServerError()
-                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
+        if pair.standby_accepts_sync() {
+            if let Err(e) = mirror::mirror_file(&pair, &tracked.relative_path) {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
+            }
+            if let Err(e) = repo.update_tracked_file_mirror_status(tracked.id, true) {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
+            }
         }
     }
     HttpResponse::Created().json(tracked)
@@ -73,33 +84,35 @@ pub async fn list_files(
 }
 
 /// GET /api/v1/files/{id} — get a single tracked file
-pub async fn get_file(
-    repo: web::Data<Repository>,
-    path: web::Path<i64>,
-) -> impl Responder {
+pub async fn get_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
     let id = path.into_inner();
     match repo.get_tracked_file(id) {
         Ok(file) => HttpResponse::Ok().json(file),
-        Err(_) => HttpResponse::NotFound()
-            .json(ApiError::new("RESOURCE_NOT_FOUND", &format!("Tracked file {} not found", id))),
+        Err(_) => HttpResponse::NotFound().json(ApiError::new(
+            "RESOURCE_NOT_FOUND",
+            &format!("Tracked file {} not found", id),
+        )),
     }
 }
 
 /// POST /api/v1/files/{id}/mirror — mirror a file to secondary
-pub async fn mirror_file(
-    repo: web::Data<Repository>,
-    path: web::Path<i64>,
-) -> impl Responder {
+pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
     let id = path.into_inner();
     let file = match repo.get_tracked_file(id) {
         Ok(f) => f,
-        Err(_) => return HttpResponse::NotFound()
-            .json(ApiError::new("RESOURCE_NOT_FOUND", &format!("Tracked file {} not found", id))),
+        Err(_) => {
+            return HttpResponse::NotFound().json(ApiError::new(
+                "RESOURCE_NOT_FOUND",
+                &format!("Tracked file {} not found", id),
+            ))
+        }
     };
-    let pair = match repo.get_drive_pair(file.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, file.drive_pair_id) {
         Ok(p) => p,
-        Err(e) => return HttpResponse::InternalServerError()
-            .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+        }
     };
     if let Err(e) = mirror::mirror_file(&pair, &file.relative_path) {
         return HttpResponse::InternalServerError()
@@ -113,15 +126,13 @@ pub async fn mirror_file(
 }
 
 /// DELETE /api/v1/files/{id} — untrack a file
-pub async fn delete_file(
-    repo: web::Data<Repository>,
-    path: web::Path<i64>,
-) -> impl Responder {
+pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
     let id = path.into_inner();
     match repo.delete_tracked_file(id) {
         Ok(()) => HttpResponse::NoContent().finish(),
-        Err(e) => HttpResponse::BadRequest()
-            .json(ApiError::new("VALIDATION_ERROR", &e.to_string())),
+        Err(e) => {
+            HttpResponse::BadRequest().json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
+        }
     }
 }
 

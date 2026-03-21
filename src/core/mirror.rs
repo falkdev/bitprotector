@@ -1,8 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use anyhow::Context;
 use crate::core::checksum;
-use crate::db::repository::{Repository, DrivePair};
+use crate::core::drive::{self, DriveRole, DriveState};
+use crate::db::repository::DrivePair;
+use anyhow::Context;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Validates that a drive pair's paths exist and are directories.
 pub fn validate_drive_pair(primary: &str, secondary: &str) -> anyhow::Result<()> {
@@ -22,8 +23,12 @@ pub fn validate_drive_pair(primary: &str, secondary: &str) -> anyhow::Result<()>
         anyhow::bail!("Secondary path is not a directory: {}", secondary);
     }
 
-    let primary_canon = primary_path.canonicalize().context("Failed to canonicalize primary path")?;
-    let secondary_canon = secondary_path.canonicalize().context("Failed to canonicalize secondary path")?;
+    let primary_canon = primary_path
+        .canonicalize()
+        .context("Failed to canonicalize primary path")?;
+    let secondary_canon = secondary_path
+        .canonicalize()
+        .context("Failed to canonicalize secondary path")?;
     if primary_canon == secondary_canon {
         anyhow::bail!("Primary and secondary paths must be different directories");
     }
@@ -41,12 +46,20 @@ pub fn validate_drive_pair(primary: &str, secondary: &str) -> anyhow::Result<()>
 }
 
 /// Mirror a file from primary to secondary drive.
-pub fn mirror_file(
-    drive_pair: &DrivePair,
-    relative_path: &str,
-) -> anyhow::Result<String> {
-    let src = PathBuf::from(&drive_pair.primary_path).join(relative_path);
-    let dst = PathBuf::from(&drive_pair.secondary_path).join(relative_path);
+pub fn mirror_file(drive_pair: &DrivePair, relative_path: &str) -> anyhow::Result<String> {
+    if !drive_pair.standby_accepts_sync() {
+        anyhow::bail!(
+            "Standby {} path is not ready to receive sync data for drive pair #{}",
+            drive_pair.standby_role().as_str(),
+            drive_pair.id
+        );
+    }
+
+    drive::ensure_drive_root_marker(drive_pair.active_path())?;
+    drive::ensure_drive_root_marker(drive_pair.standby_path())?;
+
+    let src = PathBuf::from(drive_pair.active_path()).join(relative_path);
+    let dst = PathBuf::from(drive_pair.standby_path()).join(relative_path);
 
     if !src.exists() {
         anyhow::bail!("Source file does not exist: {}", src.display());
@@ -83,6 +96,13 @@ pub fn restore_from_mirror(
     let src = PathBuf::from(&drive_pair.secondary_path).join(relative_path);
     let dst = PathBuf::from(&drive_pair.primary_path).join(relative_path);
 
+    if drive_pair.role_state(DriveRole::Primary) == DriveState::Failed {
+        anyhow::bail!(
+            "Primary drive is marked failed for drive pair #{}",
+            drive_pair.id
+        );
+    }
+
     if !src.exists() {
         anyhow::bail!("Mirror file does not exist: {}", src.display());
     }
@@ -99,6 +119,7 @@ pub fn restore_from_mirror(
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
+    drive::ensure_drive_root_marker(&drive_pair.primary_path)?;
     fs::copy(&src, &dst)?;
     Ok(())
 }
@@ -111,6 +132,13 @@ pub fn restore_mirror_from_master(
 ) -> anyhow::Result<()> {
     let src = PathBuf::from(&drive_pair.primary_path).join(relative_path);
     let dst = PathBuf::from(&drive_pair.secondary_path).join(relative_path);
+
+    if drive_pair.role_state(DriveRole::Secondary) == DriveState::Failed {
+        anyhow::bail!(
+            "Secondary drive is marked failed for drive pair #{}",
+            drive_pair.id
+        );
+    }
 
     if !src.exists() {
         anyhow::bail!("Primary file does not exist: {}", src.display());
@@ -128,6 +156,7 @@ pub fn restore_mirror_from_master(
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
+    drive::ensure_drive_root_marker(&drive_pair.secondary_path)?;
     fs::copy(&src, &dst)?;
     Ok(())
 }
@@ -135,8 +164,8 @@ pub fn restore_mirror_from_master(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::io::Write;
+    use tempfile::TempDir;
 
     fn setup_pair() -> (TempDir, TempDir) {
         (TempDir::new().unwrap(), TempDir::new().unwrap())
@@ -194,6 +223,9 @@ mod tests {
             name: "test".to_string(),
             primary_path: primary_dir.path().to_str().unwrap().to_string(),
             secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         };
@@ -222,6 +254,9 @@ mod tests {
             name: "test".to_string(),
             primary_path: primary_dir.path().to_str().unwrap().to_string(),
             secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         };
@@ -238,6 +273,9 @@ mod tests {
             name: "test".to_string(),
             primary_path: primary_dir.path().to_str().unwrap().to_string(),
             secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         };
@@ -264,6 +302,9 @@ mod tests {
             name: "test".to_string(),
             primary_path: primary_dir.path().to_str().unwrap().to_string(),
             secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         };

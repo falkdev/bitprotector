@@ -1,25 +1,20 @@
+use crate::core::{drive, integrity, mirror};
 use crate::db::repository::{Repository, SyncQueueItem, TrackedFile};
-use crate::core::{mirror, integrity};
 use crate::logging::event_logger;
 
 /// Process a single pending sync queue item.
-pub fn process_item(
-    repo: &Repository,
-    item: &SyncQueueItem,
-) -> anyhow::Result<()> {
+pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<()> {
+    let file = repo.get_tracked_file(item.tracked_file_id)?;
+    let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
+    if pair.is_quiescing() {
+        return Ok(());
+    }
+
     repo.update_sync_queue_status(item.id, "in_progress", None)?;
 
-    let file = repo.get_tracked_file(item.tracked_file_id)?;
-    let pair = repo.get_drive_pair(file.drive_pair_id)?;
-
     let result = match item.action.as_str() {
-        "mirror" => {
-            mirror::mirror_file(&pair, &file.relative_path)
-                .map(|_| ())
-        }
-        "restore_master" => {
-            mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum)
-        }
+        "mirror" => mirror::mirror_file(&pair, &file.relative_path).map(|_| ()),
+        "restore_master" => mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum),
         "restore_mirror" => {
             mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum)
         }
@@ -37,6 +32,13 @@ pub fn process_item(
     match result {
         Ok(()) => {
             repo.update_sync_queue_status(item.id, "completed", None)?;
+            if matches!(
+                item.action.as_str(),
+                "mirror" | "restore_master" | "restore_mirror"
+            ) {
+                repo.update_tracked_file_mirror_status(file.id, true)?;
+                let _ = drive::maybe_finalize_rebuild_for_action(repo, pair.id, &item.action);
+            }
             let _ = event_logger::log_sync_completed(repo, file.id, &item.action);
         }
         Err(e) => {
@@ -71,25 +73,30 @@ pub fn create_from_integrity_failure(
     let action = match result.status {
         IntegrityStatus::Ok => return Ok(None),
         IntegrityStatus::BothCorrupted => return Ok(None),
+        IntegrityStatus::PrimaryDriveUnavailable | IntegrityStatus::SecondaryDriveUnavailable => {
+            return Ok(None)
+        }
         IntegrityStatus::MirrorCorrupted | IntegrityStatus::MirrorMissing => "restore_mirror",
         IntegrityStatus::MasterCorrupted | IntegrityStatus::MasterMissing => "restore_master",
     };
-    Ok(Some(repo.create_sync_queue_item(file.id, action)?))
+    repo.create_sync_queue_item_dedup(file.id, action)
 }
 
 /// Create a sync queue item to re-mirror a changed file.
 pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
-    repo.create_sync_queue_item(file_id, "mirror")
+    Ok(repo
+        .create_sync_queue_item_dedup(file_id, "mirror")?
+        .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{}", file_id))?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::fs;
+    use crate::core::checksum;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
-    use crate::core::checksum;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn setup() -> (TempDir, TempDir, Repository) {
         let primary = TempDir::new().unwrap();
@@ -105,8 +112,16 @@ mod tests {
     #[test]
     fn test_queue_item_created_from_file() {
         let (primary, secondary, repo) = setup();
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", "hash", 1, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", "hash", 1, None)
+            .unwrap();
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
         assert_eq!(item.action, "mirror");
         assert_eq!(item.status, "pending");
@@ -120,8 +135,16 @@ mod tests {
         fs::write(primary.path().join("f.txt"), content).unwrap();
         let checksum_str = checksum::checksum_bytes(content);
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "f.txt", &checksum_str, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &checksum_str, content.len() as i64, None)
+            .unwrap();
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
         process_item(&repo, &item).unwrap();
@@ -139,14 +162,26 @@ mod tests {
         fs::write(primary.path().join("a.txt"), content).unwrap();
         fs::write(secondary.path().join("a.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "a.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "a.txt", &hash, content.len() as i64, None)
+            .unwrap();
 
         for action in &["mirror", "restore_master", "restore_mirror", "verify"] {
             let item = repo.create_sync_queue_item(file.id, action).unwrap();
             process_item(&repo, &item).unwrap();
             let updated = repo.get_sync_queue_item(item.id).unwrap();
-            assert_eq!(updated.status, "completed", "Action {} should complete", action);
+            assert_eq!(
+                updated.status, "completed",
+                "Action {} should complete",
+                action
+            );
         }
     }
 
@@ -158,8 +193,16 @@ mod tests {
         fs::write(primary.path().join("mi.txt"), content).unwrap();
         fs::write(secondary.path().join("mi.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "mi.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "mi.txt", &hash, content.len() as i64, None)
+            .unwrap();
 
         // Corrupt the mirror
         fs::write(secondary.path().join("mi.txt"), b"corrupted").unwrap();
@@ -178,19 +221,38 @@ mod tests {
         fs::write(primary.path().join("ok.txt"), content).unwrap();
         fs::write(secondary.path().join("ok.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "ok.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "ok.txt", &hash, content.len() as i64, None)
+            .unwrap();
         let result = integrity::check_file_integrity(&pair, &file).unwrap();
 
         let item = create_from_integrity_failure(&repo, &file, &result).unwrap();
-        assert!(item.is_none(), "No queue item should be created when integrity is Ok");
+        assert!(
+            item.is_none(),
+            "No queue item should be created when integrity is Ok"
+        );
     }
 
     #[test]
     fn test_create_from_change_creates_mirror_item() {
         let (primary, secondary, repo) = setup();
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "changed.txt", "oldhash", 10, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "changed.txt", "oldhash", 10, None)
+            .unwrap();
 
         let item = create_from_change(&repo, file.id).unwrap();
         assert_eq!(item.action, "mirror");
@@ -204,18 +266,31 @@ mod tests {
         let hash = checksum::checksum_bytes(content);
         fs::write(primary.path().join("cyc.txt"), content).unwrap();
 
-        let pair = repo.create_drive_pair("p", primary.path().to_str().unwrap(), secondary.path().to_str().unwrap()).unwrap();
-        let file = repo.create_tracked_file(pair.id, "cyc.txt", &hash, content.len() as i64, None).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "cyc.txt", &hash, content.len() as i64, None)
+            .unwrap();
 
         // Mirror is missing
         let result = integrity::check_file_integrity(&pair, &file).unwrap();
         assert_eq!(result.status, integrity::IntegrityStatus::MirrorMissing);
 
-        let item = create_from_integrity_failure(&repo, &file, &result).unwrap().unwrap();
+        let item = create_from_integrity_failure(&repo, &file, &result)
+            .unwrap()
+            .unwrap();
         process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
-        assert!(secondary.path().join("cyc.txt").exists(), "Mirror should be restored");
+        assert!(
+            secondary.path().join("cyc.txt").exists(),
+            "Mirror should be restored"
+        );
     }
 }

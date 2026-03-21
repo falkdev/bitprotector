@@ -1,7 +1,7 @@
+use crate::core::{drive, virtual_path};
+use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use crate::db::repository::Repository;
-use crate::core::virtual_path;
 use std::collections::HashMap;
 
 #[derive(Deserialize)]
@@ -33,23 +33,32 @@ async fn set_virtual_path(
     body: web::Json<SetVirtualPathRequest>,
 ) -> HttpResponse {
     let file_id = path.into_inner();
-    let symlink_base = body.symlink_base.clone().unwrap_or_else(default_symlink_base);
+    let symlink_base = body
+        .symlink_base
+        .clone()
+        .unwrap_or_else(default_symlink_base);
 
     let file = match repo.get_tracked_file(file_id) {
         Ok(f) => f,
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
-    let pair = match repo.get_drive_pair(file.drive_pair_id) {
+    let pair = match drive::load_operational_pair(&repo, file.drive_pair_id) {
         Ok(p) => p,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
-    let real_path = std::path::PathBuf::from(&pair.primary_path).join(&file.relative_path);
+    let real_path = std::path::PathBuf::from(pair.active_path()).join(&file.relative_path);
     let real_path_str = match real_path.to_str() {
         Some(s) => s.to_string(),
         None => return HttpResponse::InternalServerError().body("Invalid path"),
     };
 
-    match virtual_path::set_virtual_path(&repo, &symlink_base, file_id, &body.virtual_path, &real_path_str) {
+    match virtual_path::set_virtual_path(
+        &repo,
+        &symlink_base,
+        file_id,
+        &body.virtual_path,
+        &real_path_str,
+    ) {
         Ok(_) => HttpResponse::Ok().body(format!("Virtual path set for file #{}", file_id)),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
@@ -62,7 +71,10 @@ async fn remove_virtual_path(
     query: web::Query<RefreshQuery>,
 ) -> HttpResponse {
     let file_id = path.into_inner();
-    let symlink_base = query.symlink_base.clone().unwrap_or_else(default_symlink_base);
+    let symlink_base = query
+        .symlink_base
+        .clone()
+        .unwrap_or_else(default_symlink_base);
 
     let file = match repo.get_tracked_file(file_id) {
         Ok(f) => f,
@@ -84,7 +96,10 @@ async fn refresh_symlinks(
     repo: web::Data<Repository>,
     query: web::Query<RefreshQuery>,
 ) -> HttpResponse {
-    let symlink_base = query.symlink_base.clone().unwrap_or_else(default_symlink_base);
+    let symlink_base = query
+        .symlink_base
+        .clone()
+        .unwrap_or_else(default_symlink_base);
 
     let pairs = match repo.list_drive_pairs() {
         Ok(v) => v,
