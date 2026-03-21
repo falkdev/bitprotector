@@ -52,10 +52,29 @@
 │  └──────────┘ └──────────┘ └─────────────┘ │
 ├─────────────────────────────────────────────┤
 │  HTTPS  ←→  Backend REST API (v1)          │
+│             + Static File Serving           │
 └─────────────────────────────────────────────┘
 ```
 
-### 1.3 Project Structure
+### 1.3 Static File Serving
+
+The production frontend is served directly by the **actix-web backend** using the `actix-files` crate — no separate web server (nginx, caddy, etc.) is used.
+
+**Rationale:**
+- Preserves the single-binary, single-process design principle of the project.
+- No additional memory overhead or process management on resource-constrained hardware.
+- The backend already terminates TLS via rustls on port `8443`; static files are served over the same listener with no extra TLS configuration.
+- Frontend and API share the same origin (`https://<host>:8443`), so CORS headers are unnecessary.
+- Simplifies `.deb` packaging to a single systemd service with no nginx dependency.
+
+**How it works in `src/api/server.rs`:**
+1. All `/api/v1/` routes are mounted first and take precedence.
+2. `actix_files::Files::new("/", "/var/lib/bitprotector/frontend").index_file("index.html")` is mounted as a fallback to serve the Vite `dist/` output.
+3. A catch-all `GET /{tail:.*}` handler returns `index.html` for any unmatched path, enabling React Router v6 client-side navigation (e.g. a direct browser request to `/drives` still receives `index.html`).
+
+**Deployment path:** The `.deb` package installs the Vite production build to `/var/lib/bitprotector/frontend/`.
+
+### 1.4 Project Structure
 
 ```
 frontend/
@@ -73,17 +92,17 @@ frontend/
 │   ├── App.tsx                      # Root component + router
 │   ├── api/
 │   │   ├── client.ts               # Axios instance + interceptors
-│   │   ├── auth.ts                  # Auth API calls
-│   │   ├── drives.ts               # Drive pair API calls
-│   │   ├── files.ts                # File tracking API calls
-│   │   ├── virtual-paths.ts        # Virtual path API calls
-│   │   ├── folders.ts              # Tracked folder API calls
-│   │   ├── integrity.ts            # Integrity check API calls
-│   │   ├── sync.ts                 # Sync queue API calls
-│   │   ├── scheduler.ts            # Scheduler API calls
-│   │   ├── logs.ts                 # Event log API calls
-│   │   ├── database.ts             # Database backup API calls
-│   │   └── status.ts               # System status API calls
+│   │   ├── auth.ts                  # Auth API calls (login, validate)
+│   │   ├── drives.ts               # Drive pair CRUD + replacement workflow
+│   │   ├── files.ts                # File tracking + mirror API calls
+│   │   ├── virtual-paths.ts        # Virtual path set/remove/bulk/refresh
+│   │   ├── folders.ts              # Tracked folder CRUD + scan
+│   │   ├── integrity.ts            # Integrity check (single + batch)
+│   │   ├── sync.ts                 # Sync queue + process + run task
+│   │   ├── scheduler.ts            # Scheduler schedule CRUD
+│   │   ├── logs.ts                 # Event log listing
+│   │   ├── database.ts             # Database backup config CRUD + run
+│   │   └── status.ts               # System status API call
 │   ├── stores/
 │   │   ├── auth-store.ts           # Auth state (token, user)
 │   │   ├── drives-store.ts         # Drive pairs state
@@ -121,7 +140,8 @@ frontend/
 │   │   ├── drives/
 │   │   │   ├── DriveList.tsx
 │   │   │   ├── DriveForm.tsx
-│   │   │   └── DriveCard.tsx
+│   │   │   ├── DriveCard.tsx
+│   │   │   └── ReplacementWorkflow.tsx
 │   │   ├── folders/
 │   │   │   ├── FolderList.tsx
 │   │   │   └── FolderForm.tsx
@@ -160,15 +180,17 @@ frontend/
 │   │   ├── usePolling.ts           # Poll for job status updates
 │   │   └── useDebounce.ts
 │   ├── types/
-│   │   ├── api.ts                   # API response types
-│   │   ├── drive.ts
-│   │   ├── file.ts
-│   │   ├── virtual-path.ts
-│   │   ├── integrity.ts
-│   │   ├── sync.ts
-│   │   ├── scheduler.ts
-│   │   ├── log.ts
-│   │   └── status.ts
+│   │   ├── api.ts                   # API response/error types
+│   │   ├── auth.ts                  # Login response (token, username, expires_at)
+│   │   ├── drive.ts                 # Drive pair with states + replacement types
+│   │   ├── file.ts                  # Tracked file (relative_path, checksum, etc.)
+│   │   ├── folder.ts                # Tracked folder + scan result
+│   │   ├── virtual-path.ts          # Virtual path bulk request/response types
+│   │   ├── integrity.ts             # Integrity result + all status values
+│   │   ├── sync.ts                  # Sync queue item + resolve request
+│   │   ├── scheduler.ts             # Schedule config types
+│   │   ├── log.ts                   # Event log entry + event types
+│   │   └── status.ts                # System status (with degraded/rebuilding fields)
 │   ├── lib/
 │   │   ├── utils.ts                 # General utilities
 │   │   └── format.ts               # Date, size, path formatters
@@ -217,6 +239,7 @@ frontend/
 
 **Behavior:**
 - POST to `/api/v1/auth/login`
+- Response includes `token`, `username`, and `expires_at` (ISO 8601 timestamp)
 - On success: store JWT in auth store, redirect to Dashboard
 - On failure: display error message
 - Redirect to Dashboard if already authenticated
@@ -229,16 +252,17 @@ frontend/
 
 **Components:**
 - `StatusOverview` — displays key metrics:
-  - Total tracked files
-  - Mirrored files count
-  - Pending sync items
-  - Integrity issues count
-  - Changed files requiring action
-  - Last integrity check time
-  - Last sync time
-  - Number of drive pairs
+  - `files_tracked` — total tracked files
+  - `files_mirrored` — mirrored files count
+  - `pending_sync` — pending sync items
+  - `integrity_issues` — integrity issues count
+  - `drive_pairs` — number of drive pairs
+  - `degraded_pairs` — pairs with a failed or unavailable slot
+  - `active_secondary_pairs` — pairs running from the secondary side
+  - `rebuilding_pairs` — pairs with a slot being rebuilt
+  - `quiescing_pairs` — pairs with a slot being quiesced for replacement
 - `QuickActions` — buttons for common operations:
-  - Run integrity check
+  - Run integrity check (all files)
   - Process sync queue
   - Trigger database backup
 - `RecentActivity` — latest 10 event log entries
@@ -278,39 +302,51 @@ frontend/
   - Shows folder icons and file count badges
 - `BreadcrumbNav` — current virtual path as clickable breadcrumbs
 - `FileGrid` — sortable table/grid of files in the current virtual folder
-  - Columns: Name, Size, Checksum (truncated), Mirror status, Last verified, Actions
+  - Columns: Name, Size, Checksum (truncated), Mirror status (`is_mirrored`), Last verified, Actions
   - Toggle between grid and list view
   - Multi-select support for bulk operations
 - `FileDetails` — detail panel for selected file showing:
-  - Full real path (primary drive)
-  - Full mirror path (secondary drive)
-  - BLAKE3 checksum
-  - Drive pair name
-  - Last verification timestamp
-  - Mirror status
+  - `relative_path` — path relative to the drive pair root
+  - Resolved active-side path (computed from drive pair's `active_role`)
+  - Resolved standby-side path (computed from the other slot)
+  - `checksum` — BLAKE3 hex hash
+  - Drive pair name and ID
+  - `last_verified` timestamp
+  - `is_mirrored` boolean
+  - `file_size` in human-readable format
 - `FileActions` — per-file context menu:
-  - Verify integrity
-  - Edit virtual path
-  - Remove tracking
-  - View logs for this file
+  - Verify integrity (`POST /integrity/check/{id}`)
+  - Mirror to standby (`POST /files/{id}/mirror`)
+  - Edit virtual path (`PUT /virtual-paths/{file_id}`)
+  - Remove tracking (`DELETE /files/{id}`)
+  - View logs for this file (`GET /logs?file_id={id}`)
 
-**Data Sources:** `GET /api/v1/files`, `GET /api/v1/virtual-paths`
+**Data Sources:** `GET /api/v1/files`, `GET /api/v1/virtual-paths`, `GET /api/v1/drives`
+
+> **Note:** Files use `relative_path` (relative to the drive pair root), not absolute paths. The frontend must resolve the full path by joining the drive pair's active/standby paths with the `relative_path`.
 
 ---
 
 ### 2.4 Drives Page (`DrivesPage.tsx`)
 
-**Purpose:** Manage drive pairs.
+**Purpose:** Manage drive pairs, view drive health, and perform replacement workflows.
 
 **Components:**
 - `DriveList` — cards or table showing all drive pairs
-  - Each card shows: name, primary path, secondary path, file count
+  - Each card shows: name, primary path, secondary path, `primary_state`, `secondary_state`, `active_role`
+  - Color-coded state badges: active (green), quiescing (yellow), failed (red), rebuilding (blue)
 - `DriveForm` — modal form for creating/editing drive pairs
   - Fields: name, primary path, secondary path
   - Validation: paths must be non-empty and different
 - `DriveCard` — individual drive pair display with edit/delete actions
+- `ReplacementWorkflow` — UI for the drive replacement lifecycle:
+  - "Mark for Replacement" button → `POST /drives/{id}/replacement/mark` (with role selector)
+  - "Cancel Replacement" button → `POST /drives/{id}/replacement/cancel`
+  - "Confirm Failure" button → `POST /drives/{id}/replacement/confirm`
+  - "Assign Replacement Drive" form → `POST /drives/{id}/replacement/assign` (role, new_path, skip_validation)
+  - State machine visualization: `active → quiescing → failed → rebuilding → active`
 
-**Data Source:** `GET /api/v1/drives`, `POST/PUT/DELETE /api/v1/drives`
+**Data Source:** `GET /api/v1/drives`, `POST/PUT/DELETE /api/v1/drives`, `POST /api/v1/drives/{id}/replacement/*`
 
 ---
 
@@ -320,30 +356,40 @@ frontend/
 
 **Components:**
 - `FolderList` — table showing tracked folders
-  - Columns: Path, Drive Pair, Auto Virtual Path, Default Virtual Base
-- `FolderForm` — modal form for adding/editing tracked folders
+  - Columns: Path, Drive Pair, Auto Virtual Path, Default Virtual Base, Created At
+  - "Scan" button per folder → `POST /folders/{id}/scan` (discovers new files, detects changes)
+- `FolderForm` — modal form for adding tracked folders
   - Fields: drive pair (select), folder path, auto virtual path (toggle), default virtual base
+  - Note: There is no PUT endpoint — folders cannot be edited after creation, only deleted and re-created
 
-**Data Source:** `GET /api/v1/folders`, `POST/PUT/DELETE /api/v1/folders`
+**Data Source:** `GET /api/v1/folders`, `POST/DELETE /api/v1/folders`, `POST /api/v1/folders/{id}/scan`
 
 ---
 
 ### 2.6 Integrity Page (`IntegrityPage.tsx`)
 
-**Purpose:** View integrity check status and results, trigger checks.
+**Purpose:** View integrity check results and trigger checks.
 
 **Components:**
-- `IntegrityStatus` — current/last check status
-  - Progress bar during active check
-  - Summary: passed, master corrupted, mirror corrupted, both corrupted, auto-recovered
+- `IntegrityStatus` — summary of the last batch check results
+  - Counts by status: ok, master_corrupted, mirror_corrupted, both_corrupted, master_missing, mirror_missing, primary_drive_unavailable, secondary_drive_unavailable
+  - Number auto-recovered
 - `IntegrityResults` — detailed results table
-  - File path, status, master checksum, mirror checksum, action taken
-- `CorruptionAlert` — prominent alert banner for files requiring user action
-- "Run Integrity Check" button
+  - Columns: File ID, Relative Path, Status, Recovered
+  - Color-coded status badges
+  - Sortable and filterable
+- `CorruptionAlert` — prominent alert banner when both-corrupted or missing files exist
+- "Check Single File" — select a file and run `POST /integrity/check/{id}?recover=true`
+  - Returns: `file_id`, `status`, `master_valid`, `mirror_valid`, `recovered`
+- "Check All Files" button → `GET /integrity/check-all?recover=true`
+  - Optional `drive_id` filter to limit to one drive pair
+  - Returns: `{ "results": [{ "file_id", "status", "recovered" }] }`
 
-**Data Source:** `POST /api/v1/integrity/check`, `GET /api/v1/integrity/check/{job_id}`
+**Data Source:** `POST /api/v1/integrity/check/{id}`, `GET /api/v1/integrity/check-all`
 
-**Polling:** When a check is running, poll job status every 2 seconds via `usePolling` hook.
+**Note:** Both endpoints are synchronous — the response contains the full results. For batch checks on large file sets, the frontend should display a loading indicator during the request. There is no job ID or polling mechanism.
+
+**Valid `status` values:** `ok`, `master_corrupted`, `mirror_corrupted`, `both_corrupted`, `master_missing`, `mirror_missing`, `primary_drive_unavailable`, `secondary_drive_unavailable`
 
 ---
 
@@ -352,16 +398,19 @@ frontend/
 **Purpose:** View and manage the sync queue.
 
 **Components:**
-- `SyncQueueTable` — filterable table of queue items
-  - Columns: File, Action, Status, Created, Completed, Error
-  - Filter by status: pending, in_progress, completed, failed
+- `SyncQueueTable` — filterable, paginated table of queue items
+  - Columns: File ID, Action, Status, Error Message, Created, Completed
+  - Filter by status: `pending`, `in_progress`, `completed`, `failed`
+  - Action values: `mirror`, `restore_master`, `restore_mirror`, `verify`, `user_action_required`
 - `SyncQueueItem` — row with action button for items requiring resolution
-- `ResolveDialog` — modal for resolving "both corrupted" items
-  - Options: Keep master, Keep mirror, Provide new file
-  - File path input for "provide new" option
-- "Process Queue" button to trigger sync
+- `ResolveDialog` — modal for resolving `user_action_required` items
+  - Resolution options: `keep_master`, `keep_mirror`, `provide_new`
+  - File path input field (required when resolution is `provide_new`, via `new_file_path`)
+- "Process Queue" button → `POST /api/v1/sync/process` (processes all pending items)
+- "Run Task" buttons → `POST /api/v1/sync/run/{task}` where `{task}` is `sync` or `integrity-check`
+- "Add Queue Item" form → `POST /api/v1/sync/queue` with `tracked_file_id` and `action`
 
-**Data Source:** `GET /api/v1/sync/queue`, `POST /api/v1/sync/run`, `POST /api/v1/sync/queue/{id}/resolve`
+**Data Source:** `GET /api/v1/sync/queue`, `POST /api/v1/sync/process`, `POST /api/v1/sync/run/{task}`, `POST /api/v1/sync/queue/{id}/resolve`
 
 ---
 
@@ -370,17 +419,22 @@ frontend/
 **Purpose:** Dedicated page for managing virtual path assignments, including bulk operations.
 
 **Components:**
-- `VirtualPathTree` — tree view of current virtual path structure
+- `VirtualPathTree` — tree view of current virtual path structure (built from `virtual_path` fields on tracked files)
 - `PathMappingForm` — form to assign/edit a single file's virtual path
+  - Fields: file selector, `virtual_path`, optional `symlink_base` override
+  - Calls `PUT /virtual-paths/{file_id}`
 - `BulkAssignDialog` — dialog for bulk operations:
-  - Select drive pair
-  - Select source folder
-  - Define virtual base
-  - Define prefix to strip
+  - **Explicit bulk** (`POST /virtual-paths/bulk`): array of `{ file_id, virtual_path }` entries
+  - **Folder-based bulk** (`POST /virtual-paths/bulk-from-real`): select drive pair (`drive_pair_id`), folder path (`folder_path`), virtual base (`virtual_base`)
+  - Both return `{ succeeded: [file_ids], failed: [{ file_id, error }] }`
   - Preview of resulting mappings before applying
-- "Refresh Symlinks" button
+- `RemoveVirtualPath` — action to remove a file's virtual path: `DELETE /virtual-paths/{file_id}`
+- "Refresh Symlinks" button → `POST /virtual-paths/refresh` (regenerates all symlinks on disk)
+  - Returns: `{ created, removed, errors }`
 
-**Data Source:** `GET /api/v1/virtual-paths`, `PUT /api/v1/files/{id}/virtual-path`, `POST /api/v1/virtual-paths/bulk`, `POST /api/v1/virtual-paths/bulk-from-real`, `POST /api/v1/virtual-paths/refresh-symlinks`
+**Data Source:** `GET /api/v1/files` (files with virtual_path), `PUT /api/v1/virtual-paths/{file_id}`, `DELETE /api/v1/virtual-paths/{file_id}`, `POST /api/v1/virtual-paths/bulk`, `POST /api/v1/virtual-paths/bulk-from-real`, `POST /api/v1/virtual-paths/refresh`
+
+> **Note:** There is no dedicated `GET /virtual-paths` list endpoint. Virtual path data is obtained from the `virtual_path` field on tracked files (`GET /files?virtual_prefix=...`). The `symlink_base` parameter can optionally override the default symlink directory on any virtual path operation.
 
 ---
 
@@ -390,13 +444,16 @@ frontend/
 
 **Components:**
 - `ScheduleList` — table of configured schedules
-  - Columns: Task Type, Cron/Interval, Enabled, Last Run, Next Run
-  - Enable/disable toggle per schedule
+  - Columns: Task Type, Cron Expression, Interval (seconds), Enabled, Last Run, Next Run
+  - Enable/disable toggle per schedule (via `PUT /scheduler/schedules/{id}` with `{ enabled: bool }`)
 - `ScheduleForm` — modal for creating/editing schedules
-  - Fields: task type (select: sync / integrity_check), cron expression or interval, enabled toggle
+  - Fields: `task_type` (select: `sync` / `integrity_check`), `cron_expr` (optional), `interval_seconds` (optional), `enabled` toggle
+  - At least one of `cron_expr` or `interval_seconds` must be provided
   - Cron expression helper/validation
 
-**Data Source:** `GET /api/v1/scheduler`, `POST/PUT/DELETE /api/v1/scheduler`
+**Data Source:** `GET /api/v1/scheduler/schedules` (returns `{ "schedules": [...] }`), `POST/PUT/DELETE /api/v1/scheduler/schedules/{id}`
+
+> **Note:** Schedule changes automatically reload the background scheduler.
 
 ---
 
@@ -423,12 +480,17 @@ frontend/
 **Purpose:** Manage database backup destinations and trigger backups.
 
 **UI Elements:**
-- Table of backup configurations: path, drive label, max copies, enabled, last backup
-- Add/edit/delete backup destinations
-- "Run Backup Now" button
+- Table of backup configurations: `backup_path`, `drive_label`, `max_copies`, `enabled`, `last_backup`, `created_at`
+- Add backup destinations (`POST /database/backups` — fields: `backup_path` required; `drive_label`, `max_copies` (default 5), `enabled` (default true) optional)
+- Edit backup destinations (`PUT /database/backups/{id}` — only `max_copies` and `enabled` can be updated)
+- Delete backup destinations (`DELETE /database/backups/{id}`)
+- "Run Backup Now" button → `POST /api/v1/database/backups/run?db_path=<path>`
+  - **Requires** `db_path` query parameter (absolute path to the live database file)
+  - The frontend should store or configure the database path (from settings or env)
+  - Returns per-destination results: `[{ backup_config_id, backup_path, status, error }]`
 - Results display after backup execution
 
-**Data Source:** `GET /api/v1/database/backups`, `POST/PUT/DELETE /api/v1/database/backups`, `POST /api/v1/database/backups/run`
+**Data Source:** `GET /api/v1/database/backups`, `POST/PUT/DELETE /api/v1/database/backups`, `POST /api/v1/database/backups/run?db_path=...`
 
 ---
 
@@ -444,10 +506,11 @@ frontend/
 ### 3.2 Authentication Flow
 
 1. User submits credentials on Login page
-2. POST `/api/v1/auth/login` → receive JWT
-3. Store JWT in Zustand auth store (persisted to sessionStorage)
+2. POST `/api/v1/auth/login` → receive `{ token, username, expires_at }`
+3. Store JWT and `expires_at` in Zustand auth store (persisted to sessionStorage)
 4. All subsequent requests include `Authorization: Bearer <token>`
-5. On token expiry or 401 response → redirect to login
+5. On page load, validate token via `GET /api/v1/auth/validate` → returns `{ username, valid }`
+6. On token expiry (check `expires_at` client-side) or 401 response → clear auth state → redirect to login
 
 ### 3.3 Protected Routing
 
@@ -458,11 +521,13 @@ frontend/
 
 ### 3.4 Polling Hook (`usePolling`)
 
-Used for monitoring long-running operations (integrity checks, sync jobs):
-- Accepts a fetch function and interval (default 2s)
+Used for monitoring changing state (sync queue progress, system status refresh):
+- Accepts a fetch function and interval (default 5s)
 - Calls fetch function on interval
 - Returns current data, loading state, error state
-- Auto-stops when job reaches terminal state (completed/failed)
+- Can be paused/resumed manually
+
+> **Note:** Integrity checks are synchronous — the API returns full results in the response. No polling is needed for integrity operations. The polling hook is useful for refreshing the sync queue status, system status dashboard, and similar views.
 
 ---
 
@@ -495,14 +560,14 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement login flow, auth state, and application shell.
 
 **Steps:**
-1. Implement TypeScript types for auth (`types/api.ts`, `types/auth.ts`)
-2. Implement auth API client (`api/auth.ts`)
-3. Implement auth Zustand store (`stores/auth-store.ts`)
+1. Implement TypeScript types for auth (`types/api.ts`, `types/auth.ts` — `LoginResponse` has `token`, `username`, `expires_at`)
+2. Implement auth API client (`api/auth.ts` — `login()` and `validate()` calls)
+3. Implement auth Zustand store (`stores/auth-store.ts` — persist token + expires_at to sessionStorage)
 4. Implement `LoginPage.tsx` with form validation
 5. Implement `AppLayout.tsx` with sidebar and header
 6. Implement `Sidebar.tsx` with navigation links
 7. Implement `Header.tsx` with user info and logout
-8. Implement `ProtectedRoute.tsx`
+8. Implement `ProtectedRoute.tsx` — validates token via `GET /auth/validate` on mount
 9. Configure React Router with auth-guarded routes
 10. Implement `useAuth` hook
 
@@ -524,18 +589,18 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement the Dashboard page with system status overview.
 
 **Steps:**
-1. Implement status types (`types/status.ts`)
+1. Implement status types (`types/status.ts` — fields: `files_tracked`, `files_mirrored`, `pending_sync`, `integrity_issues`, `drive_pairs`, `degraded_pairs`, `active_secondary_pairs`, `rebuilding_pairs`, `quiescing_pairs`)
 2. Implement status API client (`api/status.ts`)
 3. Implement status store (`stores/status-store.ts`)
 4. Implement logs API client (partial — recent entries) (`api/logs.ts`)
 5. Implement `DashboardPage.tsx`
-6. Implement `StatusOverview.tsx` — status metric cards
-7. Implement `QuickActions.tsx` — action buttons
+6. Implement `StatusOverview.tsx` — status metric cards including drive health indicators
+7. Implement `QuickActions.tsx` — action buttons (integrity check-all, sync process, database backup run)
 8. Implement `RecentActivity.tsx` — recent log entries list
 
 **Tests:**
 - Unit: Status store fetches and stores data correctly
-- Component: StatusOverview — renders all metric values
+- Component: StatusOverview — renders all metric values including drive health fields
 - Component: QuickActions — buttons trigger correct API calls
 - Component: RecentActivity — renders log entries
 - Component: DashboardPage — displays loading state, then data
@@ -546,27 +611,30 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 ---
 
 ### Milestone 4: Drive Pair Management
-**Objective:** Implement drive pair configuration UI.
+**Objective:** Implement drive pair configuration UI with drive health and replacement workflow.
 
 **Steps:**
-1. Implement drive types (`types/drive.ts`)
-2. Implement drives API client (`api/drives.ts`)
+1. Implement drive types (`types/drive.ts` — include `primary_state`, `secondary_state`, `active_role` fields; replacement request types)
+2. Implement drives API client (`api/drives.ts` — CRUD + mark/cancel/confirm/assign replacement)
 3. Implement drives store (`stores/drives-store.ts`)
 4. Implement `DrivesPage.tsx`
-5. Implement `DriveList.tsx`
-6. Implement `DriveCard.tsx`
+5. Implement `DriveList.tsx` — with state badges and health indicators
+6. Implement `DriveCard.tsx` — show all state fields with color coding
 7. Implement `DriveForm.tsx` with validation
-8. Implement `ConfirmDialog.tsx` for delete confirmation
+8. Implement `ReplacementWorkflow.tsx` — step-by-step replacement UI
+9. Implement `ConfirmDialog.tsx` for delete confirmation
 
 **Tests:**
 - Unit: Drives store — CRUD operations update state correctly
-- Component: DriveList — renders all drive pairs
+- Component: DriveList — renders all drive pairs with correct state badges
 - Component: DriveForm — validates required fields, path uniqueness
-- Component: DriveCard — displays info, edit/delete buttons work
+- Component: DriveCard — displays info including states, edit/delete buttons work
+- Component: ReplacementWorkflow — mark/cancel/confirm/assign actions work
 - Component: ConfirmDialog — confirms or cancels action
 - E2E: Create, edit, and delete a drive pair
+- E2E: Walk through a planned drive replacement workflow
 
-**Commit:** `feat: drive pair management page with CRUD operations`
+**Commit:** `feat: drive pair management page with CRUD and replacement workflow`
 
 ---
 
@@ -574,15 +642,15 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement the primary file browser interface.
 
 **Steps:**
-1. Implement file types (`types/file.ts`, `types/virtual-path.ts`)
-2. Implement files API client (`api/files.ts`)
-3. Implement virtual paths API client (`api/virtual-paths.ts`)
+1. Implement file types (`types/file.ts` — `id`, `drive_pair_id`, `relative_path`, `checksum`, `file_size`, `virtual_path`, `is_mirrored`, `last_verified`, `created_at`, `updated_at`; `types/virtual-path.ts`)
+2. Implement files API client (`api/files.ts` — list with pagination, get, track, mirror, delete)
+3. Implement virtual paths API client (`api/virtual-paths.ts` — set, remove, bulk, bulk-from-real, refresh)
 4. Implement files store (`stores/files-store.ts`)
-5. Implement virtual paths store (`stores/virtual-paths-store.ts`)
+5. Implement virtual paths store (`stores/virtual-paths-store.ts` — built from file virtual_path fields)
 6. Implement `FileBrowserPage.tsx`
-7. Implement `FileTree.tsx` — virtual path tree sidebar
+7. Implement `FileTree.tsx` — virtual path tree sidebar (built from `virtual_path` fields on files)
 8. Implement `BreadcrumbNav.tsx`
-9. Implement `FileGrid.tsx` — sortable file table with pagination
+9. Implement `FileGrid.tsx` — sortable file table with pagination (API returns `{ files, total, page, per_page }`)
 10. Implement `FileRow.tsx` — individual file row with status indicators
 11. Implement `Pagination.tsx` shared component
 12. Implement `DataTable.tsx` shared component
@@ -605,13 +673,14 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement file detail panel and file actions.
 
 **Steps:**
-1. Implement `FileDetails.tsx` — detail panel for selected file
+1. Implement `FileDetails.tsx` — detail panel showing relative_path, resolved paths, checksum, drive pair, mirror status
 2. Implement `FileActions.tsx` — context menu with actions
-3. Wire "Verify Integrity" action to API
-4. Wire "Edit Virtual Path" to inline edit or modal
-5. Wire "Remove Tracking" with confirmation dialog
-6. Wire "View Logs" to filtered logs view
-7. Implement multi-select for bulk operations in FileGrid
+3. Wire "Verify Integrity" action → `POST /integrity/check/{id}?recover=true`
+4. Wire "Mirror File" action → `POST /files/{id}/mirror`
+5. Wire "Edit Virtual Path" → `PUT /virtual-paths/{file_id}`
+6. Wire "Remove Tracking" → `DELETE /files/{id}` with confirmation dialog
+7. Wire "View Logs" → navigate to logs page with `?file_id={id}` filter
+8. Implement multi-select for bulk operations in FileGrid
 
 **Tests:**
 - Component: FileDetails — displays all file metadata
@@ -629,22 +698,22 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 
 **Steps:**
 1. Implement `VirtualPathManagerPage.tsx`
-2. Implement `VirtualPathTree.tsx` — full tree view
-3. Implement `PathMappingForm.tsx`
+2. Implement `VirtualPathTree.tsx` — full tree view (built from file `virtual_path` fields)
+3. Implement `PathMappingForm.tsx` — single file virtual path assignment via `PUT /virtual-paths/{file_id}`
 4. Implement `BulkAssignDialog.tsx`:
-   - Drive pair selector
-   - Source folder browser
-   - Virtual base input
-   - Prefix strip input
+   - **Explicit bulk mode** — list of `{ file_id, virtual_path }` entries → `POST /virtual-paths/bulk`
+   - **Folder-based mode** — drive pair selector, `folder_path`, `virtual_base` → `POST /virtual-paths/bulk-from-real`
+   - Both return `{ succeeded: [...], failed: [...] }`
    - Preview table of resulting mappings
    - Apply button
-5. Implement "Refresh Symlinks" action
+5. Implement `RemoveVirtualPath` action → `DELETE /virtual-paths/{file_id}`
+6. Implement "Refresh Symlinks" action → `POST /virtual-paths/refresh`
 
 **Tests:**
 - Component: VirtualPathTree — renders full path hierarchy
 - Component: PathMappingForm — validates and submits path mapping
 - Component: BulkAssignDialog — preview shows correct computed paths
-- Component: BulkAssignDialog — apply triggers correct API call
+- Component: BulkAssignDialog — apply triggers correct API call (bulk or bulk-from-real)
 - E2E: Bulk assign virtual paths from folder, verify preview, apply
 
 **Commit:** `feat: virtual path manager with bulk assignment and symlink refresh`
@@ -655,19 +724,21 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement tracked folder management UI.
 
 **Steps:**
-1. Implement folder types (`types/folder.ts` if not done)
-2. Implement folders API client (`api/folders.ts`)
+1. Implement folder types (`types/folder.ts` — `id`, `drive_pair_id`, `folder_path`, `auto_virtual_path`, `default_virtual_base`, `created_at`)
+2. Implement folders API client (`api/folders.ts` — list, get, create, delete, scan)
 3. Implement `FoldersPage.tsx`
-4. Implement `FolderList.tsx`
-5. Implement `FolderForm.tsx` with drive pair selector and auto-virtual-path toggle
+4. Implement `FolderList.tsx` — with "Scan" button per folder
+5. Implement `FolderForm.tsx` with drive pair selector and auto-virtual-path toggle (create only — no edit)
+6. Implement scan results display (`POST /folders/{id}/scan` → `{ new_files, changed_files }`)
 
 **Tests:**
-- Unit: Folders API client — correct requests for CRUD
-- Component: FolderList — renders all tracked folders
+- Unit: Folders API client — correct requests for create, delete, scan
+- Component: FolderList — renders all tracked folders with scan buttons
 - Component: FolderForm — validates and submits, drive pair selector works
-- E2E: Add tracked folder with auto-virtual-path, verify in list
+- Component: Scan results — shows new/changed file counts
+- E2E: Add tracked folder with auto-virtual-path, scan it, verify results
 
-**Commit:** `feat: tracked folder management page`
+**Commit:** `feat: tracked folder management page with scan support`
 
 ---
 
@@ -675,31 +746,31 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement integrity checking UI and sync queue management.
 
 **Steps:**
-1. Implement integrity types (`types/integrity.ts`)
-2. Implement integrity API client (`api/integrity.ts`)
-3. Implement sync types (`types/sync.ts`)
-4. Implement sync API client (`api/sync.ts`)
+1. Implement integrity types (`types/integrity.ts` — all 8 status values, single/batch result types)
+2. Implement integrity API client (`api/integrity.ts` — `checkFile(id, recover)`, `checkAll(driveId, recover)`)
+3. Implement sync types (`types/sync.ts` — queue item, resolve request with `keep_master`/`keep_mirror`/`provide_new`)
+4. Implement sync API client (`api/sync.ts` — list queue, add item, get item, resolve, process, run task)
 5. Implement sync store (`stores/sync-store.ts`)
-6. Implement `usePolling` hook
+6. Implement `usePolling` hook (for sync queue refresh, not integrity polling)
 7. Implement `IntegrityPage.tsx`
-8. Implement `IntegrityStatus.tsx` — progress bar and status
-9. Implement `IntegrityResults.tsx` — results table
+8. Implement `IntegrityStatus.tsx` — summary of last batch results (no progress bar — API is synchronous)
+9. Implement `IntegrityResults.tsx` — results table with all status types
 10. Implement `CorruptionAlert.tsx` — alert banner
 11. Implement `SyncQueuePage.tsx`
 12. Implement `SyncQueueTable.tsx` — filterable queue table
 13. Implement `SyncQueueItem.tsx`
-14. Implement `ResolveDialog.tsx` — resolution modal for both-corrupted items
+14. Implement `ResolveDialog.tsx` — resolution modal for `user_action_required` items
 
 **Tests:**
-- Unit: usePolling — polls at interval, stops on terminal state
+- Unit: usePolling — polls at interval, can be paused/resumed
 - Unit: Sync store — filters by status correctly
-- Component: IntegrityStatus — shows progress during check, summary after
-- Component: IntegrityResults — renders result rows with correct status colors
-- Component: CorruptionAlert — displays when both-corrupted files exist
+- Component: IntegrityStatus — shows loading during API call, summary after completion
+- Component: IntegrityResults — renders result rows with correct status colors for all 8 statuses
+- Component: CorruptionAlert — displays when both-corrupted or missing files exist
 - Component: SyncQueueTable — filters by status, renders items correctly
-- Component: ResolveDialog — options render, submission sends correct payload
-- E2E: Trigger integrity check → monitor progress → view results
-- E2E: View sync queue → resolve a both-corrupted item
+- Component: ResolveDialog — options render (`keep_master`, `keep_mirror`, `provide_new`), submission sends correct payload
+- E2E: Trigger integrity check-all → view results
+- E2E: View sync queue → resolve a user_action_required item
 
 **Commit:** `feat: integrity check and sync queue management pages`
 
@@ -709,16 +780,16 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement scheduler configuration UI.
 
 **Steps:**
-1. Implement scheduler types (`types/scheduler.ts`)
-2. Implement scheduler API client (`api/scheduler.ts`)
+1. Implement scheduler types (`types/scheduler.ts` — `id`, `task_type`, `cron_expr`, `interval_seconds`, `enabled`, `last_run`, `next_run`, `created_at`, `updated_at`)
+2. Implement scheduler API client (`api/scheduler.ts` — CRUD on `/scheduler/schedules`; response wraps list in `{ "schedules": [...] }`)
 3. Implement `SchedulerPage.tsx`
 4. Implement `ScheduleList.tsx` with enable/disable toggle
-5. Implement `ScheduleForm.tsx` with cron expression input and interval option
+5. Implement `ScheduleForm.tsx` with cron expression input and interval option (at least one required)
 
 **Tests:**
-- Component: ScheduleList — renders schedules, toggle changes enabled state
-- Component: ScheduleForm — validates cron expression format
-- Component: ScheduleForm — interval and cron are mutually exclusive options
+- Component: ScheduleList — renders schedules, toggle changes enabled state via PUT
+- Component: ScheduleForm — validates that at least one of cron_expr or interval_seconds is provided
+- Component: ScheduleForm — task_type restricted to `sync` or `integrity_check`
 - E2E: Create schedule, toggle enable/disable, delete schedule
 
 **Commit:** `feat: scheduler configuration page`
@@ -729,12 +800,12 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement event log viewing with filters.
 
 **Steps:**
-1. Implement log types (`types/log.ts`)
-2. Implement logs API client (`api/logs.ts` — complete)
+1. Implement log types (`types/log.ts` — event types: `file_created`, `file_edited`, `file_mirrored`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`)
+2. Implement logs API client (`api/logs.ts` — list with filters, get by id; response is a flat JSON array)
 3. Implement logs store (`stores/logs-store.ts`)
 4. Implement `LogsPage.tsx`
-5. Implement `LogFilter.tsx` — event type multiselect, date range, file search
-6. Implement `LogTable.tsx` — paginated, expandable rows, color-coded types
+5. Implement `LogFilter.tsx` — event type multiselect, date range (from/to ISO 8601), file ID search
+6. Implement `LogTable.tsx` — paginated (client-side or API `page`/`per_page`), expandable rows, color-coded types
 
 **Tests:**
 - Unit: Logs store — filtering builds correct query params
@@ -751,14 +822,14 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Implement database backup configuration and manual trigger.
 
 **Steps:**
-1. Implement database backup API client (`api/database.ts`)
+1. Implement database backup API client (`api/database.ts` — CRUD on `/database/backups`; `run` requires `db_path` query param)
 2. Implement `DatabaseBackupsPage.tsx`
-3. Implement backup config table with enable/disable and CRUD
-4. Implement "Run Backup Now" with results display
+3. Implement backup config table with enable/disable and CRUD (only `max_copies` and `enabled` are editable via PUT)
+4. Implement "Run Backup Now" with `db_path` parameter and per-destination results display
 
 **Tests:**
 - Component: Backup config table — renders configs, edit/delete work
-- Component: Run backup — shows results after execution
+- Component: Run backup — sends db_path, shows per-destination results after execution
 - E2E: Add backup destination → run backup → view results
 
 **Commit:** `feat: database backup management page`
@@ -794,16 +865,22 @@ Used for monitoring long-running operations (integrity checks, sync jobs):
 **Objective:** Production build and integration with backend packaging.
 
 **Steps:**
-1. Configure Vite production build
-2. Output static assets to `dist/` directory
-3. Configure backend to serve frontend static files (or document reverse proxy setup)
-4. Verify production build works with backend TLS
-5. Include built frontend in .deb package
+1. Configure Vite production build with `base: "/"` and output to `dist/`
+2. Add `actix-files` crate to the backend `Cargo.toml`
+3. In `src/api/server.rs`, mount static file serving after all API routes:
+   - `actix_files::Files::new("/", "/var/lib/bitprotector/frontend").index_file("index.html")`
+   - Add a catch-all `GET /{tail:.*}` handler returning `index.html` to support React Router v6 client-side routing
+4. Verify all API routes at `/api/v1/` still resolve correctly (files mount must come last)
+5. Verify production build works end-to-end with backend TLS on port `8443`
+6. Include built `dist/` output in the `.deb` package, installed to `/var/lib/bitprotector/frontend/`
 
 **Tests:**
 - Unit: Production build completes without errors
-- E2E: Full E2E suite runs against production build
-- Integration: Frontend served by backend, all pages functional
+- Integration: `GET /` returns `index.html` with correct content-type
+- Integration: `GET /drives` (unmatched path) returns `index.html` (React Router fallback)
+- Integration: `GET /api/v1/status` still resolves to the API handler, not static files
+- E2E: Full E2E suite runs against production build served by actix-web
+- Integration: Frontend served by backend, all pages functional over TLS
 
 **Commit:** `feat: production build and packaging integration`
 
@@ -843,15 +920,15 @@ Each E2E spec covers a full user workflow:
 
 | Spec File                  | Workflow                                              |
 |----------------------------|-------------------------------------------------------|
-| `auth.spec.ts`             | Login, session persistence, logout, expired token     |
+| `auth.spec.ts`             | Login, session persistence, token validation, logout  |
 | `file-browser.spec.ts`     | Navigate tree, sort grid, select file, view details   |
-| `drives.spec.ts`           | Create, edit, delete drive pair                       |
-| `integrity.spec.ts`        | Trigger check, monitor progress, view results         |
-| `sync-queue.spec.ts`       | View queue, filter, resolve corrupted item            |
-| `virtual-paths.spec.ts`    | Assign path, bulk assign, refresh symlinks            |
+| `drives.spec.ts`           | Create, edit, delete drive pair; replacement workflow  |
+| `integrity.spec.ts`        | Trigger single + batch check, view results            |
+| `sync-queue.spec.ts`       | View queue, filter, resolve user_action_required item |
+| `virtual-paths.spec.ts`    | Assign path, bulk assign, bulk-from-real, refresh     |
 | `scheduler.spec.ts`        | Create, toggle, delete schedule                       |
 | `logs.spec.ts`             | Filter by type, date range, expand details            |
-| `database-backups.spec.ts` | Add destination, trigger backup, view results         |
+| `database-backups.spec.ts` | Add destination, trigger backup with db_path, results |
 
 ### 5.5 Test Coverage Targets
 
@@ -874,6 +951,9 @@ Each E2E spec covers a full user workflow:
 # Backend API URL
 VITE_API_BASE_URL=https://localhost:8443/api/v1
 
+# Database path (used by the "Run Backup Now" action)
+VITE_DB_PATH=/var/lib/bitprotector/bitprotector.db
+
 # Development only — disable TLS verification
 VITE_DEV_INSECURE=false
 ```
@@ -886,10 +966,11 @@ VITE_DEV_INSECURE=false
 - **File browser as primary interface** — the main view users see and interact with most
 - Clean, minimal design using Shadcn/ui components
 - Consistent color coding for statuses:
-  - Green: healthy / passed / mirrored
-  - Yellow: pending / warning / changed
-  - Red: corrupted / failed / error
-  - Gray: unverified / inactive
+  - Green: healthy / passed / mirrored / active
+  - Yellow: pending / warning / changed / quiescing
+  - Red: corrupted / failed / error / both_corrupted
+  - Blue: rebuilding
+  - Gray: unverified / inactive / missing
 
 ### 7.2 Layout
 - Fixed sidebar navigation (collapsible)
