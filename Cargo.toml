@@ -124,6 +124,22 @@ path = "tests/integration/cli_status.rs"
 name = "packaging"
 path = "tests/integration/packaging.rs"
 
+[[test]]
+name = "api_routes"
+path = "tests/integration/api_routes.rs"
+
+[[test]]
+name = "core_mirror"
+path = "tests/integration/core_mirror.rs"
+
+[[test]]
+name = "core_change_detection"
+path = "tests/integration/core_change_detection.rs"
+
+[[test]]
+name = "core_scheduler"
+path = "tests/integration/core_scheduler.rs"
+
 [package.metadata.deb]
 name = "bitprotector"
 maintainer = "BitProtector Authors <bitprotector@example.com>"
