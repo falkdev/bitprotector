@@ -17,6 +17,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       setChecking(false)
       return
     }
+    setChecking(true)
     validate().then((ok) => {
       setValid(ok)
       setChecking(false)

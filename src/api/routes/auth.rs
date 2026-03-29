@@ -46,7 +46,7 @@ async fn validate(auth: JwtAuth) -> HttpResponse {
 
 /// Register the public login endpoint (no JWT required).
 pub fn configure_public(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/auth").route("/login", web::post().to(login)));
+    cfg.route("/auth/login", web::post().to(login));
 }
 
 /// Register the protected validate endpoint (JWT required).

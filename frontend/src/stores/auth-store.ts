@@ -42,7 +42,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'bitprotector-auth',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
     }
   )
 )

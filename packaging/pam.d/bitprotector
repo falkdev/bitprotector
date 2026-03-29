@@ -1,0 +1,7 @@
+# PAM configuration for BitProtector
+# Delegates to the Ubuntu standard authentication stack.
+# Replace or extend this file to customise authentication for bitprotector.
+
+@include common-auth
+@include common-account
+@include common-session-noninteractive

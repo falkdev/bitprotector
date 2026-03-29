@@ -93,7 +93,7 @@ pub fn validate_token(token: &str, secret: &[u8]) -> anyhow::Result<Claims> {
 
 /// Authenticate a user via PAM. Returns true on success.
 pub fn authenticate_user(username: &str, password: &str) -> bool {
-    let mut client = match pam::Client::with_password("system-auth") {
+    let mut client = match pam::Client::with_password("bitprotector") {
         Ok(c) => c,
         Err(_) => return false,
     };
