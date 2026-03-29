@@ -24,7 +24,12 @@ async fn list_logs(repo: web::Data<Repository>, query: web::Query<ListLogsQuery>
         page,
         per_page,
     ) {
-        Ok((entries, _)) => HttpResponse::Ok().json(entries),
+        Ok((entries, total)) => HttpResponse::Ok().json(serde_json::json!({
+            "logs": entries,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        })),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }

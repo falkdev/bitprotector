@@ -1,4 +1,4 @@
-use crate::api::auth::JwtSecret;
+use crate::api::auth::{JwtSecret, RevokedTokens};
 use crate::api::models::ApiError;
 use crate::core::scheduler::Scheduler;
 use crate::db::repository::{create_pool, Repository};
@@ -95,6 +95,17 @@ where
                     })
                 }
                 Ok(claims) => {
+                    // Check revocation before accepting the token.
+                    if let Some(revoked) = req.app_data::<web::Data<RevokedTokens>>() {
+                        if revoked.is_revoked(&claims) {
+                            let (req, _) = req.into_parts();
+                            let resp = HttpResponse::Unauthorized()
+                                .json(ApiError::new("unauthorized", "Token revoked"));
+                            return Box::pin(async move {
+                                Ok(ServiceResponse::new(req, resp).map_into_right_body())
+                            });
+                        }
+                    }
                     req.extensions_mut().insert(claims);
                     let fut = self.service.call(req);
                     Box::pin(async move {
@@ -210,6 +221,7 @@ where
 
 /// Register all API routes under `/api/v1`.
 /// - `POST /api/v1/auth/login` is public (no JWT required).
+/// - `GET /api/v1/health` is public (no JWT required).
 /// - All other routes are wrapped with `JwtMiddlewareLayer`.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     use crate::api::routes::{
@@ -218,8 +230,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     };
     cfg.service(
         web::scope("/api/v1")
-            // ── Public: login only ──────────────────────────────────────────
+            // ── Public: login + health ──────────────────────────────────────
             .configure(auth::configure_public)
+            .route("/health", web::get().to(health))
             // ── Protected: everything else ──────────────────────────────────
             .service(
                 web::scope("")
@@ -237,6 +250,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                     .configure(status::configure),
             ),
     );
+}
+
+async fn health() -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({ "status": "ok" }))
 }
 
 const FRONTEND_DIST_DIR: &str = "/var/lib/bitprotector/frontend";
@@ -327,6 +344,7 @@ pub async fn run_server(
     let repo_data = web::Data::new(repo);
     let jwt_data = web::Data::new(JwtSecret(jwt_secret));
     let scheduler_data = web::Data::new(scheduler);
+    let revoked_tokens = web::Data::new(RevokedTokens::default());
     let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
     let frontend_dir = PathBuf::from(FRONTEND_DIST_DIR);
 
@@ -344,6 +362,7 @@ pub async fn run_server(
             .app_data(repo_data.clone())
             .app_data(jwt_data.clone())
             .app_data(scheduler_data.clone())
+            .app_data(revoked_tokens.clone())
             .configure(|cfg| configure_application(cfg, Some(frontend_dir.clone())))
     });
 

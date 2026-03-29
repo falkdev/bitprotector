@@ -222,6 +222,41 @@ pub async fn assign_replacement(
     }
 }
 
+/// POST /api/v1/drives/{id}/failover — trigger an emergency failover for a drive pair.
+///
+/// This endpoint evaluates the pair's current active root. If the active drive
+/// is unavailable and the standby is healthy, it immediately switches
+/// `active_role` to the standby and retargets all virtual-path symlinks.
+/// If no failover is needed (both drives are reachable) the endpoint returns
+/// the unchanged pair with `"failover_performed": false`.
+pub async fn emergency_failover(
+    repo: web::Data<Repository>,
+    path: web::Path<i64>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let pair = match repo.get_drive_pair(id) {
+        Ok(p) => p,
+        Err(_) => {
+            return HttpResponse::NotFound().json(ApiError::new(
+                "RESOURCE_NOT_FOUND",
+                &format!("Drive pair {} not found", id),
+            ))
+        }
+    };
+    let previous_role = pair.active_role.clone();
+    match drive::maybe_emergency_failover(&repo, &pair) {
+        Ok(updated) => {
+            let failover_performed = updated.active_role != previous_role;
+            HttpResponse::Ok().json(serde_json::json!({
+                "drive_pair": updated,
+                "failover_performed": failover_performed,
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError()
+            .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
+    }
+}
+
 /// Register drive pair routes on an actix-web ServiceConfig.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -231,6 +266,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::get().to(get_drive_pair))
             .route("/{id}", web::put().to(update_drive_pair))
             .route("/{id}", web::delete().to(delete_drive_pair))
+            .route("/{id}/failover", web::post().to(emergency_failover))
             .route("/{id}/replacement/mark", web::post().to(mark_replacement))
             .route(
                 "/{id}/replacement/confirm",

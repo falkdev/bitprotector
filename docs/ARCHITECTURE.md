@@ -22,12 +22,12 @@ This document describes the overall system design, module responsibilities, data
 
 BitProtector is compiled as a single binary (`bitprotector`) that exposes two interfaces from the same core library:
 
-```
+```text
 ┌─────────────────────────┐  ┌────────────────────────────┐
 │   React Web Frontend    │  │      CLI (bitprotector)    │
 │   (HTTPS / Axios)       │  │      clap subcommands      │
 └────────────┬────────────┘  └─────────────┬──────────────┘
-             │ HTTPS                        │ direct function call
+             │ HTTPS                       │ direct function call
              └──────────────┬──────────────┘
                             ▼
              ┌──────────────────────────────┐
@@ -59,7 +59,7 @@ The Rust crate compiles both a **library** (`bitprotector_lib`, `src/lib.rs`) an
 Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 
 | File | Responsibility |
-|---|---|
+| --- | --- |
 | `checksum.rs` | Compute and verify BLAKE3 hashes for files. Provides the canonical checksum function used everywhere. |
 | `drive.rs` | Drive-role state machine and path resolution helpers. Owns planned quiesce/failover, emergency failover, replacement assignment, rebuild completion, and virtual-path retargeting. |
 | `mirror.rs` | Copy a file from the primary path to the secondary path, verifying the copy with a post-write checksum. Also responsible for restoring a corrupted copy from its healthy counterpart. |
@@ -75,7 +75,7 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, and serialises results to JSON.
 
 | File | Responsibility |
-|---|---|
+| --- | --- |
 | `server.rs` | Build and start the actix-web server. Mounts all route groups, configures TLS via rustls, and injects shared state (`Repository`, `JwtSecret`) as `web::Data`. |
 | `auth.rs` | PAM authentication (`pam` crate) to verify system credentials. Issues and validates JWT tokens (`jsonwebtoken` crate). Provides `JwtAuth` as an actix-web extractor for protecting routes. |
 | `models.rs` | Request and response DTOs (`serde::Deserialize` / `Serialize`). Kept separate from the database structs in `src/db/`. |
@@ -86,7 +86,7 @@ HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, an
 Command-line interface. Parses arguments with `clap` (derive macros) and calls the same core functions as the API routes.
 
 | File | Responsibility |
-|---|---|
+| --- | --- |
 | `mod.rs` | Defines the root `Cli` struct and the `Commands` enum that clap dispatches on. |
 | `ssh_status.rs` | Logic for the `bitprotector status` command — queries the database and formats a one-screen summary suitable for display on SSH login (via `/etc/profile.d/bitprotector-status.sh`). |
 | `commands/` | One file per subcommand group (drives, files, folders, virtual\_paths, integrity, sync, logs, scheduler, database). Each matches the structure of the corresponding API route file. |
@@ -96,7 +96,7 @@ Command-line interface. Parses arguments with `clap` (derive macros) and calls t
 Data persistence. All SQLite access goes through this module.
 
 | File | Responsibility |
-|---|---|
+| --- | --- |
 | `schema.rs` | `CREATE TABLE` statements and schema migration logic. Runs at startup to ensure the database is up to date. |
 | `repository.rs` | Data access object (DAO). One method per database operation. The trait is annotated with `#[cfg_attr(test, mockall::automock)]` so unit tests can inject a mock. |
 | `backup.rs` | Copy the live database file to each configured backup destination, rotating old copies when `max_copies` is exceeded. |
@@ -106,7 +106,7 @@ Connection pooling is provided by `r2d2` + `r2d2_sqlite`. The pool is wrapped in
 ### src/logging/
 
 | File | Responsibility |
-|---|---|
+| --- | --- |
 | `event_logger.rs` | Write structured events to the `event_log` table and simultaneously emit `tracing` spans. Events include file lifecycle changes, integrity outcomes, sync results, and recovery actions. |
 
 ---
@@ -216,30 +216,30 @@ CREATE TABLE db_backup_config (
 
 ## Key Design Decisions
 
-**Single binary, shared core**
+### Single binary, shared core
 
 The CLI and the API server are two entry points into the same library crate. Test code also imports the library directly. This avoids duplicating business logic and ensures CLI and API behave identically for the same operation.
 
-**PAM authentication — no separate user database**
+### PAM authentication — no separate user database
 
 The REST API authenticates against the host's system accounts via PAM. There is no user table in the database. This means any valid system user can be granted access, and password management remains with the OS. The JWT `sub` field records the authenticated username.
 
-**BLAKE3 for checksums**
+### BLAKE3 for checksums
 
 BLAKE3 is faster than SHA-256/SHA-512 on modern hardware and provides sufficient collision resistance. The stored checksum is a hex-encoded 256-bit (32-byte) hash.
 
-**Virtual paths are symlinks on disk**
+### Virtual paths are symlinks on disk
 
 The virtual path system does not intercept file I/O. Instead it creates regular symlinks in a dedicated directory (`symlink_base`). This makes virtual paths transparent to any tool that can follow symlinks, requires no kernel module or FUSE, and is straightforward to regenerate from the database (`POST /virtual-paths/refresh`). During drive failover, the symlink target is refreshed from the pair's `active_role`, so future opens move to the surviving side.
 
-**Drive failover is stateful, not path-swapping in place**
+### Drive failover is stateful, not path-swapping in place
 
 Each drive pair now tracks `primary_state`, `secondary_state`, and `active_role`. Planned replacements move a slot through `active -> quiescing -> failed -> rebuilding -> active`. Unexpected loss of the active root can trigger emergency failover to the healthy side. The logical pair and relative paths stay stable; only the operational source/target root changes.
 
-**r2d2 connection pool for SQLite**
+### r2d2 connection pool for SQLite
 
 Even though SQLite serialises writes, using a pool with `r2d2_sqlite` allows read operations across actix-web worker threads without acquiring a global lock.
 
-**Background task scheduling via OS threads**
+### Background task scheduling via OS threads
 
 Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement.

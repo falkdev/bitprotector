@@ -2,13 +2,14 @@
 
 **Base URL:** `https://<host>:<port>/api/v1`  
 **Transport:** HTTPS only (TLS required)  
-**Authentication:** JWT bearer token (all endpoints except `POST /auth/login`)
+**Authentication:** JWT bearer token (all endpoints except `POST /auth/login` and `GET /health`)
 
 ---
 
 ## Table of Contents
 
 - [Authentication](#authentication)
+- [Health](#health)
 - [Drive Pairs](#drive-pairs)
 - [File Tracking](#file-tracking)
 - [Virtual Paths](#virtual-paths)
@@ -27,7 +28,7 @@
 
 The API uses [PAM](https://en.wikipedia.org/wiki/Linux_PAM) to verify credentials against the host's system accounts, then issues a short-lived JWT. Include the token in every subsequent request:
 
-```
+```http
 Authorization: Bearer <token>
 ```
 
@@ -36,6 +37,7 @@ Authorization: Bearer <token>
 Authenticate with a local system account.
 
 **Request body:**
+
 ```json
 {
     "username": "alice",
@@ -44,6 +46,7 @@ Authenticate with a local system account.
 ```
 
 **Response `200`:**
+
 ```json
 {
     "token": "<jwt>",
@@ -63,12 +66,41 @@ Authenticate with a local system account.
 Check whether the current token is valid. Requires a valid JWT.
 
 **Response `200`:**
+
 ```json
 {
     "username": "alice",
     "valid": true
 }
 ```
+
+### POST `/auth/logout`
+
+Invalidate the current JWT immediately. After this call the token is rejected by the server even if it has not yet expired.
+
+**Response `200`:**
+
+```json
+{ "message": "Logged out" }
+```
+
+**Errors:** `401 Unauthorized` (token already invalid)
+
+---
+
+## Health
+
+### GET `/health`
+
+Liveness probe. Does not require authentication. Returns `200` whenever the process is running and accepting connections.
+
+**Response `200`:**
+
+```json
+{ "status": "ok" }
+```
+
+This endpoint is intended for monitoring systems, load balancers, and systemd watchdogs.
 
 ---
 
@@ -81,6 +113,7 @@ A drive pair binds a **primary** directory to a **secondary** (mirror) directory
 List all configured drive pairs.
 
 **Response `200`:**
+
 ```json
 [
     {
@@ -106,6 +139,7 @@ List all configured drive pairs.
 Create a new drive pair.
 
 **Request body:**
+
 ```json
 {
     "name": "mybackup",
@@ -133,6 +167,7 @@ Get a specific drive pair.
 Update a drive pair. All fields are optional.
 
 **Request body:**
+
 ```json
 {
     "name": "renamed",
@@ -160,6 +195,7 @@ Remove a drive pair. Fails if any tracked files still reference it.
 Start a planned replacement workflow by moving one slot into `quiescing`.
 
 **Request body:**
+
 ```json
 {
     "role": "primary"
@@ -178,6 +214,7 @@ Start a planned replacement workflow by moving one slot into `quiescing`.
 Cancel a planned replacement and return a `quiescing` slot to `active`.
 
 **Request body:**
+
 ```json
 {
     "role": "primary"
@@ -194,6 +231,7 @@ Cancel a planned replacement and return a `quiescing` slot to `active`.
 Confirm that the quiesced drive is now failed. If the failed slot was active, BitProtector switches `active_role` to the surviving side and refreshes virtual paths.
 
 **Request body:**
+
 ```json
 {
     "role": "primary"
@@ -210,6 +248,7 @@ Confirm that the quiesced drive is now failed. If the failed slot was active, Bi
 Assign a new mounted path to a failed slot and queue rebuild work.
 
 **Request body:**
+
 ```json
 {
     "role": "primary",
@@ -219,6 +258,7 @@ Assign a new mounted path to a failed slot and queue rebuild work.
 ```
 
 **Response `200`:**
+
 ```json
 {
     "drive_pair": {
@@ -240,6 +280,25 @@ BitProtector queues rebuild work but does not process it automatically. Run the 
 
 ---
 
+### POST `/drives/{id}/failover`
+
+Trigger an emergency failover for a drive pair immediately. If the currently active drive root is unavailable and the standby slot is healthy and `active`, the server switches `active_role` to the standby and retargets all virtual-path symlinks.
+
+If no failover is needed (both sides are reachable) the request succeeds with `"failover_performed": false` and the pair is returned unchanged.
+
+**Response `200`:**
+
+```json
+{
+    "drive_pair": { ... },
+    "failover_performed": true
+}
+```
+
+**Errors:** `404 Not Found`, `500 Internal Server Error`
+
+---
+
 ## File Tracking
 
 ### GET `/files`
@@ -249,7 +308,7 @@ List tracked files with optional filtering and pagination.
 **Query parameters:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `drive_id` | integer | Filter by drive pair |
 | `virtual_prefix` | string | Filter by virtual path prefix |
 | `mirrored` | boolean | Filter by mirror status |
@@ -257,6 +316,7 @@ List tracked files with optional filtering and pagination.
 | `per_page` | integer | Items per page (default: 50) |
 
 **Response `200`:**
+
 ```json
 {
     "files": [
@@ -286,6 +346,7 @@ List tracked files with optional filtering and pagination.
 Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an initial mirror from the pair's current active side.
 
 **Request body:**
+
 ```json
 {
     "drive_pair_id": 1,
@@ -325,6 +386,7 @@ Stop tracking a file. Does **not** delete the file from disk.
 Trigger an immediate mirror of the file to the secondary path. Requires the standby slot to be available.
 
 **Response `200`:**
+
 ```json
 { "mirrored": true }
 ```
@@ -344,6 +406,7 @@ Virtual paths expose tracked files through a user-defined path, realised as syml
 Set or update the virtual path for a tracked file.
 
 **Request body:**
+
 ```json
 {
     "virtual_path": "/docs/report.pdf",
@@ -365,7 +428,7 @@ Remove the virtual path mapping (and its symlink) from a file.
 **Query parameters:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `symlink_base` | string | Override the symlink base directory |
 
 **Response `200`:** Plain text confirmation.  
@@ -380,10 +443,11 @@ Regenerate all symlinks on disk from the database. Useful after the `symlink_bas
 **Query parameters:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `symlink_base` | string | Override the symlink base directory |
 
 **Response `200`:**
+
 ```json
 {
     "created": 45,
@@ -401,6 +465,7 @@ Tracked folders let BitProtector automatically discover and track new files adde
 ### GET `/folders`
 
 **Response `200`:** Flat JSON array of folder objects:
+
 ```json
 [
     {
@@ -419,6 +484,7 @@ Tracked folders let BitProtector automatically discover and track new files adde
 ### POST `/folders`
 
 **Request body:**
+
 ```json
 {
     "drive_pair_id": 1,
@@ -442,11 +508,32 @@ Tracked folders let BitProtector automatically discover and track new files adde
 
 ---
 
+### PUT `/folders/{id}`
+
+Update a tracked folder's configuration. All fields are optional.
+
+**Request body:**
+
+```json
+{
+    "auto_virtual_path": false,
+    "default_virtual_base": "/new-base"
+}
+```
+
+To clear `default_virtual_base`, pass it explicitly as `null`. Omitting the field leaves the current value unchanged.
+
+**Response `200`:** Updated folder object.  
+**Errors:** `404 Not Found`
+
+---
+
 ### POST `/folders/{id}/scan`
 
 Scan a tracked folder for new and changed files. Newly discovered files are tracked automatically. Changed files are detected by re-hashing.
 
 **Response `200`:**
+
 ```json
 {
     "new_files": 3,
@@ -474,6 +561,7 @@ Stop tracking the folder. Already-tracked files are **not** removed.
 Run an integrity check for one tracked file. Add `?recover=true` to attempt automatic recovery where the healthy counterpart still exists.
 
 **Response `200`:**
+
 ```json
 {
     "file_id": 1,
@@ -502,6 +590,7 @@ Run an integrity check for one tracked file. Add `?recover=true` to attempt auto
 Run integrity checks across all tracked files, or limit them to one drive pair with `?drive_id=<id>`. Add `&recover=true` to enable auto-recovery where possible.
 
 **Response `200`:**
+
 ```json
 {
     "results": [
@@ -530,24 +619,30 @@ When a slot is deliberately failed or rebuilding, integrity checks validate the 
 **Query parameters:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `status` | string | `pending` \| `in_progress` \| `completed` \| `failed` |
 | `page` | integer | Page number |
 | `per_page` | integer | Items per page |
 
-**Response `200`:** Flat JSON array of queue items:
+**Response `200`:**
+
 ```json
-[
-    {
-        "id": 1,
-        "tracked_file_id": 5,
-        "action": "mirror",
-        "status": "pending",
-        "error_message": null,
-        "created_at": "2026-03-15T08:00:00Z",
-        "completed_at": null
-    }
-]
+{
+    "queue": [
+        {
+            "id": 1,
+            "tracked_file_id": 5,
+            "action": "mirror",
+            "status": "pending",
+            "error_message": null,
+            "created_at": "2026-03-15T08:00:00Z",
+            "completed_at": null
+        }
+    ],
+    "total": 42,
+    "page": 1,
+    "per_page": 50
+}
 ```
 
 ---
@@ -557,6 +652,7 @@ When a slot is deliberately failed or rebuilding, integrity checks validate the 
 Manually enqueue a sync action for a tracked file.
 
 **Request body:**
+
 ```json
 {
     "tracked_file_id": 5,
@@ -580,11 +676,46 @@ Get a single sync queue item.
 
 ---
 
+### POST `/sync/queue/{id}/resolve`
+
+Resolve a `user_action_required` sync queue item. This is required when an integrity check finds both copies corrupted and no automatic recovery is possible.
+
+**Request body:**
+
+```json
+{
+    "resolution": "keep_master"
+}
+```
+
+`resolution` is one of:
+
+| Value | Meaning |
+| --- | --- |
+| `keep_master` | Treat the master copy as authoritative; re-mirror it to the secondary |
+| `keep_mirror` | Treat the mirror copy as authoritative; restore it to the primary |
+| `provide_new` | Supply a replacement file; requires `new_file_path` |
+
+When `resolution` is `provide_new`, also include:
+
+```json
+{
+    "resolution": "provide_new",
+    "new_file_path": "/path/to/replacement.dat"
+}
+```
+
+**Response `200`:** Updated queue item object.  
+**Errors:** `400 Bad Request` (invalid resolution or file not found), `404 Not Found`
+
+---
+
 ### POST `/sync/process`
 
 Process all pending sync queue items immediately (synchronous).
 
 **Response `200`:**
+
 ```json
 { "processed": 10 }
 ```
@@ -596,6 +727,7 @@ Process all pending sync queue items immediately (synchronous).
 Run a named task immediately. `{task}` is `sync` or `integrity-check`.
 
 **Response `200`:**
+
 ```json
 {
     "task": "sync",
@@ -610,7 +742,84 @@ Run a named task immediately. `{task}` is `sync` or `integrity-check`.
 
 ## Scheduler
 
-> **Not yet implemented.** The scheduler API endpoints are reserved for a future release. Background tasks can be run on demand via [`POST /sync/process`](#post-syncprocess) and [`POST /sync/run/{task}`](#post-syncruntask). The `schedule_config` table exists in the database schema but schedule management via the API is not yet available.
+Scheduled tasks (periodic sync and integrity checks) are managed through this resource.
+
+### GET `/scheduler/schedules`
+
+List all configured schedules.
+
+**Response `200`:**
+
+```json
+[
+    {
+        "id": 1,
+        "task_type": "sync",
+        "cron_expr": null,
+        "interval_seconds": 3600,
+        "enabled": true,
+        "last_run": "2026-03-29T02:00:00Z",
+        "next_run": "2026-03-29T03:00:00Z",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z"
+    }
+]
+```
+
+`task_type` is `sync` or `integrity_check`.
+
+---
+
+### POST `/scheduler/schedules`
+
+Create a new schedule. At least one of `cron_expr` or `interval_seconds` must be provided.
+
+**Request body:**
+
+```json
+{
+    "task_type": "integrity_check",
+    "interval_seconds": 86400,
+    "enabled": true
+}
+```
+
+**Response `201`:** Created schedule object.  
+**Errors:** `400 Bad Request`
+
+---
+
+### GET `/scheduler/schedules/{id}`
+
+**Response `200`:** Single schedule object.  
+**Errors:** `404 Not Found`
+
+---
+
+### PUT `/scheduler/schedules/{id}`
+
+Update an existing schedule. All fields are optional.
+
+**Request body:**
+
+```json
+{
+    "interval_seconds": 43200,
+    "enabled": false
+}
+```
+
+**Response `200`:** Updated schedule object.  
+**Errors:** `404 Not Found`
+
+---
+
+### DELETE `/scheduler/schedules/{id}`
+
+**Response `204`:** No content.  
+**Errors:** `404 Not Found`
+
+Changes to schedules take effect immediately — the running `Scheduler` reloads after every create, update, or delete.
 
 ---
 
@@ -621,7 +830,7 @@ Run a named task immediately. `{task}` is `sync` or `integrity-check`.
 **Query parameters:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `event_type` | string | Filter by event type (see schema for allowed values) |
 | `file_id` | integer | Filter by tracked file |
 | `from` | string | ISO 8601 start timestamp |
@@ -629,18 +838,24 @@ Run a named task immediately. `{task}` is `sync` or `integrity-check`.
 | `page` | integer | Page number |
 | `per_page` | integer | Items per page |
 
-**Response `200`:** Flat JSON array of log entries:
+**Response `200`:**
+
 ```json
-[
-    {
-        "id": 1,
-        "event_type": "integrity_pass",
-        "tracked_file_id": 5,
-        "message": "Integrity check passed",
-        "details": "master=abc123 mirror=abc123",
-        "created_at": "2026-03-15T12:00:00Z"
-    }
-]
+{
+    "logs": [
+        {
+            "id": 1,
+            "event_type": "integrity_pass",
+            "tracked_file_id": 5,
+            "message": "Integrity check passed",
+            "details": "master=abc123 mirror=abc123",
+            "created_at": "2026-03-15T12:00:00Z"
+        }
+    ],
+    "total": 200,
+    "page": 1,
+    "per_page": 50
+}
 ```
 
 Valid `event_type` values: `file_created`, `file_edited`, `file_mirrored`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`.
@@ -663,6 +878,7 @@ Get a single event log entry.
 List all backup destination configurations.
 
 **Response `200`:** Flat JSON array of backup config objects:
+
 ```json
 [
     {
@@ -684,6 +900,7 @@ List all backup destination configurations.
 Add a backup destination.
 
 **Request body:**
+
 ```json
 {
     "backup_path": "/mnt/backup1/db/",
@@ -732,10 +949,11 @@ Trigger an immediate backup to all enabled destinations.
 **Required query parameter:**
 
 | Parameter | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `db_path` | string | Absolute path to the live database file to copy |
 
 **Response `200`:** Flat JSON array of per-destination results:
+
 ```json
 [
     {
@@ -758,6 +976,7 @@ Trigger an immediate backup to all enabled destinations.
 Return a summary of the system state. This endpoint is also consumed by the SSH login hook (`bitprotector status`).
 
 **Response `200`:**
+
 ```json
 {
     "files_tracked": 150,
@@ -788,7 +1007,7 @@ All error responses follow the same shape:
 ```
 
 | HTTP status | Meaning |
-|---|---|
+| --- | --- |
 | `400 Bad Request` | Missing or invalid request body / query parameters |
 | `401 Unauthorized` | Missing, expired, or invalid JWT |
 | `404 Not Found` | Resource does not exist |

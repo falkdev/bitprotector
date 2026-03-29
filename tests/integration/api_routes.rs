@@ -787,7 +787,7 @@ async fn test_sync_queue_list_empty() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert!(body.as_array().unwrap().is_empty());
+    assert!(body["queue"].as_array().unwrap().is_empty());
 }
 
 #[actix_rt::test]
@@ -1046,7 +1046,7 @@ async fn test_logs_list_empty() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert!(body.as_array().unwrap().is_empty());
+    assert!(body["logs"].as_array().unwrap().is_empty());
 }
 
 #[actix_rt::test]
@@ -1079,7 +1079,7 @@ async fn test_logs_filter_by_event_type() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    let entries = body.as_array().unwrap();
+    let entries = body["logs"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["event_type"], "sync_completed");
 }
@@ -1115,7 +1115,7 @@ async fn test_logs_date_range_filter() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert!(body.as_array().unwrap().is_empty());
+    assert!(body["logs"].as_array().unwrap().is_empty());
 }
 
 // ── Database backups ───────────────────────────────────────────────────────

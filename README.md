@@ -1,6 +1,6 @@
 # BitProtector
 
-**Distributed File Mirror and Integrity Protection System**
+## Distributed File Mirror and Integrity Protection System
 
 Monitors files across redundant storage, detects bit-decay and silent corruption using BLAKE3 checksums, automatically recovers from mirror copies, and supports live drive failover plus replacement rebuilds. Operates as a background daemon with both a CLI tool and a HTTPS REST API.
 
@@ -36,7 +36,7 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 ## Prerequisites
 
 | Requirement | Notes |
-|---|---|
+| --- | --- |
 | Rust stable toolchain | Install via [rustup](https://rustup.rs) |
 | Node.js 20.19+ | Required to build, lint, and test the React frontend |
 | `libpam0g-dev` | PAM headers for system authentication — `sudo apt install libpam0g-dev` |
@@ -84,6 +84,7 @@ sudo dpkg -i target/debian/bitprotector_*.deb
 ```
 
 The package installs:
+
 - Binary to `/usr/bin/bitprotector`
 - Default config to `/etc/bitprotector/config.toml`
 - systemd unit to `/lib/systemd/system/bitprotector.service`
@@ -190,7 +191,7 @@ bitprotector --db /tmp/test.db drives list
 ## Documentation
 
 | Document | Description |
-|---|---|
+| --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module breakdown, and database schema |
 | [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |

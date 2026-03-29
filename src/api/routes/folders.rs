@@ -11,6 +11,13 @@ pub struct AddFolderRequest {
     pub default_virtual_base: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateFolderRequest {
+    pub auto_virtual_path: Option<bool>,
+    /// Pass `null` explicitly to clear the base; omit the field to leave it unchanged.
+    pub default_virtual_base: Option<Option<String>>,
+}
+
 #[derive(Serialize)]
 struct ScanResult {
     new_files: usize,
@@ -62,6 +69,31 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
     }
 }
 
+/// PUT /folders/{id}
+async fn update_folder(
+    repo: web::Data<Repository>,
+    path: web::Path<i64>,
+    body: web::Json<UpdateFolderRequest>,
+) -> HttpResponse {
+    let id = path.into_inner();
+    // Map Option<Option<String>> to Option<Option<&str>> for the repository.
+    let dvb: Option<Option<&str>> = body
+        .default_virtual_base
+        .as_ref()
+        .map(|opt| opt.as_deref());
+    match repo.update_tracked_folder(id, body.auto_virtual_path, dvb) {
+        Ok(folder) => HttpResponse::Ok().json(folder),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {
+                HttpResponse::NotFound().body(msg)
+            } else {
+                HttpResponse::InternalServerError().body(msg)
+            }
+        }
+    }
+}
+
 /// POST /folders/{id}/scan
 async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
     let folder = match repo.get_tracked_folder(path.into_inner()) {
@@ -100,6 +132,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("", web::get().to(list_folders))
             .route("", web::post().to(add_folder))
             .route("/{id}", web::get().to(get_folder))
+            .route("/{id}", web::put().to(update_folder))
             .route("/{id}", web::delete().to(delete_folder))
             .route("/{id}/scan", web::post().to(scan_folder)),
     );

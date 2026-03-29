@@ -1,4 +1,4 @@
-use crate::api::auth::{issue_token, JwtAuth, JwtSecret};
+use crate::api::auth::{issue_token, JwtAuth, JwtSecret, RevokedTokens};
 use crate::api::models::LoginResponse;
 use actix_web::{web, HttpResponse};
 use chrono::{Duration, Utc};
@@ -44,14 +44,24 @@ async fn validate(auth: JwtAuth) -> HttpResponse {
     })
 }
 
+/// POST /auth/logout — invalidate the current token immediately.
+async fn logout(auth: JwtAuth, revoked: web::Data<RevokedTokens>) -> HttpResponse {
+    revoked.revoke(&auth.claims);
+    HttpResponse::Ok().json(serde_json::json!({ "message": "Logged out" }))
+}
+
 /// Register the public login endpoint (no JWT required).
 pub fn configure_public(cfg: &mut web::ServiceConfig) {
     cfg.route("/auth/login", web::post().to(login));
 }
 
-/// Register the protected validate endpoint (JWT required).
+/// Register the protected validate and logout endpoints (JWT required).
 pub fn configure_protected(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/auth").route("/validate", web::get().to(validate)));
+    cfg.service(
+        web::scope("/auth")
+            .route("/validate", web::get().to(validate))
+            .route("/logout", web::post().to(logout)),
+    );
 }
 
 /// Register all auth endpoints (used internally or for backward-compat in tests
@@ -60,6 +70,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/auth")
             .route("/login", web::post().to(login))
-            .route("/validate", web::get().to(validate)),
+            .route("/validate", web::get().to(validate))
+            .route("/logout", web::post().to(logout)),
     );
 }

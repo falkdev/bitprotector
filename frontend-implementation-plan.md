@@ -1,4 +1,5 @@
 # Frontend Implementation Plan
+
 ## Distributed File Mirror and Integrity Protection System
 
 ---
@@ -8,7 +9,7 @@
 ### 1.1 Technology Stack
 
 | Component            | Technology                        |
-|----------------------|-----------------------------------|
+| --- | --- |
 | Framework            | React 18+                         |
 | Language             | TypeScript                        |
 | Build Tool           | Vite                              |
@@ -26,7 +27,7 @@
 
 ### 1.2 High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │                React Frontend               │
 ├─────────────────────────────────────────────┤
@@ -54,6 +55,7 @@
 │  HTTPS  ←→  Backend REST API (v1)          │
 │             + Static File Serving           │
 └─────────────────────────────────────────────┘
+
 ```
 
 ### 1.3 Static File Serving
@@ -61,6 +63,7 @@
 The production frontend is served directly by the **actix-web backend** using the `actix-files` crate — no separate web server (nginx, caddy, etc.) is used.
 
 **Rationale:**
+
 - Preserves the single-binary, single-process design principle of the project.
 - No additional memory overhead or process management on resource-constrained hardware.
 - The backend already terminates TLS via rustls on port `8443`; static files are served over the same listener with no extra TLS configuration.
@@ -68,6 +71,7 @@ The production frontend is served directly by the **actix-web backend** using th
 - Simplifies `.deb` packaging to a single systemd service with no nginx dependency.
 
 **How it works in `src/api/server.rs`:**
+
 1. All `/api/v1/` routes are mounted first and take precedence.
 2. `actix_files::Files::new("/", "/var/lib/bitprotector/frontend").index_file("index.html")` is mounted as a fallback to serve the Vite `dist/` output.
 3. A catch-all `GET /{tail:.*}` handler returns `index.html` for any unmatched path, enabling React Router v6 client-side navigation (e.g. a direct browser request to `/drives` still receives `index.html`).
@@ -76,7 +80,7 @@ The production frontend is served directly by the **actix-web backend** using th
 
 ### 1.4 Project Structure
 
-```
+```text
 frontend/
 ├── index.html
 ├── package.json
@@ -220,6 +224,7 @@ frontend/
 │       ├── logs.spec.ts
 │       └── database-backups.spec.ts
 └── .env.example
+
 ```
 
 ---
@@ -231,6 +236,7 @@ frontend/
 **Purpose:** Authenticate users via local system accounts.
 
 **UI Elements:**
+
 - Application logo and title
 - Username input field
 - Password input field
@@ -238,6 +244,7 @@ frontend/
 - Error message display area
 
 **Behavior:**
+
 - POST to `/api/v1/auth/login`
 - Response includes `token`, `username`, and `expires_at` (ISO 8601 timestamp)
 - On success: store JWT in auth store, redirect to Dashboard
@@ -251,6 +258,7 @@ frontend/
 **Purpose:** Provide an at-a-glance system overview.
 
 **Components:**
+
 - `StatusOverview` — displays key metrics:
   - `files_tracked` — total tracked files
   - `files_mirrored` — mirrored files count
@@ -276,7 +284,8 @@ frontend/
 **Purpose:** Primary interface — file browser style view of all tracked files (Requirement 29).
 
 **Layout:**
-```
+
+```text
 ┌──────────────────────────────────────────────┐
 │  BreadcrumbNav                               │
 ├──────────┬───────────────────────────────────┤
@@ -294,9 +303,11 @@ frontend/
 │          │  - Checksum, paths, drive pair    │
 │          │  - Last verified, mirror status   │
 └──────────┴───────────────────────────────────┘
+
 ```
 
 **Components:**
+
 - `FileTree` — collapsible tree showing virtual path hierarchy
   - Clicking a node navigates into that virtual folder
   - Shows folder icons and file count badges
@@ -332,6 +343,7 @@ frontend/
 **Purpose:** Manage drive pairs, view drive health, and perform replacement workflows.
 
 **Components:**
+
 - `DriveList` — cards or table showing all drive pairs
   - Each card shows: name, primary path, secondary path, `primary_state`, `secondary_state`, `active_role`
   - Color-coded state badges: active (green), quiescing (yellow), failed (red), rebuilding (blue)
@@ -355,6 +367,7 @@ frontend/
 **Purpose:** Manage tracked folders.
 
 **Components:**
+
 - `FolderList` — table showing tracked folders
   - Columns: Path, Drive Pair, Auto Virtual Path, Default Virtual Base, Created At
   - "Scan" button per folder → `POST /folders/{id}/scan` (discovers new files, detects changes)
@@ -371,6 +384,7 @@ frontend/
 **Purpose:** View integrity check results and trigger checks.
 
 **Components:**
+
 - `IntegrityStatus` — summary of the last batch check results
   - Counts by status: ok, master_corrupted, mirror_corrupted, both_corrupted, master_missing, mirror_missing, primary_drive_unavailable, secondary_drive_unavailable
   - Number auto-recovered
@@ -398,6 +412,7 @@ frontend/
 **Purpose:** View and manage the sync queue.
 
 **Components:**
+
 - `SyncQueueTable` — filterable, paginated table of queue items
   - Columns: File ID, Action, Status, Error Message, Created, Completed
   - Filter by status: `pending`, `in_progress`, `completed`, `failed`
@@ -419,6 +434,7 @@ frontend/
 **Purpose:** Dedicated page for managing virtual path assignments, including bulk operations.
 
 **Components:**
+
 - `VirtualPathTree` — tree view of current virtual path structure (built from `virtual_path` fields on tracked files)
 - `PathMappingForm` — form to assign/edit a single file's virtual path
   - Fields: file selector, `virtual_path`, optional `symlink_base` override
@@ -443,6 +459,7 @@ frontend/
 **Purpose:** Configure sync and integrity check schedules.
 
 **Components:**
+
 - `ScheduleList` — table of configured schedules
   - Columns: Task Type, Cron Expression, Interval (seconds), Enabled, Last Run, Next Run
   - Enable/disable toggle per schedule (via `PUT /scheduler/schedules/{id}` with `{ enabled: bool }`)
@@ -462,6 +479,7 @@ frontend/
 **Purpose:** View and filter event logs.
 
 **Components:**
+
 - `LogFilter` — filter bar:
   - Event type dropdown (multi-select)
   - File ID / path search
@@ -480,6 +498,7 @@ frontend/
 **Purpose:** Manage database backup destinations and trigger backups.
 
 **UI Elements:**
+
 - Table of backup configurations: `backup_path`, `drive_label`, `max_copies`, `enabled`, `last_backup`, `created_at`
 - Add backup destinations (`POST /database/backups` — fields: `backup_path` required; `drive_label`, `max_copies` (default 5), `enabled` (default true) optional)
 - Edit backup destinations (`PUT /database/backups/{id}` — only `max_copies` and `enabled` can be updated)
@@ -522,6 +541,7 @@ frontend/
 ### 3.4 Polling Hook (`usePolling`)
 
 Used for monitoring changing state (sync queue progress, system status refresh):
+
 - Accepts a fetch function and interval (default 5s)
 - Calls fetch function on interval
 - Returns current data, loading state, error state
@@ -534,9 +554,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ## 4. Implementation Milestones
 
 ### Milestone 1: Project Setup & Scaffolding
+
 **Objective:** Initialize React project with all tooling configured.
 
 **Steps:**
+
 1. Create Vite + React + TypeScript project
 2. Install and configure Tailwind CSS
 3. Install and configure Shadcn/ui components
@@ -548,6 +570,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 9. Set up Axios API client with base configuration
 
 **Tests:**
+
 - Unit: Verify Axios client creates correct base URL
 - Unit: Verify Axios interceptor attaches auth header
 - Component: App renders without crashing
@@ -557,9 +580,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 2: Authentication & Layout
+
 **Objective:** Implement login flow, auth state, and application shell.
 
 **Steps:**
+
 1. Implement TypeScript types for auth (`types/api.ts`, `types/auth.ts` — `LoginResponse` has `token`, `username`, `expires_at`)
 2. Implement auth API client (`api/auth.ts` — `login()` and `validate()` calls)
 3. Implement auth Zustand store (`stores/auth-store.ts` — persist token + expires_at to sessionStorage)
@@ -572,6 +597,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 10. Implement `useAuth` hook
 
 **Tests:**
+
 - Unit: Auth store — login sets token, logout clears state
 - Unit: API client — auth interceptor attaches bearer token
 - Unit: API client — 401 response clears auth and redirects
@@ -586,9 +612,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 3: Dashboard
+
 **Objective:** Implement the Dashboard page with system status overview.
 
 **Steps:**
+
 1. Implement status types (`types/status.ts` — fields: `files_tracked`, `files_mirrored`, `pending_sync`, `integrity_issues`, `drive_pairs`, `degraded_pairs`, `active_secondary_pairs`, `rebuilding_pairs`, `quiescing_pairs`)
 2. Implement status API client (`api/status.ts`)
 3. Implement status store (`stores/status-store.ts`)
@@ -599,6 +627,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 8. Implement `RecentActivity.tsx` — recent log entries list
 
 **Tests:**
+
 - Unit: Status store fetches and stores data correctly
 - Component: StatusOverview — renders all metric values including drive health fields
 - Component: QuickActions — buttons trigger correct API calls
@@ -611,9 +640,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 4: Drive Pair Management
+
 **Objective:** Implement drive pair configuration UI with drive health and replacement workflow.
 
 **Steps:**
+
 1. Implement drive types (`types/drive.ts` — include `primary_state`, `secondary_state`, `active_role` fields; replacement request types)
 2. Implement drives API client (`api/drives.ts` — CRUD + mark/cancel/confirm/assign replacement)
 3. Implement drives store (`stores/drives-store.ts`)
@@ -625,6 +656,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 9. Implement `ConfirmDialog.tsx` for delete confirmation
 
 **Tests:**
+
 - Unit: Drives store — CRUD operations update state correctly
 - Component: DriveList — renders all drive pairs with correct state badges
 - Component: DriveForm — validates required fields, path uniqueness
@@ -639,9 +671,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 5: File Browser — Core
+
 **Objective:** Implement the primary file browser interface.
 
 **Steps:**
+
 1. Implement file types (`types/file.ts` — `id`, `drive_pair_id`, `relative_path`, `checksum`, `file_size`, `virtual_path`, `is_mirrored`, `last_verified`, `created_at`, `updated_at`; `types/virtual-path.ts`)
 2. Implement files API client (`api/files.ts` — list with pagination, get, track, mirror, delete)
 3. Implement virtual paths API client (`api/virtual-paths.ts` — set, remove, bulk, bulk-from-real, refresh)
@@ -656,6 +690,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 12. Implement `DataTable.tsx` shared component
 
 **Tests:**
+
 - Unit: Files store — fetches, paginates, filters files
 - Unit: Virtual paths store — builds tree structure from flat list
 - Component: FileTree — renders tree, clicking navigates
@@ -670,9 +705,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 6: File Browser — Details & Actions
+
 **Objective:** Implement file detail panel and file actions.
 
 **Steps:**
+
 1. Implement `FileDetails.tsx` — detail panel showing relative_path, resolved paths, checksum, drive pair, mirror status
 2. Implement `FileActions.tsx` — context menu with actions
 3. Wire "Verify Integrity" action → `POST /integrity/check/{id}?recover=true`
@@ -683,6 +720,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 8. Implement multi-select for bulk operations in FileGrid
 
 **Tests:**
+
 - Component: FileDetails — displays all file metadata
 - Component: FileActions — menu renders, actions fire correct API calls
 - Component: FileGrid — multi-select works, bulk action bar appears
@@ -694,9 +732,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 7: Virtual Path Management
+
 **Objective:** Implement dedicated virtual path management with bulk operations.
 
 **Steps:**
+
 1. Implement `VirtualPathManagerPage.tsx`
 2. Implement `VirtualPathTree.tsx` — full tree view (built from file `virtual_path` fields)
 3. Implement `PathMappingForm.tsx` — single file virtual path assignment via `PUT /virtual-paths/{file_id}`
@@ -710,6 +750,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 6. Implement "Refresh Symlinks" action → `POST /virtual-paths/refresh`
 
 **Tests:**
+
 - Component: VirtualPathTree — renders full path hierarchy
 - Component: PathMappingForm — validates and submits path mapping
 - Component: BulkAssignDialog — preview shows correct computed paths
@@ -721,9 +762,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 8: Tracked Folders
+
 **Objective:** Implement tracked folder management UI.
 
 **Steps:**
+
 1. Implement folder types (`types/folder.ts` — `id`, `drive_pair_id`, `folder_path`, `auto_virtual_path`, `default_virtual_base`, `created_at`)
 2. Implement folders API client (`api/folders.ts` — list, get, create, delete, scan)
 3. Implement `FoldersPage.tsx`
@@ -732,6 +775,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 6. Implement scan results display (`POST /folders/{id}/scan` → `{ new_files, changed_files }`)
 
 **Tests:**
+
 - Unit: Folders API client — correct requests for create, delete, scan
 - Component: FolderList — renders all tracked folders with scan buttons
 - Component: FolderForm — validates and submits, drive pair selector works
@@ -743,9 +787,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 9: Integrity Check & Sync Queue
+
 **Objective:** Implement integrity checking UI and sync queue management.
 
 **Steps:**
+
 1. Implement integrity types (`types/integrity.ts` — all 8 status values, single/batch result types)
 2. Implement integrity API client (`api/integrity.ts` — `checkFile(id, recover)`, `checkAll(driveId, recover)`)
 3. Implement sync types (`types/sync.ts` — queue item, resolve request with `keep_master`/`keep_mirror`/`provide_new`)
@@ -762,6 +808,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 14. Implement `ResolveDialog.tsx` — resolution modal for `user_action_required` items
 
 **Tests:**
+
 - Unit: usePolling — polls at interval, can be paused/resumed
 - Unit: Sync store — filters by status correctly
 - Component: IntegrityStatus — shows loading during API call, summary after completion
@@ -777,9 +824,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 10: Scheduler Configuration
+
 **Objective:** Implement scheduler configuration UI.
 
 **Steps:**
+
 1. Implement scheduler types (`types/scheduler.ts` — `id`, `task_type`, `cron_expr`, `interval_seconds`, `enabled`, `last_run`, `next_run`, `created_at`, `updated_at`)
 2. Implement scheduler API client (`api/scheduler.ts` — CRUD on `/scheduler/schedules`; response wraps list in `{ "schedules": [...] }`)
 3. Implement `SchedulerPage.tsx`
@@ -787,6 +836,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 5. Implement `ScheduleForm.tsx` with cron expression input and interval option (at least one required)
 
 **Tests:**
+
 - Component: ScheduleList — renders schedules, toggle changes enabled state via PUT
 - Component: ScheduleForm — validates that at least one of cron_expr or interval_seconds is provided
 - Component: ScheduleForm — task_type restricted to `sync` or `integrity_check`
@@ -797,9 +847,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 11: Event Logs
+
 **Objective:** Implement event log viewing with filters.
 
 **Steps:**
+
 1. Implement log types (`types/log.ts` — event types: `file_created`, `file_edited`, `file_mirrored`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`)
 2. Implement logs API client (`api/logs.ts` — list with filters, get by id; response is a flat JSON array)
 3. Implement logs store (`stores/logs-store.ts`)
@@ -808,6 +860,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 6. Implement `LogTable.tsx` — paginated (client-side or API `page`/`per_page`), expandable rows, color-coded types
 
 **Tests:**
+
 - Unit: Logs store — filtering builds correct query params
 - Component: LogFilter — selecting filters updates query
 - Component: LogTable — renders entries, expandable rows show details
@@ -819,15 +872,18 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 12: Database Backup Management
+
 **Objective:** Implement database backup configuration and manual trigger.
 
 **Steps:**
+
 1. Implement database backup API client (`api/database.ts` — CRUD on `/database/backups`; `run` requires `db_path` query param)
 2. Implement `DatabaseBackupsPage.tsx`
 3. Implement backup config table with enable/disable and CRUD (only `max_copies` and `enabled` are editable via PUT)
 4. Implement "Run Backup Now" with `db_path` parameter and per-destination results display
 
 **Tests:**
+
 - Component: Backup config table — renders configs, edit/delete work
 - Component: Run backup — sends db_path, shows per-destination results after execution
 - E2E: Add backup destination → run backup → view results
@@ -837,9 +893,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 13: Error Handling, Loading States & Polish
+
 **Objective:** Ensure consistent UX across all pages.
 
 **Steps:**
+
 1. Implement `ErrorBoundary.tsx` — global error boundary
 2. Implement `EmptyState.tsx` — empty state placeholders for all lists
 3. Implement `LoadingSpinner.tsx` — consistent loading indicators
@@ -852,6 +910,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 7. Accessibility audit (aria labels, focus management)
 
 **Tests:**
+
 - Component: ErrorBoundary — catches and displays errors
 - Component: EmptyState — renders correct message per context
 - Component: Toast notifications — appear for success/error
@@ -862,9 +921,11 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ---
 
 ### Milestone 14: Build & Packaging
+
 **Objective:** Production build and integration with backend packaging.
 
 **Steps:**
+
 1. Configure Vite production build with `base: "/"` and output to `dist/`
 2. Add `actix-files` crate to the backend `Cargo.toml`
 3. In `src/api/server.rs`, mount static file serving after all API routes:
@@ -875,6 +936,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 6. Include built `dist/` output in the `.deb` package, installed to `/var/lib/bitprotector/frontend/`
 
 **Tests:**
+
 - Unit: Production build completes without errors
 - Integration: `GET /` returns `index.html` with correct content-type
 - Integration: `GET /drives` (unmatched path) returns `index.html` (React Router fallback)
@@ -891,7 +953,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ### 5.1 Test Levels
 
 | Level      | Scope                              | Tools                        | Location             |
-|------------|-------------------------------------|------------------------------|----------------------|
+| --- | --- | --- | --- |
 | Unit       | API clients, stores, hooks, utils   | Vitest                       | `tests/unit/`        |
 | Component  | Individual React components         | Vitest + RTL                 | `tests/component/`   |
 | E2E        | Full user workflows                 | Playwright                   | `tests/e2e/`         |
@@ -908,7 +970,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 ### 5.3 Mocking Strategy
 
 | Dependency        | Mock Approach                              |
-|-------------------|--------------------------------------------|
+| --- | --- |
 | API responses     | MSW (Mock Service Worker) in unit/component tests |
 | Auth state        | Direct Zustand store manipulation          |
 | Router            | MemoryRouter wrapper in component tests    |
@@ -919,7 +981,7 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 Each E2E spec covers a full user workflow:
 
 | Spec File                  | Workflow                                              |
-|----------------------------|-------------------------------------------------------|
+| --- | --- |
 | `auth.spec.ts`             | Login, session persistence, token validation, logout  |
 | `file-browser.spec.ts`     | Navigate tree, sort grid, select file, view details   |
 | `drives.spec.ts`           | Create, edit, delete drive pair; replacement workflow  |
@@ -933,7 +995,7 @@ Each E2E spec covers a full user workflow:
 ### 5.5 Test Coverage Targets
 
 | Area                  | Minimum Coverage |
-|-----------------------|-----------------|
+| --- | --- |
 | API clients           | 95%             |
 | Zustand stores        | 95%             |
 | Custom hooks          | 90%             |
@@ -947,15 +1009,20 @@ Each E2E spec covers a full user workflow:
 ## 6. Environment Configuration
 
 `.env.example`:
+
 ```env
 # Backend API URL
+
 VITE_API_BASE_URL=https://localhost:8443/api/v1
 
 # Database path (used by the "Run Backup Now" action)
+
 VITE_DB_PATH=/var/lib/bitprotector/bitprotector.db
 
 # Development only — disable TLS verification
+
 VITE_DEV_INSECURE=false
+
 ```
 
 ---
@@ -963,6 +1030,7 @@ VITE_DEV_INSECURE=false
 ## 7. UI Design Guidelines
 
 ### 7.1 Design Principles
+
 - **File browser as primary interface** — the main view users see and interact with most
 - Clean, minimal design using Shadcn/ui components
 - Consistent color coding for statuses:
@@ -973,6 +1041,7 @@ VITE_DEV_INSECURE=false
   - Gray: unverified / inactive / missing
 
 ### 7.2 Layout
+
 - Fixed sidebar navigation (collapsible)
 - Top header with breadcrumbs and user menu
 - Main content area with consistent padding
@@ -980,6 +1049,7 @@ VITE_DEV_INSECURE=false
 - Toast notifications for operation feedback
 
 ### 7.3 Responsiveness
+
 - Desktop-first design (primary use case)
 - Sidebar collapses to icons on narrow viewports
 - Tables become scrollable on small screens

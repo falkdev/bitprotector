@@ -2,7 +2,9 @@ use actix_web::{web, FromRequest, HttpMessage, HttpRequest};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::future::{ready, Ready};
+use std::sync::Mutex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -14,6 +16,36 @@ pub struct Claims {
 /// Shared JWT secret stored as app data.
 #[derive(Clone)]
 pub struct JwtSecret(pub Vec<u8>);
+
+/// In-memory set of revoked token identifiers (`"<sub>:<iat>"`).
+/// Tokens added here are rejected by the JWT middleware and extractor even
+/// if their signature and expiry are otherwise valid.
+/// The set is intentionally process-scoped: it is cleared on restart, which
+/// is acceptable because the daemon is single-host and tokens are short-lived.
+#[derive(Default)]
+pub struct RevokedTokens(pub Mutex<HashSet<String>>);
+
+impl RevokedTokens {
+    /// Derive the revocation key for a set of claims.
+    pub fn key(claims: &Claims) -> String {
+        format!("{}:{}", claims.sub, claims.iat)
+    }
+
+    /// Revoke the token described by `claims`.
+    pub fn revoke(&self, claims: &Claims) {
+        if let Ok(mut set) = self.0.lock() {
+            set.insert(Self::key(claims));
+        }
+    }
+
+    /// Return `true` if the token has been revoked.
+    pub fn is_revoked(&self, claims: &Claims) -> bool {
+        self.0
+            .lock()
+            .map(|set| set.contains(&Self::key(claims)))
+            .unwrap_or(false)
+    }
+}
 
 /// Extractor that validates a Bearer JWT token from the Authorization header.
 pub struct JwtAuth {
@@ -27,6 +59,7 @@ impl FromRequest for JwtAuth {
     fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
         // Fast path: claims already inserted by the global JWT middleware.
         if let Some(claims) = req.extensions().get::<Claims>().cloned() {
+            // The middleware already checked revocation; trust the inserted claims.
             return ready(Ok(JwtAuth { claims }));
         }
 
@@ -55,12 +88,22 @@ impl FromRequest for JwtAuth {
             }
         };
 
-        match validate_token(&token, &secret) {
-            Ok(claims) => ready(Ok(JwtAuth { claims })),
-            Err(_) => ready(Err(actix_web::error::ErrorUnauthorized(
-                "Invalid or expired token",
-            ))),
+        let claims = match validate_token(&token, &secret) {
+            Ok(c) => c,
+            Err(_) => {
+                return ready(Err(actix_web::error::ErrorUnauthorized(
+                    "Invalid or expired token",
+                )))
+            }
+        };
+
+        if let Some(revoked) = req.app_data::<web::Data<RevokedTokens>>() {
+            if revoked.is_revoked(&claims) {
+                return ready(Err(actix_web::error::ErrorUnauthorized("Token revoked")));
+            }
         }
+
+        ready(Ok(JwtAuth { claims }))
     }
 }
 

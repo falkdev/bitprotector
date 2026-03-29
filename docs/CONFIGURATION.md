@@ -31,7 +31,7 @@ bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
 - [Section: \[scheduler\]](#section-scheduler)
 - [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate)
 - [CLI --db flag](#cli---db-flag)
-- [Example — complete file](#example--complete-file)
+- [Example — complete serve invocation](#example--complete-serve-invocation)
 
 ---
 
@@ -40,7 +40,7 @@ bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
 Controls the HTTP listener.
 
 | Key / CLI flag | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. |
 | `port` / `--port` | integer | `8443` | TCP port for the HTTPS API. |
 | `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address. |
@@ -56,7 +56,7 @@ bitprotector serve --host 0.0.0.0 --port 8443 --rate-limit-rps 100
 TLS certificate and private key for the HTTPS server. Both files must be present before the service can start.
 
 | Key / CLI flag | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `tls_cert` / `--tls-cert` | string | *(none)* | Path to the PEM-encoded TLS certificate (or full chain). |
 | `tls_key` / `--tls-key` | string | *(none)* | Path to the PEM-encoded private key. |
 
@@ -72,7 +72,7 @@ See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate
 ## Section: [database]
 
 | Key / CLI flag | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `path` / `--db` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
 
 ```bash
@@ -86,7 +86,7 @@ bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
 PAM is used for credential verification; no additional configuration is required for PAM itself.
 
 | Key / CLI flag | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
 
 The JWT token lifetime is fixed at **86400 seconds (24 hours)** and is not configurable.
@@ -96,6 +96,7 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 ```
 
 > **Security note:** The JWT secret must be kept confidential. Anyone with this value can forge valid tokens for any user. Generate a strong secret with:
+>
 > ```bash
 > openssl rand -hex 32
 > ```
@@ -105,7 +106,7 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 ## Section: [virtual_paths]
 
 | Setting | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `BITPROTECTOR_SYMLINK_BASE` env var | string | `"/var/lib/bitprotector/virtual"` | Directory where virtual-path symlinks are created. The service must have write access. The directory is created on first use. |
 
 ```bash
@@ -119,7 +120,7 @@ This can also be overridden per-request via the optional `symlink_base` field in
 ## Section: [logging]
 
 | Key | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `level` | string | `"info"` | Minimum log level for `tracing` output. One of: `trace`, `debug`, `info`, `warn`, `error`. |
 | `file` | string | `"/var/log/bitprotector/bitprotector.log"` | Path to the log file. The directory must be writable by the service user. |
 

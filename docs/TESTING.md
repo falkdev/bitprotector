@@ -19,20 +19,24 @@ This document explains how to run the test suite, what each test category covers
 
 ## Test Layout
 
-```
+```text
 tests/
 ├── integration/          # Integration tests (Rust — cargo test)
-│   ├── cli_auth.rs       # JWT middleware, token lifecycle
-│   ├── cli_drives.rs     # Drive pair CLI commands
-│   ├── cli_files.rs      # File tracking CLI commands
-│   ├── cli_folders.rs    # Tracked folder CLI commands
-│   ├── cli_integrity.rs  # Integrity check CLI commands
-│   ├── cli_logs.rs       # Event log CLI commands
-│   ├── cli_sync.rs       # Sync queue CLI commands
-│   ├── cli_status.rs     # SSH status display
+│   ├── api_routes.rs         # REST API endpoint coverage (drives, files, auth, etc.)
+│   ├── cli_auth.rs           # JWT middleware, token lifecycle, logout
+│   ├── cli_drives.rs         # Drive pair CLI commands
+│   ├── cli_files.rs          # File tracking CLI commands
+│   ├── cli_folders.rs        # Tracked folder CLI commands
+│   ├── cli_integrity.rs      # Integrity check CLI commands
+│   ├── cli_logs.rs           # Event log CLI commands
+│   ├── cli_sync.rs           # Sync queue CLI commands
+│   ├── cli_status.rs         # SSH status display
 │   ├── cli_virtual_paths.rs  # Virtual path CLI commands
-│   ├── cli_database.rs   # Database backup CLI commands
-│   └── packaging.rs      # Verifies packaging artifacts exist
+│   ├── cli_database.rs       # Database backup CLI commands
+│   ├── core_mirror.rs        # File mirroring and restore mechanics
+│   ├── core_change_detection.rs  # File change detection and re-mirroring
+│   ├── core_scheduler.rs     # Background task scheduling
+│   └── packaging.rs          # Verifies packaging artifacts exist
 └── installation/
     ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
     └── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
@@ -293,7 +297,7 @@ There are two QEMU suites:
 ### Prerequisites
 
 | Tool | Install |
-|---|---|
+| --- | --- |
 | `qemu-system-x86_64` | `sudo apt install qemu-system-x86_64` |
 | KVM acceleration | Verify with `kvm-ok`. The script passes `-enable-kvm`; remove that flag if KVM is unavailable (slower). |
 | `cloud-image-utils` | `sudo apt install cloud-image-utils` |
@@ -349,7 +353,7 @@ Both scripts stream serial console lines to your terminal as the VM boots. The f
 ### Smoke test coverage
 
 | Test | Description |
-|---|---|
+| --- | --- |
 | Package installed | `which bitprotector` and `bitprotector --version` succeed |
 | Service status | `systemctl is-active bitprotector` (NOTE: requires TLS certs to be present for full start) |
 | CLI smoke tests | `bitprotector --db /tmp/test.db drives list` and `status` succeed |
@@ -358,7 +362,7 @@ Both scripts stream serial console lines to your terminal as the VM boots. The f
 ### Failover suite coverage
 
 | Test | Description |
-|---|---|
+| --- | --- |
 | Planned failover | Marks the primary slot `quiescing`, confirms failure, and verifies `active_role` switches to `secondary` |
 | Virtual-path retargeting | Confirms symlinks move from `/mnt/primary/...` to `/mnt/mirror/...` during failover |
 | Degraded writes | Writes through the virtual path while secondary is active, then runs folder scan to update checksums and mirror metadata |
@@ -368,7 +372,7 @@ Both scripts stream serial console lines to your terminal as the VM boots. The f
 ### Exit codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | `0` | All tests passed |
 | `1` | `.deb` build or installation failed |
 | `2` | systemd service failed to start |

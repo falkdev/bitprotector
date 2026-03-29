@@ -1,9 +1,10 @@
 # Project Requirements Specification
+
 ## Distributed File Mirror and Integrity Protection System
 
 ---
 
-# 1. Requirement Classification
+## 1. Requirement Classification
 
 All statements in this document are **strict requirements**.  
 They must be implemented exactly as described.  
@@ -13,7 +14,7 @@ This document defines the complete system requirements for implementation by AI 
 
 ---
 
-# 2. System Purpose
+## 2. System Purpose
 
 The system **must provide a storage protection system designed for long-term data preservation**.
 
@@ -30,7 +31,7 @@ The system must:
 
 ---
 
-# 3. Database Requirements
+## 3. Database Requirements
 
 The system **must maintain a database containing metadata for all tracked files**.
 
@@ -53,7 +54,7 @@ The system must ensure that the **master database file is properly handled and p
 
 ---
 
-# 4. Checksum Requirements
+## 4. Checksum Requirements
 
 The system **must use BLAKE3 as the checksum algorithm**.
 
@@ -65,7 +66,7 @@ The checksum must be used for:
 
 ---
 
-# 5. Drive Pairing Requirements
+## 5. Drive Pairing Requirements
 
 The system must support **paired drives**.
 
@@ -82,7 +83,7 @@ Behavior requirements:
 
 ---
 
-# 6. File Tracking Requirements
+## 6. File Tracking Requirements
 
 The system must support **tracking individual files**.
 
@@ -99,7 +100,7 @@ Tracked files must:
 
 ---
 
-# 7. Virtual Path Requirements
+## 7. Virtual Path Requirements
 
 The system must support **virtual file paths**.
 
@@ -115,7 +116,7 @@ Users must be able to:
 
 ---
 
-# 8. Bulk Virtual Path Assignment Requirements
+## 8. Bulk Virtual Path Assignment Requirements
 
 The system must support **bulk operations for assigning virtual paths**.
 
@@ -126,7 +127,7 @@ Users must be able to:
 
 ---
 
-# 9. File Mirroring Requirements
+## 9. File Mirroring Requirements
 
 When a tracked file is created:
 
@@ -137,7 +138,7 @@ The system must ensure that both copies remain synchronized.
 
 ---
 
-# 10. File Synchronization Requirements
+## 10. File Synchronization Requirements
 
 The system must perform **file synchronization and integrity verification**.
 
@@ -150,7 +151,7 @@ Users must be able to configure these schedules.
 
 ---
 
-# 11. Integrity Check Requirements
+## 11. Integrity Check Requirements
 
 During integrity checks the system must detect corruption.
 
@@ -162,16 +163,19 @@ Integrity validation must compare:
 The system must perform the following recovery actions:
 
 ### Case 1
+
 If the **master file is corrupted** and the **mirror file is valid**:
 
 - The system must restore the master file from the mirror.
 
 ### Case 2
+
 If the **mirror file is corrupted** and the **master file is valid**:
 
 - The system must restore the mirror file from the master.
 
 ### Case 3
+
 If **both copies are corrupted**:
 
 - The system must report the failure
@@ -179,7 +183,7 @@ If **both copies are corrupted**:
 
 ---
 
-# 12. Event Logging Requirements
+## 12. Event Logging Requirements
 
 The system must include an **application logging system**.
 
@@ -198,7 +202,7 @@ Users must be able to:
 
 ---
 
-# 13. Integrity Failure Handling Requirements
+## 13. Integrity Failure Handling Requirements
 
 When an integrity failure occurs:
 
@@ -209,7 +213,7 @@ The system must not automatically resolve failures that require user decisions.
 
 ---
 
-# 14. File Change Detection Requirements
+## 14. File Change Detection Requirements
 
 The system must detect when a **master file has been modified**.
 
@@ -221,7 +225,7 @@ When this occurs the system must:
 
 ---
 
-# 15. SSH Login Status Requirements
+## 15. SSH Login Status Requirements
 
 When a user logs into the system through **SSH**, the system must display a **short status message**.
 
@@ -233,7 +237,7 @@ The message must notify the user if:
 
 ---
 
-# 16. Sync Queue Requirements
+## 16. Sync Queue Requirements
 
 Files that require handling must:
 
@@ -246,7 +250,7 @@ The sync queue must be processed during scheduled:
 
 ---
 
-# 17. Folder Tracking Requirements
+## 17. Folder Tracking Requirements
 
 The system must support **tracked folders**.
 
@@ -254,7 +258,7 @@ Users must be able to configure folders whose contents are automatically tracked
 
 ---
 
-# 18. Default Folder Behavior Requirements
+## 18. Default Folder Behavior Requirements
 
 Tracked folders must support **default behavior configuration**.
 
@@ -264,7 +268,7 @@ Users must be able to configure behavior so that:
 
 ---
 
-# 19. Backend Implementation Requirements
+## 19. Backend Implementation Requirements
 
 The backend implementation must:
 
@@ -275,7 +279,7 @@ The implementation language must be selected based on **efficiency and low resou
 
 ---
 
-# 20. Code Documentation Requirements
+## 20. Code Documentation Requirements
 
 All code in the project must be:
 
@@ -287,7 +291,7 @@ Documentation must be written alongside implementation.
 
 ---
 
-# 21. Development Methodology Requirements
+## 21. Development Methodology Requirements
 
 The project must use **Test Driven Development (TDD)**.
 
@@ -301,7 +305,7 @@ The system must include:
 
 ---
 
-# 22. Planning Requirements
+## 22. Planning Requirements
 
 The complete project plan must be written in **Markdown format**.
 
@@ -317,7 +321,7 @@ Whenever changes occur:
 
 ---
 
-# 23. Version Control Requirements
+## 23. Version Control Requirements
 
 The project must use **Git** for version control.
 
@@ -328,19 +332,19 @@ Requirements:
 
 ---
 
-# 24. Web Server Requirements
+## 24. Web Server Requirements
 
 The system must include a **web server** to support the frontend.
 
 ---
 
-# 25. Frontend Technology Requirements
+## 25. Frontend Technology Requirements
 
 The frontend must be implemented using **React**.
 
 ---
 
-# 26. Drive Failure and Replacement Requirements
+## 26. Drive Failure and Replacement Requirements
 
 The system must support **planned drive replacement** and **unexpected drive failure** handling.
 
@@ -366,7 +370,7 @@ The system must preserve:
 
 ---
 
-# 27. Live Failover Requirements
+## 27. Live Failover Requirements
 
 If the currently active drive becomes unavailable, the system must support **live failover** to the surviving slot.
 
@@ -384,7 +388,7 @@ The system must support rebuilding the failed slot from the surviving slot once 
 
 ---
 
-# 28. Failover Test Coverage Requirements
+## 28. Failover Test Coverage Requirements
 
 The project must include automated test coverage for failover and replacement behavior.
 
@@ -403,7 +407,7 @@ The QEMU tests must cover:
 
 ---
 
-# 26. CLI Configuration Requirements
+## 26. CLI Configuration Requirements
 
 All system functionality must be configurable through the **CLI interface**.
 
@@ -411,7 +415,7 @@ No functionality may be limited to the frontend.
 
 ---
 
-# 27. Secure Communication Requirements
+## 27. Secure Communication Requirements
 
 Communication between the frontend and backend must:
 
@@ -424,7 +428,7 @@ Authentication must use:
 
 ---
 
-# 28. Frontend and Backend Planning Requirements
+## 28. Frontend and Backend Planning Requirements
 
 The project plan must include **two separate implementation plans**:
 
@@ -439,13 +443,13 @@ The frontend implementation will be performed by **another AI agent** and must r
 
 ---
 
-# 29. Frontend Design Requirements
+## 29. Frontend Design Requirements
 
 The frontend must use a **file browser style interface as the main design**.
 
 ---
 
-# 30. Packaging Requirements
+## 30. Packaging Requirements
 
 The system must be packaged for **Ubuntu 24**.
 
@@ -453,7 +457,7 @@ Installation must be provided through a package installer.
 
 ---
 
-# 31. Installation Testing Requirements
+## 31. Installation Testing Requirements
 
 The installation process must include **automatic testing**.
 
