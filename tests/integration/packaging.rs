@@ -53,8 +53,8 @@ fn test_default_config_file_exists() {
         "Config must have [database] section"
     );
     assert!(
-        content.contains("[auth]"),
-        "Config must have [auth] section"
+        content.contains("jwt_secret"),
+        "Config must include JWT auth configuration"
     );
 }
 

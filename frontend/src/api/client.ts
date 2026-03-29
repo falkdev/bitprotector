@@ -11,6 +11,12 @@ export const apiClient = axios.create({
   },
 })
 
+export const authNavigation = {
+  redirectToLogin() {
+    window.location.assign('/login')
+  },
+}
+
 // Attach JWT token on every request
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token
@@ -26,7 +32,7 @@ apiClient.interceptors.response.use(
   (error: unknown) => {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       useAuthStore.getState().logout()
-      window.location.href = '/login'
+      authNavigation.redirectToLogin()
     }
     return Promise.reject(error)
   }

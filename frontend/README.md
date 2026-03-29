@@ -4,7 +4,7 @@ React + TypeScript + Vite frontend for the BitProtector web UI.
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 20.19 or newer
 
 ## Commands
 

@@ -82,16 +82,13 @@ fetch_status_code() {
 
 check_node_runtime() {
     local node_major
-    node_major="$(node -p 'process.versions.node.split(".")[0]')"
+    local node_minor
+    node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+    node_minor="$(node -p 'Number(process.versions.node.split(".")[1])')"
 
-    if [[ "${node_major}" -lt 18 ]]; then
-        echo "ERROR: Node.js 18+ is required for the frontend helper (found $(node --version))" >&2
+    if [[ "${node_major}" -lt 20 || ( "${node_major}" -eq 20 && "${node_minor}" -lt 19 ) ]]; then
+        echo "ERROR: Node.js 20.19+ is required for the frontend helper (found $(node --version))" >&2
         exit 1
-    fi
-
-    if [[ "${node_major}" -lt 20 ]]; then
-        echo "WARNING: Node.js 20+ is the supported frontend baseline, but continuing with $(node --version) for manual dev." >&2
-        echo "         Build/dev work on this machine, but Vitest currently fails on Node 18." >&2
     fi
 }
 

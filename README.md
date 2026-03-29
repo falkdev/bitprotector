@@ -38,7 +38,7 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 | Requirement | Notes |
 |---|---|
 | Rust stable toolchain | Install via [rustup](https://rustup.rs) |
-| Node.js 20+ | Required to build, lint, and test the React frontend |
+| Node.js 20.19+ | Required to build, lint, and test the React frontend |
 | `libpam0g-dev` | PAM headers for system authentication — `sudo apt install libpam0g-dev` |
 | TLS certificate and key | Required for the HTTPS API server — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#generating-a-self-signed-certificate) |
 | `cargo-deb` (optional) | Required only to build the `.deb` package — `cargo install cargo-deb` |

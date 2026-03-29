@@ -52,7 +52,7 @@ cargo test
 
 ### Frontend checks
 
-The frontend toolchain targets Node.js 20+.
+The frontend toolchain targets Node.js 20.19+.
 
 ```bash
 cd frontend
@@ -61,7 +61,7 @@ npm run build
 npm run lint
 ```
 
-`npm test` also expects Node.js 20+ because the current Vitest stack depends on newer Node APIs than Node 18 provides.
+`npm test` also expects Node.js 20.19+ because the current Vite/Vitest stack requires newer Node APIs.
 
 ### Run all tests in one integration file
 
