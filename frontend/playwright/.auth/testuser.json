@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://127.0.0.1:4173",
+      "localStorage": [
+        {
+          "name": "bitprotector-auth",
+          "value": "{\"state\":{\"token\":\"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0dXNlciIsImV4cCI6MTc3NTA3MTY3NSwiaWF0IjoxNzc0OTg1Mjc1fQ.7u-PDjjxC-xKlH3jfaD8z86CmxukurS-GceABRVh1k0\",\"username\":\"testuser\",\"expiresAt\":\"2026-04-01T19:27:55Z\",\"isAuthenticated\":true},\"version\":0}"
+        }
+      ]
+    }
+  ]
+}

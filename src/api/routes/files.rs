@@ -1,4 +1,5 @@
 use crate::api::models::ApiError;
+use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
 use crate::core::{drive, mirror, tracker};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse, Responder};
@@ -33,18 +34,25 @@ pub async fn track_file(
                 .json(ApiError::new("RESOURCE_NOT_FOUND", "Drive pair not found"))
         }
     };
-    let tracked = match tracker::track_file(
-        &repo,
-        &pair,
+    let relative_path = match resolve_path_within_drive_root(
+        pair.active_path(),
         &body.relative_path,
-        body.virtual_path.as_deref(),
+        PathTargetKind::File,
     ) {
-        Ok(t) => t,
+        Ok(path) => path,
         Err(e) => {
             return HttpResponse::BadRequest()
                 .json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
         }
     };
+    let tracked =
+        match tracker::track_file(&repo, &pair, &relative_path, body.virtual_path.as_deref()) {
+            Ok(t) => t,
+            Err(e) => {
+                return HttpResponse::BadRequest()
+                    .json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
+            }
+        };
     if body.mirror.unwrap_or(false) {
         if pair.standby_accepts_sync() {
             if let Err(e) = mirror::mirror_file(&pair, &tracked.relative_path) {

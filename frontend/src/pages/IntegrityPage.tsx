@@ -232,6 +232,7 @@ export function IntegrityPage() {
         </div>
       ) : (
         <DataTable
+          tableTestId="integrity-results-table"
           columns={[
             {
               key: 'file_id',
@@ -265,6 +266,7 @@ export function IntegrityPage() {
           ]}
           data={results ?? []}
           rowKey={(result) => result.file_id}
+          rowTestId={(result) => `integrity-row-${result.file_id}`}
           emptyState={
             <EmptyState
               title="No tracked files matched this integrity run"

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import { Plus } from 'lucide-react'
+import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
 import { virtualPathsApi } from '@/api/virtual-paths'
 import { useFilesStore } from '@/stores/files-store'
@@ -9,7 +10,10 @@ import { FileGrid } from '@/components/file-browser/FileGrid'
 import { FileDetails } from '@/components/file-browser/FileDetails'
 import { BreadcrumbNav } from '@/components/file-browser/BreadcrumbNav'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
+import { getActiveDrivePath, resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
+import type { DrivePair } from '@/types/drive'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -26,50 +30,113 @@ const vPathSchema = z.object({
 type TrackFormData = z.infer<typeof trackSchema>
 type VPathFormData = z.infer<typeof vPathSchema>
 
-function TrackFileModal({
+export function TrackFileModal({
   open,
   onClose,
   onTrack,
+  drives,
 }: {
   open: boolean
   onClose: () => void
   onTrack: (data: TrackFileRequest) => Promise<void>
+  drives: DrivePair[]
 }) {
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } =
-    useForm<TrackFormData>({ resolver: zodResolver(trackSchema) as never })
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    clearErrors,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<TrackFormData>({ resolver: zodResolver(trackSchema) as never })
+  const [showPicker, setShowPicker] = useState(false)
+  const drivePairId = watch('drive_pair_id')
+  const rawPath = watch('relative_path') ?? ''
+  const selectedDrive = drives.find((drive) => drive.id === Number(drivePairId))
+  const activeRoot = selectedDrive
+    ? getActiveDrivePath(
+        selectedDrive.primary_path,
+        selectedDrive.secondary_path,
+        selectedDrive.active_role
+      )
+    : null
+  const pathResolution = resolveTrackedPathInput(activeRoot, rawPath)
 
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6">
         <h2 className="text-lg font-semibold mb-4">Track new file</h2>
         <form
           onSubmit={handleSubmit(async (d) => {
-            await onTrack(d as TrackFileRequest)
+            const resolution = resolveTrackedPathInput(activeRoot, d.relative_path)
+            if (resolution.error || !resolution.relativePath) {
+              setError('relative_path', {
+                type: 'manual',
+                message: resolution.error ?? 'Path is required',
+              })
+              return
+            }
+
+            clearErrors('relative_path')
+            await onTrack({
+              drive_pair_id: Number(d.drive_pair_id),
+              relative_path: resolution.relativePath,
+            })
             reset()
             onClose()
           })}
           className="space-y-4"
         >
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Drive pair ID</label>
-            <input
-              type="number"
+            <label htmlFor="track-file-drive-pair" className="block text-sm font-medium text-gray-700 mb-1">Drive pair</label>
+            <select
+              id="track-file-drive-pair"
               {...register('drive_pair_id')}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="1"
-            />
+            >
+              <option value="">Select…</option>
+              {drives.map((drive) => (
+                <option key={drive.id} value={drive.id}>
+                  {drive.name}
+                </option>
+              ))}
+            </select>
             {errors.drive_pair_id && <p className="mt-1 text-xs text-red-500">{errors.drive_pair_id.message}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Relative path</label>
-            <input
-              type="text"
-              {...register('relative_path')}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="/path/to/file.dat"
-            />
+            <label htmlFor="track-file-path" className="block text-sm font-medium text-gray-700 mb-1">File path</label>
+            <div className="flex gap-2">
+              <input
+                id="track-file-path"
+                type="text"
+                {...register('relative_path')}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="docs/report.pdf or /mnt/drive-a/docs/report.pdf"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                disabled={!selectedDrive}
+                className="whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Browse
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              {selectedDrive
+                ? `Active root: ${activeRoot}`
+                : 'Select a drive pair before browsing or submitting.'}
+            </p>
+            {selectedDrive && rawPath.trim() && !pathResolution.error && pathResolution.relativePath ? (
+              <p className="mt-1 text-xs text-gray-500">
+                Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
+              </p>
+            ) : null}
             {errors.relative_path && <p className="mt-1 text-xs text-red-500">{errors.relative_path.message}</p>}
           </div>
           <div className="flex gap-2 justify-end pt-2">
@@ -90,7 +157,24 @@ function TrackFileModal({
           </div>
         </form>
       </div>
-    </div>
+      </div>
+      <PathPickerDialog
+        open={showPicker}
+        title="Select File Path"
+        description="Browse the BitProtector host filesystem and choose a file under the selected drive pair’s active root."
+        mode="file"
+        value={rawPath}
+        startPath={resolveAbsolutePathForPicker(activeRoot, rawPath)}
+        confirmLabel="Use File Path"
+        validatePath={(path) => resolveTrackedPathInput(activeRoot, path).error}
+        onClose={() => setShowPicker(false)}
+        onPick={(path) => {
+          setValue('relative_path', path, { shouldDirty: true, shouldValidate: true })
+          clearErrors('relative_path')
+          setShowPicker(false)
+        }}
+      />
+    </>
   )
 }
 
@@ -126,8 +210,9 @@ function VirtualPathModal({
           className="space-y-4"
         >
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Virtual path</label>
+            <label htmlFor="file-virtual-path" className="block text-sm font-medium text-gray-700 mb-1">Virtual path</label>
             <input
+              id="file-virtual-path"
               type="text"
               {...register('virtual_path')}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -165,19 +250,40 @@ export function FileBrowserPage() {
   const [vpathFile, setVpathFile] = useState<TrackedFile | null>(null)
   const [deleteFile, setDeleteFile] = useState<TrackedFile | null>(null)
   const [loading, setLoading] = useState(false)
+  const [drives, setDrives] = useState<DrivePair[]>([])
 
-  const loadFiles = useCallback(async (nextParams = params) => {
+  const loadFiles = useCallback(async (nextParams: typeof params) => {
     setLoading(true)
     try {
       await fetch(nextParams)
     } finally {
       setLoading(false)
     }
-  }, [fetch, params])
+  }, [fetch])
 
   useEffect(() => {
     void loadFiles(params)
   }, [loadFiles, params])
+
+  useEffect(() => {
+    let active = true
+
+    const loadDrives = async () => {
+      try {
+        const nextDrives = await drivesApi.list()
+        if (active) {
+          setDrives(nextDrives)
+        }
+      } catch {
+        toast.error('Failed to load drive pairs')
+      }
+    }
+
+    void loadDrives()
+    return () => {
+      active = false
+    }
+  }, [])
 
   const allVirtualPaths = (response?.files ?? [])
     .map((f) => f.virtual_path)
@@ -298,6 +404,7 @@ export function FileBrowserPage() {
         open={showTrack}
         onClose={() => setShowTrack(false)}
         onTrack={handleTrack}
+        drives={drives}
       />
       <VirtualPathModal
         file={vpathFile}

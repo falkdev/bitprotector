@@ -239,6 +239,7 @@ export function LogsPage() {
         </div>
       ) : (
         <DataTable
+          tableTestId="logs-table"
           columns={[
             {
               key: 'event_type',
@@ -288,6 +289,7 @@ export function LogsPage() {
           ]}
           data={entries}
           rowKey={(entry) => entry.id}
+          rowTestId={(entry) => `log-row-${entry.id}`}
           emptyState={
             <EmptyState
               title="No matching log entries"

@@ -79,7 +79,8 @@ HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, an
 | `server.rs` | Build and start the actix-web server. Mounts all route groups, configures TLS via rustls, and injects shared state (`Repository`, `JwtSecret`) as `web::Data`. |
 | `auth.rs` | PAM authentication (`pam` crate) to verify system credentials. Issues and validates JWT tokens (`jsonwebtoken` crate). Provides `JwtAuth` as an actix-web extractor for protecting routes. |
 | `models.rs` | Request and response DTOs (`serde::Deserialize` / `Serialize`). Kept separate from the database structs in `src/db/`. |
-| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. See [API.md](API.md) for the full endpoint reference. |
+| `path_resolution.rs` | API-layer helper for validating host paths submitted by the web UI and converting tracked file/folder selections back into drive-relative paths. Rejects traversal and canonicalized escapes before core tracking logic runs. |
+| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. This now includes a read-only filesystem browse route used by the web UI path picker. See [API.md](API.md) for the full endpoint reference. |
 
 ### src/cli/
 
@@ -235,6 +236,10 @@ The virtual path system does not intercept file I/O. Instead it creates regular 
 ### Drive failover is stateful, not path-swapping in place
 
 Each drive pair now tracks `primary_state`, `secondary_state`, and `active_role`. Planned replacements move a slot through `active -> quiescing -> failed -> rebuilding -> active`. Unexpected loss of the active root can trigger emergency failover to the healthy side. The logical pair and relative paths stay stable; only the operational source/target root changes.
+
+### Web path pickers browse absolute host paths, but tracking stays drive-relative
+
+The web UI now opens a server-side filesystem browser for selecting files and directories. That browser exposes absolute host paths for navigation, but tracked files and tracked folders are still stored as paths relative to the selected drive pair's active root. Keeping storage relative preserves failover, mirroring, and rebuild behavior even when the active role changes.
 
 ### r2d2 connection pool for SQLite
 

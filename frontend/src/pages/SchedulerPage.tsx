@@ -270,6 +270,7 @@ export function SchedulerPage() {
       </div>
 
       <DataTable
+        tableTestId="scheduler-table"
         columns={[
           {
             key: 'task_type',
@@ -330,6 +331,7 @@ export function SchedulerPage() {
         ]}
         data={schedules}
         rowKey={(schedule) => schedule.id}
+        rowTestId={(schedule) => `schedule-row-${schedule.id}`}
         emptyState={
           <EmptyState
             title="No schedules configured"

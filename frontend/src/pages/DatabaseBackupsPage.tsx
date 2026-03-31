@@ -299,6 +299,7 @@ export function DatabaseBackupsPage() {
       </div>
 
       <DataTable
+        tableTestId="database-backups-table"
         columns={[
           {
             key: 'backup_path',
@@ -357,6 +358,7 @@ export function DatabaseBackupsPage() {
         ]}
         data={backups}
         rowKey={(backup) => backup.id}
+        rowTestId={(backup) => `database-backup-row-${backup.id}`}
         emptyState={
           <EmptyState
             title="No backup destinations configured"

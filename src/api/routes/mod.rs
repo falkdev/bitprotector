@@ -2,6 +2,7 @@ pub mod auth;
 pub mod database;
 pub mod drives;
 pub mod files;
+pub mod filesystem;
 pub mod folders;
 pub mod integrity;
 pub mod logs;

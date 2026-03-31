@@ -22,7 +22,7 @@ export const useFilesStore = create<FilesState>((set, get) => ({
 
   async fetch(params) {
     const merged = { ...get().params, ...params }
-    set({ loading: true, error: null, params: merged })
+    set({ loading: true, error: null })
     try {
       const response = await filesApi.list(merged)
       set({ response, loading: false })

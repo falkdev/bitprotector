@@ -193,6 +193,11 @@ write_files:
     permissions: '0644'
     content: |
       [Service]
+      NoNewPrivileges=false
+      User=root
+      Group=root
+      ReadWritePaths=
+      ReadWritePaths=/var/lib/bitprotector /var/log/bitprotector /var/lib/bitprotector/virtual /mnt/primary /mnt/mirror /mnt/replacement-primary /mnt/replacement-secondary /mnt/spare1 /mnt/spare2
       ExecStart=
       ExecStart=/usr/bin/bitprotector \
           --db /var/lib/bitprotector/bitprotector.db \

@@ -23,6 +23,8 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 
 1. You register **drive pairs** — a primary path and a secondary (mirror) path.
 2. You **track files** (individually or by folder). BitProtector computes a BLAKE3 checksum and mirrors the file to the secondary path.
+   - In the web UI, tracked file/folder forms now open a real server-side path picker backed by the host filesystem.
+   - Those web selections may start as absolute host paths in the UI, but BitProtector still stores tracked file/folder paths relative to the selected drive pair's active root.
 3. Scheduled **integrity checks** re-hash both copies and compare them against the stored baseline:
    - Mirror corrupted → restore from primary.
    - Primary corrupted → restore from mirror.
@@ -114,10 +116,10 @@ sudo cp -r frontend/dist/* /var/lib/bitprotector/frontend/
 bitprotector drives add mybackup /mnt/primary /mnt/mirror
 
 # 2. Track a file (mirrors it immediately)
-bitprotector files track <drive-pair-id> /mnt/primary/documents/report.pdf
+bitprotector files track <drive-pair-id> documents/report.pdf
 
 # 3. Track all files in a folder
-bitprotector folders add <drive-pair-id> documents/
+bitprotector folders add <drive-pair-id> documents
 
 # 4. Run an integrity check
 bitprotector integrity check all
@@ -179,6 +181,12 @@ sudo journalctl -u bitprotector -f
 
 The web UI is available at `https://localhost:8443/` once the service is running.
 The REST API remains available at `https://localhost:8443/api/v1`.
+
+In the web UI:
+
+- tracked file and tracked folder forms use a filesystem browser dialog powered by the server
+- drive pair and replacement-drive forms can also fill directory paths from the same browser
+- tracked file/folder submissions are validated against the selected drive pair's active root before they are stored
 
 For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
 

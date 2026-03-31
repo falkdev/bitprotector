@@ -256,6 +256,7 @@ export function SyncQueuePage() {
         </div>
       ) : (
         <DataTable
+          tableTestId="sync-queue-table"
           columns={[
             {
               key: 'id',
@@ -311,6 +312,7 @@ export function SyncQueuePage() {
           ]}
           data={visibleItems}
           rowKey={(item) => item.id}
+          rowTestId={(item) => `sync-queue-row-${item.id}`}
           emptyState={
             <EmptyState
               title="No queue items"

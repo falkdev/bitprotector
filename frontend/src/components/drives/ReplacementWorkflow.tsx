@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
+import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import type { DrivePair, DriveRole } from '@/types/drive'
 
 interface ReplacementWorkflowProps {
@@ -15,6 +16,7 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
   const [role, setRole] = useState<DriveRole>('primary')
   const [skipValidation, setSkipValidation] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [showPicker, setShowPicker] = useState(false)
 
   const run = async (action: () => Promise<unknown>, label: string) => {
     setLoading(true)
@@ -30,11 +32,16 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold">Replacement Workflow — {drive.name}</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-accent transition-colors">
+          <button
+            onClick={onClose}
+            className="rounded p-1 hover:bg-accent transition-colors"
+            data-testid="close-replacement-workflow"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -84,13 +91,22 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
           {/* Assign new path */}
           <div className="rounded-lg border border-border p-3 space-y-2">
             <p className="text-xs font-medium">Assign Replacement Drive</p>
-            <input
-              value={newPath}
-              onChange={(e) => setNewPath(e.target.value)}
-              placeholder="/mnt/new-drive"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              data-testid="assign-path-input"
-            />
+            <div className="flex gap-2">
+              <input
+                value={newPath}
+                onChange={(e) => setNewPath(e.target.value)}
+                placeholder="/mnt/new-drive"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                data-testid="assign-path-input"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
+              >
+                Browse
+              </button>
+            </div>
             <label className="flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
@@ -115,6 +131,21 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      <PathPickerDialog
+        open={showPicker}
+        title="Select Replacement Drive Path"
+        description="Browse the BitProtector host filesystem and choose the mounted directory for the replacement drive."
+        mode="directory"
+        value={newPath}
+        startPath={newPath}
+        confirmLabel="Use Directory"
+        onClose={() => setShowPicker(false)}
+        onPick={(path) => {
+          setNewPath(path)
+          setShowPicker(false)
+        }}
+      />
+    </>
   )
 }

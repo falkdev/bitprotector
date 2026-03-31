@@ -8,9 +8,18 @@ import type {
   RunTaskResult,
 } from '@/types/sync'
 
+interface SyncQueueListResponse {
+  queue: SyncQueueItem[]
+  total: number
+  page: number
+  per_page: number
+}
+
 export const syncApi = {
   listQueue(): Promise<SyncQueueItem[]> {
-    return apiClient.get<SyncQueueItem[]>('/sync/queue').then((r) => r.data)
+    return apiClient
+      .get<SyncQueueItem[] | SyncQueueListResponse>('/sync/queue')
+      .then((r) => (Array.isArray(r.data) ? r.data : r.data.queue))
   },
 
   addQueueItem(data: AddQueueItemRequest): Promise<SyncQueueItem> {

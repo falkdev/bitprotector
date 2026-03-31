@@ -130,6 +130,10 @@ name = "api_routes"
 path = "tests/integration/api_routes.rs"
 
 [[test]]
+name = "api_filesystem_browser"
+path = "tests/integration/api_filesystem_browser.rs"
+
+[[test]]
 name = "core_mirror"
 path = "tests/integration/core_mirror.rs"
 

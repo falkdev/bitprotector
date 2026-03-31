@@ -88,9 +88,7 @@ async fn test_drives_create_validation_failure_returns_400() {
 #[actix_rt::test]
 async fn test_drives_get_existing() {
     let repo = make_repo();
-    let pair = repo
-        .create_drive_pair("get-pair", "/np", "/ns")
-        .unwrap();
+    let pair = repo.create_drive_pair("get-pair", "/np", "/ns").unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::get()
         .uri(&format!("/api/v1/drives/{}", pair.id))
@@ -224,6 +222,124 @@ async fn test_files_track() {
 }
 
 #[actix_rt::test]
+async fn test_files_track_accepts_absolute_path_within_active_root() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let absolute_path = primary.path().join("nested/doc.txt");
+    fs::create_dir_all(absolute_path.parent().unwrap()).unwrap();
+    fs::write(&absolute_path, b"file content").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-abs",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": absolute_path.to_str().unwrap()
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["relative_path"], "nested/doc.txt");
+}
+
+#[actix_rt::test]
+async fn test_files_track_rejects_path_outside_active_root() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_file = outside.path().join("outside.txt");
+    fs::write(&outside_file, b"outside").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-outside",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": outside_file.to_str().unwrap()
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_rt::test]
+async fn test_files_track_rejects_parent_directory_traversal() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::write(primary.path().join("doc.txt"), b"file content").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-traversal",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "../doc.txt"
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[cfg(unix)]
+#[actix_rt::test]
+async fn test_files_track_rejects_symlink_escape() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_file = outside.path().join("secret.txt");
+    fs::write(&outside_file, b"secret").unwrap();
+    std::os::unix::fs::symlink(&outside_file, primary.path().join("secret-link.txt")).unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-symlink",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "secret-link.txt"
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_rt::test]
 async fn test_files_list() {
     let app = make_app!(make_repo()).await;
     let req = test::TestRequest::get()
@@ -353,6 +469,65 @@ async fn test_folders_add() {
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["folder_path"], "docs");
+}
+
+#[actix_rt::test]
+async fn test_folders_add_accepts_absolute_path_within_active_root() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let folder = primary.path().join("projects/docs");
+    fs::create_dir_all(&folder).unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-folder-abs",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/folders")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "folder_path": folder.to_str().unwrap()
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["folder_path"], "projects/docs");
+}
+
+#[actix_rt::test]
+async fn test_folders_add_rejects_path_outside_active_root() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_folder = outside.path().join("outside");
+    fs::create_dir_all(&outside_folder).unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-folder-outside",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/folders")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "folder_path": outside_folder.to_str().unwrap()
+        }))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
 }
 
 #[actix_rt::test]
@@ -1241,8 +1416,18 @@ async fn test_status_reflects_degraded_pair() {
         )
         .unwrap();
     // Mark primary as quiescing then failed to make it degraded
-    bitprotector_lib::core::drive::mark_drive_quiescing(&repo, pair.id, bitprotector_lib::core::drive::DriveRole::Primary).unwrap();
-    bitprotector_lib::core::drive::confirm_drive_failure(&repo, pair.id, bitprotector_lib::core::drive::DriveRole::Primary).unwrap();
+    bitprotector_lib::core::drive::mark_drive_quiescing(
+        &repo,
+        pair.id,
+        bitprotector_lib::core::drive::DriveRole::Primary,
+    )
+    .unwrap();
+    bitprotector_lib::core::drive::confirm_drive_failure(
+        &repo,
+        pair.id,
+        bitprotector_lib::core::drive::DriveRole::Primary,
+    )
+    .unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::get()
         .uri("/api/v1/status")

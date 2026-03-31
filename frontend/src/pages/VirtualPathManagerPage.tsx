@@ -197,22 +197,22 @@ export function VirtualPathManagerPage() {
       return
     }
 
-    const entries = lines.map((line) => {
-      const [fileIdText, ...rest] = line.split('|')
-      const fileId = Number(fileIdText?.trim())
-      const virtualPath = rest.join('|').trim()
-
-      if (!Number.isFinite(fileId) || fileId <= 0 || !virtualPath) {
-        throw new Error(`Invalid bulk assignment line: ${line}`)
-      }
-
-      return {
-        file_id: fileId,
-        virtual_path: virtualPath,
-      }
-    })
-
     try {
+      const entries = lines.map((line) => {
+        const [fileIdText, ...rest] = line.split('|')
+        const fileId = Number(fileIdText?.trim())
+        const virtualPath = rest.join('|').trim()
+
+        if (!Number.isFinite(fileId) || fileId <= 0 || !virtualPath) {
+          throw new Error(`Invalid bulk assignment line: ${line}`)
+        }
+
+        return {
+          file_id: fileId,
+          virtual_path: virtualPath,
+        }
+      })
+
       const result = await virtualPathsApi.bulk({ entries })
       setBulkResult(result)
       if (result.failed.length === 0) {
@@ -281,6 +281,7 @@ export function VirtualPathManagerPage() {
             Enter one mapping per line in the format <span className="font-mono">file_id|/virtual/path</span>.
           </p>
           <textarea
+            aria-label="Bulk Assignments"
             value={bulkInput}
             onChange={(event) => setBulkInput(event.target.value)}
             rows={6}
@@ -386,6 +387,7 @@ export function VirtualPathManagerPage() {
       ) : (
         <div className="space-y-3">
           <DataTable
+            tableTestId="virtual-paths-table"
             columns={[
               {
                 key: 'id',
@@ -433,6 +435,7 @@ export function VirtualPathManagerPage() {
             ]}
             data={files}
             rowKey={(file) => file.id}
+            rowTestId={(file) => `virtual-path-row-${file.id}`}
             emptyState={
               <EmptyState
                 title="No tracked files"

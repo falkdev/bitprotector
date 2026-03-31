@@ -1,3 +1,4 @@
+use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
 use crate::core::{change_detection, drive, tracker};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
@@ -41,10 +42,20 @@ async fn add_folder(
         Ok(p) => p,
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
+    let folder_path = match resolve_path_within_drive_root(
+        pair.active_path(),
+        &body.folder_path,
+        PathTargetKind::Directory,
+    ) {
+        Ok(path) => path,
+        Err(e) => {
+            return HttpResponse::BadRequest().body(e.to_string());
+        }
+    };
     match tracker::track_folder(
         &repo,
         &pair,
-        &body.folder_path,
+        &folder_path,
         body.auto_virtual_path.unwrap_or(false),
         body.default_virtual_base.as_deref(),
     ) {
@@ -77,10 +88,7 @@ async fn update_folder(
 ) -> HttpResponse {
     let id = path.into_inner();
     // Map Option<Option<String>> to Option<Option<&str>> for the repository.
-    let dvb: Option<Option<&str>> = body
-        .default_virtual_base
-        .as_ref()
-        .map(|opt| opt.as_deref());
+    let dvb: Option<Option<&str>> = body.default_virtual_base.as_ref().map(|opt| opt.as_deref());
     match repo.update_tracked_folder(id, body.auto_virtual_path, dvb) {
         Ok(folder) => HttpResponse::Ok().json(folder),
         Err(e) => {

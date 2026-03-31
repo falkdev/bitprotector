@@ -79,20 +79,20 @@ where
         match token {
             None => {
                 let (req, _) = req.into_parts();
-                let resp = HttpResponse::Unauthorized()
-                    .json(ApiError::new("unauthorized", "Missing authorization header"));
-                Box::pin(async move {
-                    Ok(ServiceResponse::new(req, resp).map_into_right_body())
-                })
+                let resp = HttpResponse::Unauthorized().json(ApiError::new(
+                    "unauthorized",
+                    "Missing authorization header",
+                ));
+                Box::pin(async move { Ok(ServiceResponse::new(req, resp).map_into_right_body()) })
             }
             Some(token) => match crate::api::auth::validate_token(&token, &secret) {
                 Err(_) => {
                     let (req, _) = req.into_parts();
                     let resp = HttpResponse::Unauthorized()
                         .json(ApiError::new("unauthorized", "Invalid or expired token"));
-                    Box::pin(async move {
-                        Ok(ServiceResponse::new(req, resp).map_into_right_body())
-                    })
+                    Box::pin(
+                        async move { Ok(ServiceResponse::new(req, resp).map_into_right_body()) },
+                    )
                 }
                 Ok(claims) => {
                     // Check revocation before accepting the token.
@@ -225,8 +225,8 @@ where
 /// - All other routes are wrapped with `JwtMiddlewareLayer`.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     use crate::api::routes::{
-        auth, database, drives, files, folders, integrity, logs, scheduler, status, sync,
-        virtual_paths,
+        auth, database, drives, files, filesystem, folders, integrity, logs, scheduler, status,
+        sync, virtual_paths,
     };
     cfg.service(
         web::scope("/api/v1")
@@ -239,6 +239,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                     .wrap(JwtMiddlewareLayer)
                     .configure(auth::configure_protected)
                     .configure(drives::configure)
+                    .configure(filesystem::configure)
                     .configure(files::configure)
                     .configure(virtual_paths::configure)
                     .configure(integrity::configure)
@@ -331,6 +332,10 @@ pub async fn run_server(
     rate_limit_rps: usize,
 ) -> anyhow::Result<()> {
     let pool = create_pool(db_path)?;
+    {
+        let conn = pool.get()?;
+        crate::db::schema::initialize_schema(&conn)?;
+    }
     let repo = Repository::new(pool);
     let repo_arc = Arc::new(repo.clone());
 
@@ -499,9 +504,7 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);
 
-        let req = test::TestRequest::get()
-            .uri("/api/v1/drives")
-            .to_request();
+        let req = test::TestRequest::get().uri("/api/v1/drives").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);
     }

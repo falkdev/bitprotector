@@ -11,6 +11,7 @@
 - [Authentication](#authentication)
 - [Health](#health)
 - [Drive Pairs](#drive-pairs)
+- [Filesystem Browser](#filesystem-browser)
 - [File Tracking](#file-tracking)
 - [Virtual Paths](#virtual-paths)
 - [Tracked Folders](#tracked-folders)
@@ -299,6 +300,54 @@ If no failover is needed (both sides are reachable) the request succeeds with `"
 
 ---
 
+## Filesystem Browser
+
+The web UI uses a read-only server-side filesystem browser to populate path picker dialogs. This endpoint browses the BitProtector host filesystem, not the end user's local machine.
+
+### GET `/filesystem/children`
+
+List one directory level of children for a host path.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | string | Absolute directory path to browse. Defaults to `/`. |
+| `include_hidden` | boolean | Include dotfiles and dot-directories when `true`. Defaults to `false`. |
+| `directories_only` | boolean | Return only directories when `true`. Defaults to `false`. |
+
+**Response `200`:**
+
+```json
+{
+    "path": "/mnt",
+    "canonical_path": "/mnt",
+    "parent_path": "/",
+    "entries": [
+        {
+            "name": "primary",
+            "path": "/mnt/primary",
+            "kind": "directory",
+            "is_hidden": false,
+            "is_selectable": true,
+            "has_children": true
+        },
+        {
+            "name": "report.pdf",
+            "path": "/mnt/report.pdf",
+            "kind": "file",
+            "is_hidden": false,
+            "is_selectable": true,
+            "has_children": false
+        }
+    ]
+}
+```
+
+**Errors:** `400 Bad Request` (invalid path, unreadable path, or path is not a directory), `401 Unauthorized`
+
+---
+
 ## File Tracking
 
 ### GET `/files`
@@ -357,6 +406,10 @@ Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an
 ```
 
 `virtual_path` and `mirror` are optional. When `mirror` is `true` and the standby slot can accept sync, the file is mirrored immediately after tracking.
+
+`relative_path` remains the stored path relative to the selected drive pair's current active root. The web UI path picker may submit an absolute host path, but the server validates that it resolves under the active root and converts it back to a relative path before storing it.
+
+Inputs that contain parent-directory traversal (`..`) or canonicalize outside the selected active root are rejected with `400 Bad Request`.
 
 **Response `201`:** Newly created file object.  
 **Errors:** `400 Bad Request`, `404 Not Found` (file not on primary drive), `409 Conflict`
@@ -495,6 +548,10 @@ Tracked folders let BitProtector automatically discover and track new files adde
 ```
 
 `auto_virtual_path` and `default_virtual_base` are optional.
+
+`folder_path` remains the stored path relative to the selected drive pair's current active root. The web UI path picker may submit an absolute host path, but the server validates that it resolves under the active root and converts it back to a relative path before storing it.
+
+Inputs that contain parent-directory traversal (`..`) or canonicalize outside the selected active root are rejected with `400 Bad Request`.
 
 **Response `201`:** Created folder object.  
 **Errors:** `400 Bad Request`, `409 Conflict`

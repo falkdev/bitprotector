@@ -7,9 +7,11 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
+import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import type { TrackedFolder, CreateFolderRequest, ScanFolderResult } from '@/types/folder'
 import type { DrivePair } from '@/types/drive'
 import { formatDate } from '@/lib/format'
+import { getActiveDrivePath, resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -96,6 +98,7 @@ export function FoldersPage() {
       )}
 
       <DataTable
+        tableTestId="folders-table"
         columns={[
           { key: 'path', header: 'Path', cell: (f) => <span className="font-mono text-xs">{f.folder_path}</span> },
           { key: 'drive', header: 'Drive Pair', cell: (f) => driveName(f.drive_pair_id) },
@@ -127,6 +130,7 @@ export function FoldersPage() {
         ]}
         data={folders}
         rowKey={(f) => f.id}
+        rowTestId={(f) => `folder-row-${f.id}`}
         emptyState={<EmptyState title="No tracked folders" description="Add a folder to auto-discover files" />}
       />
 
@@ -156,7 +160,7 @@ export function FoldersPage() {
   )
 }
 
-function FolderFormModal({
+export function FolderFormModal({
   drives,
   onClose,
   onSave,
@@ -165,26 +169,93 @@ function FolderFormModal({
   onClose: () => void
   onSave: (data: CreateFolderRequest) => Promise<void>
 }) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const {
+    register,
+    handleSubmit,
+    setError,
+    clearErrors,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({
     resolver: zodResolver(schema) as never,
   })
+  const [showPicker, setShowPicker] = useState(false)
+  const drivePairId = watch('drive_pair_id')
+  const rawPath = watch('folder_path') ?? ''
+  const selectedDrive = drives.find((drive) => drive.id === Number(drivePairId))
+  const activeRoot = selectedDrive
+    ? getActiveDrivePath(
+        selectedDrive.primary_path,
+        selectedDrive.secondary_path,
+        selectedDrive.active_role
+      )
+    : null
+  const pathResolution = resolveTrackedPathInput(activeRoot, rawPath)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-lg">
         <h2 className="mb-4 font-semibold">Add Tracked Folder</h2>
-          <form onSubmit={handleSubmit((d) => onSave(d as unknown as CreateFolderRequest))} className="space-y-4">
+          <form onSubmit={handleSubmit(async (d) => {
+            const resolution = resolveTrackedPathInput(activeRoot, d.folder_path)
+            if (resolution.error || !resolution.relativePath) {
+              setError('folder_path', {
+                type: 'manual',
+                message: resolution.error ?? 'Folder path is required',
+              })
+              return
+            }
+
+            clearErrors('folder_path')
+            await onSave({
+              drive_pair_id: Number(d.drive_pair_id),
+              folder_path: resolution.relativePath,
+              auto_virtual_path: d.auto_virtual_path,
+              default_virtual_base: d.default_virtual_base,
+            })
+          })} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Drive Pair</label>
-            <select {...register('drive_pair_id')} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            <label htmlFor="folder-drive-pair" className="mb-1 block text-sm font-medium">Drive Pair</label>
+            <select
+              id="folder-drive-pair"
+              {...register('drive_pair_id')}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
               <option value="">Select…</option>
               {drives.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             {errors.drive_pair_id && <p className="mt-1 text-xs text-destructive">{errors.drive_pair_id.message}</p>}
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Folder Path</label>
-            <input {...register('folder_path')} placeholder="/mnt/drive-a/documents" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+            <label htmlFor="folder-path" className="mb-1 block text-sm font-medium">Folder Path</label>
+            <div className="flex gap-2">
+              <input
+                id="folder-path"
+                {...register('folder_path')}
+                placeholder="documents or /mnt/drive-a/documents"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                disabled={!selectedDrive}
+                className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Browse
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selectedDrive
+                ? `Active root: ${activeRoot}`
+                : 'Select a drive pair before browsing or submitting.'}
+            </p>
+            {selectedDrive && rawPath.trim() && !pathResolution.error && pathResolution.relativePath ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
+              </p>
+            ) : null}
             {errors.folder_path && <p className="mt-1 text-xs text-destructive">{errors.folder_path.message}</p>}
           </div>
           <label className="flex items-center gap-2 text-sm">
@@ -192,8 +263,13 @@ function FolderFormModal({
             Auto-assign virtual paths
           </label>
           <div>
-            <label className="mb-1 block text-sm font-medium">Default Virtual Base (optional)</label>
-            <input {...register('default_virtual_base')} placeholder="/virtual/documents" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+            <label htmlFor="default-virtual-base" className="mb-1 block text-sm font-medium">Default Virtual Base (optional)</label>
+            <input
+              id="default-virtual-base"
+              {...register('default_virtual_base')}
+              placeholder="/virtual/documents"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors">Cancel</button>
@@ -203,6 +279,23 @@ function FolderFormModal({
           </div>
         </form>
       </div>
-    </div>
+      </div>
+      <PathPickerDialog
+        open={showPicker}
+        title="Select Folder Path"
+        description="Browse the BitProtector host filesystem and choose a directory under the selected drive pair’s active root."
+        mode="directory"
+        value={rawPath}
+        startPath={resolveAbsolutePathForPicker(activeRoot, rawPath)}
+        confirmLabel="Use Folder Path"
+        validatePath={(path) => resolveTrackedPathInput(activeRoot, path).error}
+        onClose={() => setShowPicker(false)}
+        onPick={(path) => {
+          setValue('folder_path', path, { shouldDirty: true, shouldValidate: true })
+          clearErrors('folder_path')
+          setShowPicker(false)
+        }}
+      />
+    </>
   )
 }

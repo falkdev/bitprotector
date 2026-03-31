@@ -23,6 +23,7 @@ This document explains how to run the test suite, what each test category covers
 tests/
 ├── integration/          # Integration tests (Rust — cargo test)
 │   ├── api_routes.rs         # REST API endpoint coverage (drives, files, auth, etc.)
+│   ├── api_filesystem_browser.rs # Filesystem browse route coverage for the web path picker
 │   ├── cli_auth.rs           # JWT middleware, token lifecycle, logout
 │   ├── cli_drives.rs         # Drive pair CLI commands
 │   ├── cli_files.rs          # File tracking CLI commands
@@ -63,6 +64,7 @@ cd frontend
 npm ci
 npm run build
 npm run lint
+npm test
 ```
 
 `npm test` also expects Node.js 20.19+ because the current Vite/Vitest stack requires newer Node APIs.
@@ -201,6 +203,20 @@ async fn test_auth_middleware_accepts_valid_token() {
 
 Note: these tests require `actix_rt` as a dev dependency. Annotate async test functions with `#[actix_rt::test]` instead of `#[tokio::test]`.
 
+### Filesystem Browser Integration Tests
+
+File: `tests/integration/api_filesystem_browser.rs`
+
+These tests cover the read-only filesystem route that powers the web UI path picker. They verify:
+
+- default root browsing
+- nested directory loading
+- hidden-file toggle behavior
+- invalid and unreadable path handling
+- directory-only filtering for directory pickers
+
+The tracked file/folder validation edge cases remain covered in `tests/integration/api_routes.rs`, where absolute-path submissions are accepted only when they resolve under the selected drive pair's active root.
+
 ### Packaging Tests
 
 File: `tests/integration/packaging.rs`
@@ -216,6 +232,13 @@ cargo test --test packaging
 ## Unit Tests
 
 Unit tests live as inline `#[cfg(test)]` modules at the bottom of each `src/` file. This keeps them next to the code they test and avoids additional file management.
+
+Frontend component/unit tests now also cover the path-picker workflow in `frontend/src/**/*.test.tsx`, including:
+
+- path normalization helpers
+- lazy-loading behavior in the shared path picker dialog
+- absolute-to-relative conversion for tracked file/folder submits
+- absolute path fill behavior in drive configuration forms
 
 **Basic structure:**
 
