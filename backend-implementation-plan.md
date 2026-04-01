@@ -1,6 +1,8 @@
 # Backend Implementation Plan
 ## Distributed File Mirror and Integrity Protection System
 
+> Historical planning note: sections that mention `symlink_base`, `auto_virtual_path`, `default_virtual_base`, or hidden virtual-path roots predate the literal publish-path overhaul. The current behavior is documented in `README.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/CONFIGURATION.md`.
+
 ---
 
 ## 1. Architecture Overview

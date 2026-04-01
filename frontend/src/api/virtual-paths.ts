@@ -12,10 +12,8 @@ export const virtualPathsApi = {
     return apiClient.put<string>(`/virtual-paths/${fileId}`, data).then((r) => r.data)
   },
 
-  remove(fileId: number, symlinkBase?: string): Promise<string> {
-    return apiClient
-      .delete<string>(`/virtual-paths/${fileId}`, { params: { symlink_base: symlinkBase } })
-      .then((r) => r.data)
+  remove(fileId: number): Promise<string> {
+    return apiClient.delete<string>(`/virtual-paths/${fileId}`).then((r) => r.data)
   },
 
   refresh(): Promise<RefreshSymlinksResult> {

@@ -39,8 +39,7 @@ fn test_folders_add_and_list() {
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "documents".to_string(),
-            auto_virtual_path: false,
-            virtual_base: None,
+            virtual_path: None,
         }),
         &repo,
     )
@@ -60,7 +59,7 @@ fn test_folders_show() {
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("media")).unwrap();
     let folder = repo
-        .create_tracked_folder(pair.id, "media", false, None)
+        .create_tracked_folder(pair.id, "media", None)
         .unwrap();
 
     handle(FoldersCommand::Show { id: folder.id }, &repo).unwrap();
@@ -74,7 +73,7 @@ fn test_folders_remove() {
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("temp")).unwrap();
     let folder = repo
-        .create_tracked_folder(pair.id, "temp", false, None)
+        .create_tracked_folder(pair.id, "temp", None)
         .unwrap();
 
     handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
@@ -95,8 +94,7 @@ fn test_folders_scan_auto_tracks_new_files() {
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "uploads".to_string(),
-            auto_virtual_path: false,
-            virtual_base: None,
+            virtual_path: None,
         }),
         &repo,
     )
@@ -130,8 +128,7 @@ fn test_folders_add_nonexistent_folder_fails() {
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "no_such_folder".to_string(),
-            auto_virtual_path: false,
-            virtual_base: None,
+            virtual_path: None,
         }),
         &repo,
     );
@@ -140,36 +137,31 @@ fn test_folders_add_nonexistent_folder_fails() {
 }
 
 #[test]
-fn test_folders_scan_with_auto_virtual_path() {
+fn test_folders_add_with_virtual_path() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("photos")).unwrap();
-    fs::write(primary.path().join("photos/sunset.jpg"), b"image data").unwrap();
+    let publish_path = publish_root.path().join("gallery");
 
     handle(
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "photos".to_string(),
-            auto_virtual_path: true,
-            virtual_base: Some("/gallery".to_string()),
+            virtual_path: Some(publish_path.to_str().unwrap().to_string()),
         }),
         &repo,
     )
     .unwrap();
 
     let folders = repo.list_tracked_folders().unwrap();
-    handle(FoldersCommand::Scan(ScanArgs { id: folders[0].id }), &repo).unwrap();
-
-    let (files, _) = repo
-        .list_tracked_files(Some(pair.id), None, None, 1, 100)
-        .unwrap();
-    assert_eq!(files.len(), 1);
     assert_eq!(
-        files[0].virtual_path,
-        Some("/gallery/sunset.jpg".to_string())
+        folders[0].virtual_path,
+        Some(publish_path.to_string_lossy().to_string())
     );
+    assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("photos"));
 }
 
 #[test]
@@ -188,8 +180,7 @@ fn test_folders_scan_uses_secondary_after_primary_failover() {
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "docs".to_string(),
-            auto_virtual_path: false,
-            virtual_base: None,
+            virtual_path: None,
         }),
         &repo,
     )

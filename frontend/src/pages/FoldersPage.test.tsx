@@ -43,8 +43,7 @@ describe('FolderFormModal', () => {
     expect(onSave).toHaveBeenCalledWith({
       drive_pair_id: 1,
       folder_path: 'documents',
-      auto_virtual_path: false,
-      default_virtual_base: '',
+      virtual_path: undefined,
     })
   })
 })

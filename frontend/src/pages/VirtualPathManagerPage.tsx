@@ -16,6 +16,10 @@ import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
 import type { TrackedFolder } from '@/types/folder'
 import type { BulkAssignResult } from '@/types/virtual-path'
 
+function isAbsolutePath(value: string) {
+  return value.trim().startsWith('/')
+}
+
 function VirtualPathModal({
   file,
   onClose,
@@ -40,6 +44,11 @@ function VirtualPathModal({
       return
     }
 
+    if (!isAbsolutePath(value)) {
+      toast.error('Publish path must be absolute')
+      return
+    }
+
     setSaving(true)
     try {
       await onSave(file.id, value.trim())
@@ -51,21 +60,24 @@ function VirtualPathModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
-        <h2 className="text-lg font-semibold">Set Virtual Path</h2>
+        <h2 className="text-lg font-semibold">Publish File At Path</h2>
         <p className="mt-1 text-sm text-muted-foreground font-mono">{file.relative_path}</p>
 
         <div className="mt-4 space-y-3">
           <div>
             <label htmlFor="virtual-path-value" className="mb-1 block text-sm font-medium">
-              Virtual Path
+              Publish Path
             </label>
             <input
               id="virtual-path-value"
               value={value}
               onChange={(event) => setValue(event.target.value)}
-              placeholder="/virtual/path/example"
+              placeholder="/docs/report.pdf"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              BitProtector will create a symlink exactly at this absolute path.
+            </p>
           </div>
         </div>
 
@@ -104,7 +116,7 @@ export function VirtualPathManagerPage() {
   const [bulkFromReal, setBulkFromReal] = useState({
     drive_pair_id: '',
     folder_path: '',
-    virtual_base: '',
+    publish_root: '',
   })
   const [refreshSummary, setRefreshSummary] = useState<{
     created: number
@@ -156,10 +168,10 @@ export function VirtualPathManagerPage() {
     try {
       await virtualPathsApi.set(fileId, { virtual_path: virtualPath })
       setEditingFile(null)
-      toast.success(`Virtual path updated for file #${fileId}`)
+      toast.success(`Publish path updated for file #${fileId}`)
       await loadFiles(page)
     } catch {
-      toast.error(`Failed to update virtual path for file #${fileId}`)
+      toast.error(`Failed to update publish path for file #${fileId}`)
     }
   }
 
@@ -168,11 +180,11 @@ export function VirtualPathManagerPage() {
 
     try {
       await virtualPathsApi.remove(removeTarget.id)
-      toast.success(`Removed virtual path from file #${removeTarget.id}`)
+      toast.success(`Removed publish path from file #${removeTarget.id}`)
       setRemoveTarget(null)
       await loadFiles(page)
     } catch {
-      toast.error(`Failed to remove virtual path from file #${removeTarget.id}`)
+      toast.error(`Failed to remove publish path from file #${removeTarget.id}`)
     }
   }
 
@@ -180,9 +192,9 @@ export function VirtualPathManagerPage() {
     try {
       const result = await virtualPathsApi.refresh()
       setRefreshSummary(result)
-      toast.success(`Refreshed symlinks (${result.created} created, ${result.removed} removed)`)
+      toast.success(`Refreshed published symlinks (${result.created} created, ${result.removed} removed)`)
     } catch {
-      toast.error('Failed to refresh symlinks')
+      toast.error('Failed to refresh published symlinks')
     }
   }
 
@@ -216,10 +228,10 @@ export function VirtualPathManagerPage() {
       const result = await virtualPathsApi.bulk({ entries })
       setBulkResult(result)
       if (result.failed.length === 0) {
-        toast.success(`Assigned ${result.succeeded.length} virtual path(s)`)
+        toast.success(`Assigned ${result.succeeded.length} publish path(s)`)
       } else {
         toast.warning(
-          `Assigned ${result.succeeded.length} path(s) with ${result.failed.length} failure(s)`
+          `Assigned ${result.succeeded.length} publish path(s) with ${result.failed.length} failure(s)`
         )
       }
       await loadFiles(page)
@@ -230,8 +242,13 @@ export function VirtualPathManagerPage() {
   }
 
   const submitBulkFromReal = async () => {
-    if (!bulkFromReal.drive_pair_id || !bulkFromReal.folder_path.trim() || !bulkFromReal.virtual_base.trim()) {
-      toast.error('Drive, folder path, and virtual base are required')
+    if (!bulkFromReal.drive_pair_id || !bulkFromReal.folder_path.trim() || !bulkFromReal.publish_root.trim()) {
+      toast.error('Drive, folder path, and publish root are required')
+      return
+    }
+
+    if (!isAbsolutePath(bulkFromReal.publish_root)) {
+      toast.error('Publish root must be absolute')
       return
     }
 
@@ -239,15 +256,15 @@ export function VirtualPathManagerPage() {
       const result = await virtualPathsApi.bulkFromReal({
         drive_pair_id: Number(bulkFromReal.drive_pair_id),
         folder_path: bulkFromReal.folder_path.trim(),
-        virtual_base: bulkFromReal.virtual_base.trim(),
+        publish_root: bulkFromReal.publish_root.trim(),
       })
       setBulkResult(result)
       toast.success(
-        `Generated ${result.succeeded.length} virtual path(s) from real paths`
+        `Generated ${result.succeeded.length} publish path(s) from real paths`
       )
       await loadFiles(page)
     } catch {
-      toast.error('Failed to assign virtual paths from real paths')
+      toast.error('Failed to assign publish paths from real paths')
     }
   }
 
@@ -257,9 +274,9 @@ export function VirtualPathManagerPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">Virtual Paths</h1>
+          <h1 className="text-xl font-semibold">Publish Paths</h1>
           <p className="text-sm text-muted-foreground">
-            Manage individual and bulk symlink mappings for tracked files.
+            Manage the exact filesystem paths where tracked files are published as symlinks.
           </p>
         </div>
         <button
@@ -267,7 +284,7 @@ export function VirtualPathManagerPage() {
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <RefreshCw className="h-4 w-4" />
-          Refresh Symlinks
+          Refresh Published Symlinks
         </button>
       </div>
 
@@ -275,10 +292,10 @@ export function VirtualPathManagerPage() {
         <div className="space-y-4 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center gap-2">
             <Link2 className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">Bulk Assign</h2>
+            <h2 className="text-sm font-semibold">Bulk Assign Publish Paths</h2>
           </div>
           <p className="text-sm text-muted-foreground">
-            Enter one mapping per line in the format <span className="font-mono">file_id|/virtual/path</span>.
+            Enter one mapping per line in the format <span className="font-mono">file_id|/exact/publish/path</span>.
           </p>
           <textarea
             aria-label="Bulk Assignments"
@@ -292,15 +309,18 @@ export function VirtualPathManagerPage() {
             onClick={() => void submitBulkAssignments()}
             className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
           >
-            Apply Bulk Assignments
+            Apply Publish Paths
           </button>
         </div>
 
         <div className="space-y-4 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">Bulk From Real Paths</h2>
+            <h2 className="text-sm font-semibold">Generate Publish Paths From Folder Files</h2>
           </div>
+          <p className="text-sm text-muted-foreground">
+            BitProtector will append each tracked file path under the selected folder to this absolute publish root.
+          </p>
           <div className="space-y-3">
             <div>
               <label htmlFor="bulk-drive" className="mb-1 block text-sm font-medium">
@@ -338,15 +358,15 @@ export function VirtualPathManagerPage() {
             </div>
             <div>
               <label htmlFor="bulk-base" className="mb-1 block text-sm font-medium">
-                Virtual Base
+                Publish Root
               </label>
               <input
                 id="bulk-base"
-                value={bulkFromReal.virtual_base}
+                value={bulkFromReal.publish_root}
                 onChange={(event) =>
-                  setBulkFromReal((current) => ({ ...current, virtual_base: event.target.value }))
+                  setBulkFromReal((current) => ({ ...current, publish_root: event.target.value }))
                 }
-                placeholder="/virtual/documents"
+                placeholder="/published/documents"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               />
             </div>
@@ -355,7 +375,7 @@ export function VirtualPathManagerPage() {
             onClick={() => void submitBulkFromReal()}
             className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
           >
-            Generate From Real Paths
+            Generate Publish Paths
           </button>
           {folders.length > 0 && (
             <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
@@ -367,7 +387,7 @@ export function VirtualPathManagerPage() {
 
       {refreshSummary && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-          Refreshed symlinks: {refreshSummary.created} created, {refreshSummary.removed} removed
+          Refreshed published symlinks: {refreshSummary.created} created, {refreshSummary.removed} removed
           {refreshSummary.errors.length > 0 &&
             `, ${refreshSummary.errors.length} error(s)`}
         </div>
@@ -406,7 +426,7 @@ export function VirtualPathManagerPage() {
               },
               {
                 key: 'virtual_path',
-                header: 'Virtual Path',
+                header: 'Publish Path',
                 cell: (file) => (
                   <span className="font-mono text-xs">{formatPath(file.virtual_path)}</span>
                 ),
@@ -420,7 +440,7 @@ export function VirtualPathManagerPage() {
                       onClick={() => setEditingFile(file)}
                       className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
                     >
-                      Set
+                      Set Path
                     </button>
                     <button
                       onClick={() => setRemoveTarget(file)}
@@ -439,7 +459,7 @@ export function VirtualPathManagerPage() {
             emptyState={
               <EmptyState
                 title="No tracked files"
-                description="Track files first, then assign virtual paths from this page."
+                description="Track files first, then assign exact publish paths from this page."
               />
             }
           />
@@ -465,8 +485,8 @@ export function VirtualPathManagerPage() {
         onOpenChange={(open) => {
           if (!open) setRemoveTarget(null)
         }}
-        title="Remove virtual path?"
-        description={`Remove the virtual path for "${removeTarget?.relative_path}"?`}
+        title="Remove publish path?"
+        description={`Remove the publish path for "${removeTarget?.relative_path}"?`}
         confirmLabel="Remove"
         destructive
         onConfirm={removeVirtualPath}

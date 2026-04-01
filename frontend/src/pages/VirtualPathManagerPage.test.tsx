@@ -15,7 +15,7 @@ import {
 import { renderWithApp } from '@/test/render'
 
 describe('VirtualPathManagerPage', () => {
-  it('generates virtual paths from real paths with mocked backend responses', async () => {
+  it('generates publish paths from real paths with mocked backend responses', async () => {
     const user = userEvent.setup()
     let requestBody: unknown = null
 
@@ -40,14 +40,14 @@ describe('VirtualPathManagerPage', () => {
     await screen.findByTestId('virtual-path-row-5')
     await user.selectOptions(screen.getByLabelText('Drive Pair'), '1')
     await user.type(screen.getByLabelText('Folder Path'), 'documents')
-    await user.type(screen.getByLabelText('Virtual Base'), '/virtual/documents')
-    await user.click(screen.getByRole('button', { name: 'Generate From Real Paths' }))
+    await user.type(screen.getByLabelText('Publish Root'), '/published/documents')
+    await user.click(screen.getByRole('button', { name: 'Generate Publish Paths' }))
 
-    expect(await screen.findByText('Generated 1 virtual path(s) from real paths')).toBeInTheDocument()
+    expect(await screen.findByText('Generated 1 publish path(s) from real paths')).toBeInTheDocument()
     expect(requestBody).toEqual({
       drive_pair_id: 1,
       folder_path: 'documents',
-      virtual_base: '/virtual/documents',
+      publish_root: '/published/documents',
     })
   })
 
@@ -66,7 +66,7 @@ describe('VirtualPathManagerPage', () => {
 
     await screen.findByTestId('virtual-path-row-5')
     await user.type(screen.getByLabelText('Bulk Assignments'), 'bad-line-without-separator')
-    await user.click(screen.getByRole('button', { name: 'Apply Bulk Assignments' }))
+    await user.click(screen.getByRole('button', { name: 'Apply Publish Paths' }))
 
     expect(await screen.findByText(/Invalid bulk assignment line:/)).toBeInTheDocument()
   })

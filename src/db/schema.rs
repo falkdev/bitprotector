@@ -75,12 +75,20 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             drive_pair_id        INTEGER NOT NULL REFERENCES drive_pairs(id),
             folder_path          TEXT NOT NULL,
+            virtual_path         TEXT,
             auto_virtual_path    INTEGER NOT NULL DEFAULT 0,
             default_virtual_base TEXT,
             created_at           TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
         );",
     )?;
+
+    if !column_exists(conn, "tracked_folders", "virtual_path")? {
+        conn.execute_batch(
+            "ALTER TABLE tracked_folders
+             ADD COLUMN virtual_path TEXT;",
+        )?;
+    }
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_queue (

@@ -4,12 +4,7 @@ use std::path::Path;
 use crate::db::repository::{DrivePair, Repository};
 use crate::logging::event_logger;
 
-pub const DEFAULT_SYMLINK_BASE: &str = "/var/lib/bitprotector/virtual";
 pub const DRIVE_ROOT_MARKER: &str = ".bitprotector-drive-root";
-
-pub fn automatic_symlink_base() -> String {
-    std::env::var("BITPROTECTOR_SYMLINK_BASE").unwrap_or_else(|_| DEFAULT_SYMLINK_BASE.to_string())
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriveRole {
@@ -182,8 +177,7 @@ pub fn require_pair_mutation_allowed(pair: &DrivePair) -> anyhow::Result<()> {
 pub fn refresh_pair_virtual_paths(repo: &Repository, pair: &DrivePair) -> anyhow::Result<()> {
     let mut pairs = HashMap::new();
     pairs.insert(pair.id, pair.clone());
-    let symlink_base = automatic_symlink_base();
-    let _ = crate::core::virtual_path::refresh_all_symlinks(repo, &symlink_base, &pairs)?;
+    let _ = crate::core::virtual_path::refresh_all_virtual_paths(repo, &pairs)?;
     Ok(())
 }
 
@@ -547,8 +541,6 @@ mod tests {
     use crate::db::schema::initialize_schema;
     use tempfile::TempDir;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn make_repo() -> Repository {
         let pool = create_memory_pool().unwrap();
         initialize_schema(&pool.get().unwrap()).unwrap();
@@ -626,11 +618,10 @@ mod tests {
 
     #[test]
     fn test_emergency_failover_switches_active_role_and_refreshes_symlink() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let repo = make_repo();
         let primary = TempDir::new().unwrap();
         let secondary = TempDir::new().unwrap();
-        let symlink_base = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
         let primary_path = primary.path().to_path_buf();
         let secondary_path = secondary.path().to_path_buf();
 
@@ -649,26 +640,25 @@ mod tests {
             .unwrap();
         virtual_path::set_virtual_path(
             &repo,
-            symlink_base.path().to_str().unwrap(),
             tracked.id,
-            "/docs/doc.txt",
-            primary_path.join("doc.txt").to_str().unwrap(),
+            publish_root
+                .path()
+                .join("docs/doc.txt")
+                .to_str()
+                .unwrap(),
         )
         .unwrap();
 
         ensure_drive_root_marker(primary_path.to_str().unwrap()).unwrap();
         ensure_drive_root_marker(secondary_path.to_str().unwrap()).unwrap();
-        std::env::set_var("BITPROTECTOR_SYMLINK_BASE", symlink_base.path());
         drop(primary);
 
         let failed_over = load_operational_pair(&repo, pair.id).unwrap();
-        let link_target = std::fs::read_link(symlink_base.path().join("docs/doc.txt")).unwrap();
+        let link_target = std::fs::read_link(publish_root.path().join("docs/doc.txt")).unwrap();
 
         assert_eq!(failed_over.active_role, "secondary");
         assert_eq!(failed_over.primary_state, "failed");
         assert_eq!(link_target, secondary_path.join("doc.txt"));
-
-        std::env::remove_var("BITPROTECTOR_SYMLINK_BASE");
     }
 
     #[test]

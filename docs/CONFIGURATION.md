@@ -103,17 +103,11 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 
 ---
 
-## Section: [virtual_paths]
+## Virtual Path Publishing
 
-| Setting | Type | Default | Description |
-| --- | --- | --- | --- |
-| `BITPROTECTOR_SYMLINK_BASE` env var | string | `"/var/lib/bitprotector/virtual"` | Directory where virtual-path symlinks are created. The service must have write access. The directory is created on first use. |
+BitProtector no longer uses a global publish root such as `symlink_base`. Each file or folder virtual path is the exact absolute filesystem path where BitProtector will create a symlink.
 
-```bash
-export BITPROTECTOR_SYMLINK_BASE=/var/lib/bitprotector/virtual
-```
-
-This can also be overridden per-request via the optional `symlink_base` field in API calls and the `--symlink-base` flag in CLI commands.
+Make sure the service user has permission to create parent directories and symlinks at whatever publish paths you assign through the CLI, API, or web UI.
 
 ---
 

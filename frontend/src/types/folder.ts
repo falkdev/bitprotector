@@ -2,16 +2,18 @@ export interface TrackedFolder {
   id: number
   drive_pair_id: number
   folder_path: string
-  auto_virtual_path: boolean
-  default_virtual_base: string | null
+  virtual_path: string | null
   created_at: string
 }
 
 export interface CreateFolderRequest {
   drive_pair_id: number
   folder_path: string
-  auto_virtual_path?: boolean
-  default_virtual_base?: string
+  virtual_path?: string
+}
+
+export interface UpdateFolderRequest {
+  virtual_path?: string | null
 }
 
 export interface ScanFolderResult {

@@ -20,7 +20,7 @@ const navItems = [
   { to: '/folders', label: 'Folders', icon: FolderOpen },
   { to: '/integrity', label: 'Integrity', icon: ShieldCheck },
   { to: '/sync', label: 'Sync Queue', icon: RefreshCw },
-  { to: '/virtual-paths', label: 'Virtual Paths', icon: GitBranch },
+  { to: '/virtual-paths', label: 'Publish Paths', icon: GitBranch },
   { to: '/scheduler', label: 'Scheduler', icon: Clock },
   { to: '/logs', label: 'Logs', icon: ScrollText },
   { to: '/database', label: 'Database Backups', icon: Database },

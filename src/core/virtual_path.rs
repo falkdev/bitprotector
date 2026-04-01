@@ -1,14 +1,27 @@
-use crate::db::repository::Repository;
+use crate::core::drive;
+use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use anyhow::Context;
+use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
-/// Represents a virtual path mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublishOwner {
+    File(i64),
+    Folder(i64),
+}
+
 #[derive(Debug, Clone)]
-pub struct VirtualPathMapping {
-    pub file_id: i64,
-    pub virtual_path: String,
-    pub real_path: String,
+struct PublishReservation {
+    owner: PublishOwner,
+    virtual_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct PublishMapping {
+    owner: PublishOwner,
+    virtual_path: String,
+    real_path: String,
 }
 
 /// Result of a bulk virtual path operation.
@@ -18,53 +31,147 @@ pub struct BulkResult {
     pub failed: Vec<(i64, String)>,
 }
 
-/// Set the virtual path for a tracked file and create a symlink.
-pub fn set_virtual_path(
-    repo: &Repository,
-    symlink_base: &str,
-    file_id: i64,
-    virtual_path: &str,
-    real_path: &str,
-) -> anyhow::Result<()> {
-    // Validate the virtual path format (must be absolute)
-    if !virtual_path.starts_with('/') {
-        anyhow::bail!(
-            "Virtual path must be absolute (start with /): {}",
-            virtual_path
-        );
+#[derive(Debug)]
+pub struct SymlinkRefreshResult {
+    pub created: u32,
+    pub removed: u32,
+    pub errors: Vec<String>,
+}
+
+pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
+    let trimmed = virtual_path.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Virtual path is required");
     }
 
-    repo.update_tracked_file_virtual_path(file_id, Some(virtual_path))?;
-    create_symlink(symlink_base, virtual_path, real_path)?;
+    let raw_path = Path::new(trimmed);
+    if !raw_path.is_absolute() {
+        anyhow::bail!("Virtual path must be absolute (start with /): {}", virtual_path);
+    }
+
+    let mut segments = Vec::new();
+    for component in raw_path.components() {
+        match component {
+            Component::RootDir => {}
+            Component::Normal(segment) => segments.push(segment.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                anyhow::bail!("Parent-directory traversal is not allowed in virtual paths")
+            }
+            Component::Prefix(_) => anyhow::bail!("Unsupported virtual path: {}", virtual_path),
+        }
+    }
+
+    if segments.is_empty() {
+        anyhow::bail!("Publishing to the filesystem root is not allowed");
+    }
+
+    Ok(format!("/{}", segments.join("/")))
+}
+
+/// Set the virtual path for a tracked file and create/update its publish symlink.
+pub fn set_virtual_path(
+    repo: &Repository,
+    file_id: i64,
+    virtual_path: &str,
+) -> anyhow::Result<()> {
+    let file = repo.get_tracked_file(file_id)?;
+    let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
+    let normalized = validate_virtual_path(repo, PublishOwner::File(file_id), virtual_path)?;
+    let real_path = file_real_path(&pair, &file);
+
+    let previous = file
+        .virtual_path
+        .as_deref()
+        .map(normalize_virtual_path)
+        .transpose()?;
+    let replacing_same_path = previous.as_deref() == Some(normalized.as_str());
+
+    create_symlink(&normalized, &real_path, replacing_same_path)?;
+
+    if let Err(error) = repo.update_tracked_file_virtual_path(file_id, Some(&normalized)) {
+        if !replacing_same_path {
+            let _ = remove_symlink(&normalized);
+        }
+        return Err(error);
+    }
+
+    if let Some(previous) = previous {
+        if previous != normalized {
+            remove_symlink(&previous)?;
+        }
+    }
+
     Ok(())
 }
 
-/// Remove the virtual path for a tracked file and delete the symlink.
-pub fn remove_virtual_path(
+/// Remove the virtual path for a tracked file and delete the published symlink.
+pub fn remove_virtual_path(repo: &Repository, file_id: i64) -> anyhow::Result<()> {
+    let file = repo.get_tracked_file(file_id)?;
+    let Some(virtual_path) = file.virtual_path.as_deref() else {
+        anyhow::bail!("File #{} has no virtual path assigned", file_id);
+    };
+
+    let normalized = normalize_virtual_path(virtual_path)?;
+    repo.update_tracked_file_virtual_path(file_id, None)?;
+    remove_symlink(&normalized)?;
+    Ok(())
+}
+
+pub fn set_folder_virtual_path(
     repo: &Repository,
-    symlink_base: &str,
-    file_id: i64,
+    folder_id: i64,
     virtual_path: &str,
 ) -> anyhow::Result<()> {
-    repo.update_tracked_file_virtual_path(file_id, None)?;
-    remove_symlink(symlink_base, virtual_path)?;
+    let folder = repo.get_tracked_folder(folder_id)?;
+    let pair = drive::load_operational_pair(repo, folder.drive_pair_id)?;
+    let normalized = validate_virtual_path(repo, PublishOwner::Folder(folder_id), virtual_path)?;
+    let real_path = folder_real_path(&pair, &folder);
+
+    let previous = folder
+        .virtual_path
+        .as_deref()
+        .map(normalize_virtual_path)
+        .transpose()?;
+    let replacing_same_path = previous.as_deref() == Some(normalized.as_str());
+
+    create_symlink(&normalized, &real_path, replacing_same_path)?;
+
+    if let Err(error) = repo.update_tracked_folder(folder_id, Some(Some(&normalized))) {
+        if !replacing_same_path {
+            let _ = remove_symlink(&normalized);
+        }
+        return Err(error);
+    }
+
+    if let Some(previous) = previous {
+        if previous != normalized {
+            remove_symlink(&previous)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn remove_folder_virtual_path(repo: &Repository, folder_id: i64) -> anyhow::Result<()> {
+    let folder = repo.get_tracked_folder(folder_id)?;
+    let Some(virtual_path) = folder.virtual_path.as_deref() else {
+        return Ok(());
+    };
+
+    let normalized = normalize_virtual_path(virtual_path)?;
+    repo.update_tracked_folder(folder_id, Some(None))?;
+    remove_symlink(&normalized)?;
     Ok(())
 }
 
 /// Set virtual paths for multiple files in a single operation.
-///
-/// Each entry maps a `file_id` to a `(virtual_path, real_path)` tuple.
-/// Failures on individual items are collected rather than aborting the whole batch.
-pub fn bulk_set(
-    repo: &Repository,
-    symlink_base: &str,
-    entries: &[(i64, String, String)],
-) -> BulkResult {
+pub fn bulk_set(repo: &Repository, entries: &[(i64, String)]) -> BulkResult {
     let mut succeeded = Vec::new();
     let mut failed = Vec::new();
 
-    for (file_id, virtual_path, real_path) in entries {
-        match set_virtual_path(repo, symlink_base, *file_id, virtual_path, real_path) {
+    for (file_id, virtual_path) in entries {
+        match set_virtual_path(repo, *file_id, virtual_path) {
             Ok(()) => succeeded.push(*file_id),
             Err(e) => failed.push((*file_id, e.to_string())),
         }
@@ -73,111 +180,107 @@ pub fn bulk_set(
     BulkResult { succeeded, failed }
 }
 
-/// Assign virtual paths to all tracked files in a folder using a common virtual base.
-///
-/// For each file under `folder_path` (relative within the drive pair), the virtual path
-/// is computed as `virtual_base / <relative-path-within-folder>`.
+/// Assign literal publish paths to all tracked files in a folder under a common publish root.
 pub fn bulk_from_real(
     repo: &Repository,
-    symlink_base: &str,
     drive_pair_id: i64,
     folder_path: &str,
-    virtual_base: &str,
-    pair_active_path: &str,
+    publish_root: &str,
 ) -> anyhow::Result<BulkResult> {
-    if !virtual_base.starts_with('/') {
-        anyhow::bail!(
-            "virtual_base must be absolute (start with /): {}",
-            virtual_base
-        );
-    }
-
-    let (files, _) =
-        repo.list_tracked_files(Some(drive_pair_id), None, None, 1, i64::MAX)?;
+    let normalized_root = normalize_virtual_path(publish_root)?;
+    let (files, _) = repo.list_tracked_files(Some(drive_pair_id), None, None, 1, i64::MAX)?;
 
     let folder_norm = folder_path.trim_end_matches('/');
-    let mut entries: Vec<(i64, String, String)> = Vec::new();
+    let mut entries: Vec<(i64, String)> = Vec::new();
 
     for file in &files {
         let rel = file.relative_path.as_str();
-        // Only include files whose path starts with the target folder
         if !rel.starts_with(folder_norm) {
             continue;
         }
         let suffix = rel[folder_norm.len()..].trim_start_matches('/');
         let virtual_path = if suffix.is_empty() {
-            virtual_base.to_string()
+            normalized_root.clone()
         } else {
-            format!("{}/{}", virtual_base.trim_end_matches('/'), suffix)
+            format!("{}/{}", normalized_root.trim_end_matches('/'), suffix)
         };
-        let real_path = PathBuf::from(pair_active_path).join(rel);
-        entries.push((
-            file.id,
-            virtual_path,
-            real_path.to_string_lossy().to_string(),
-        ));
+        entries.push((file.id, virtual_path));
     }
 
-    Ok(bulk_set(repo, symlink_base, &entries))
+    Ok(bulk_set(repo, &entries))
 }
 
-/// Create a symlink at `symlink_base/virtual_path` -> `real_path`.
+/// Create a symlink at `virtual_path` -> `real_path`.
 pub fn create_symlink(
-    symlink_base: &str,
     virtual_path: &str,
     real_path: &str,
+    allow_replace_existing_symlink: bool,
 ) -> anyhow::Result<()> {
-    let link_path = build_symlink_path(symlink_base, virtual_path);
+    let link_path = PathBuf::from(virtual_path);
 
     if let Some(parent) = link_path.parent() {
         fs::create_dir_all(parent).context("Failed to create virtual path directories")?;
     }
 
-    // Remove existing symlink if it exists
-    if link_path.exists() || link_path.is_symlink() {
-        fs::remove_file(&link_path).context("Failed to remove old symlink")?;
+    match fs::symlink_metadata(&link_path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "Virtual path already exists and is not a BitProtector-managed symlink: {}",
+                    virtual_path
+                );
+            }
+            if !allow_replace_existing_symlink {
+                anyhow::bail!("Virtual path is already in use: {}", virtual_path);
+            }
+            fs::remove_file(&link_path).context("Failed to remove old symlink")?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("Failed to inspect virtual path"),
     }
 
     std::os::unix::fs::symlink(real_path, &link_path).context("Failed to create symlink")?;
-
     Ok(())
 }
 
-/// Remove the symlink at `symlink_base/virtual_path`.
-pub fn remove_symlink(symlink_base: &str, virtual_path: &str) -> anyhow::Result<()> {
-    let link_path = build_symlink_path(symlink_base, virtual_path);
-    if link_path.exists() || link_path.is_symlink() {
-        fs::remove_file(&link_path)?;
+/// Remove the symlink at `virtual_path`.
+pub fn remove_symlink(virtual_path: &str) -> anyhow::Result<()> {
+    let link_path = PathBuf::from(virtual_path);
+    match fs::symlink_metadata(&link_path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "Virtual path is not a BitProtector-managed symlink: {}",
+                    virtual_path
+                );
+            }
+            fs::remove_file(&link_path)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("Failed to inspect virtual path"),
     }
     Ok(())
 }
 
-fn build_symlink_path(symlink_base: &str, virtual_path: &str) -> PathBuf {
-    // virtual_path starts with '/', strip it for joining
-    let stripped = virtual_path.trim_start_matches('/');
-    PathBuf::from(symlink_base).join(stripped)
-}
-
-/// Regenerate all symlinks from the database.
-pub fn refresh_all_symlinks(
+/// Regenerate all publish symlinks from the database.
+pub fn refresh_all_virtual_paths(
     repo: &Repository,
-    symlink_base: &str,
-    drive_pairs: &std::collections::HashMap<i64, crate::db::repository::DrivePair>,
+    drive_pairs: &HashMap<i64, DrivePair>,
 ) -> anyhow::Result<SymlinkRefreshResult> {
     let mut created = 0u32;
     let removed = 0u32;
-    let mut errors: Vec<String> = Vec::new();
+    let mut errors = Vec::new();
 
-    let (files, _) = repo.list_tracked_files(None, None, None, 1, i64::MAX)?;
-    for file in &files {
-        if let Some(vp) = &file.virtual_path {
-            if let Some(pair) = drive_pairs.get(&file.drive_pair_id) {
-                let real_path = PathBuf::from(pair.active_path()).join(&file.relative_path);
-                match create_symlink(symlink_base, vp, real_path.to_str().unwrap_or("")) {
-                    Ok(()) => created += 1,
-                    Err(e) => errors.push(format!("File {}: {}", file.id, e)),
-                }
-            }
+    let mappings = collect_publish_mappings(repo, drive_pairs)?;
+    for mapping in mappings {
+        if let Err(error) = validate_virtual_path(repo, mapping.owner, &mapping.virtual_path) {
+            errors.push(owner_error(mapping.owner, &error.to_string()));
+            continue;
+        }
+
+        match create_symlink(&mapping.virtual_path, &mapping.real_path, true) {
+            Ok(()) => created += 1,
+            Err(error) => errors.push(owner_error(mapping.owner, &error.to_string())),
         }
     }
 
@@ -188,16 +291,153 @@ pub fn refresh_all_symlinks(
     })
 }
 
-#[derive(Debug)]
-pub struct SymlinkRefreshResult {
-    pub created: u32,
-    pub removed: u32,
-    pub errors: Vec<String>,
+fn validate_virtual_path(
+    repo: &Repository,
+    owner: PublishOwner,
+    virtual_path: &str,
+) -> anyhow::Result<String> {
+    let normalized = normalize_virtual_path(virtual_path)?;
+    let reservations = collect_publish_reservations(repo)?;
+
+    for reservation in reservations {
+        if reservation.owner == owner {
+            continue;
+        }
+
+        if reservation.virtual_path == normalized {
+            anyhow::bail!("Virtual path is already assigned: {}", normalized);
+        }
+
+        if paths_overlap(&reservation.virtual_path, &normalized) {
+            anyhow::bail!(
+                "Virtual path overlaps an existing published path: {}",
+                reservation.virtual_path
+            );
+        }
+    }
+
+    match fs::symlink_metadata(&normalized) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "Virtual path already exists and is not a BitProtector-managed symlink: {}",
+                    normalized
+                );
+            }
+
+            let owned_by_current = collect_publish_reservations(repo)?
+                .into_iter()
+                .any(|reservation| reservation.owner == owner && reservation.virtual_path == normalized);
+
+            if !owned_by_current {
+                anyhow::bail!("Virtual path is already in use: {}", normalized);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("Failed to inspect virtual path"),
+    }
+
+    Ok(normalized)
+}
+
+fn collect_publish_reservations(repo: &Repository) -> anyhow::Result<Vec<PublishReservation>> {
+    let (files, _) = repo.list_tracked_files(None, None, None, 1, i64::MAX)?;
+    let mut reservations = Vec::new();
+
+    for file in files {
+        if let Some(virtual_path) = file.virtual_path.as_deref() {
+            reservations.push(PublishReservation {
+                owner: PublishOwner::File(file.id),
+                virtual_path: normalize_virtual_path(virtual_path)?,
+            });
+        }
+    }
+
+    for folder in repo.list_tracked_folders()? {
+        if let Some(virtual_path) = folder.virtual_path.as_deref() {
+            reservations.push(PublishReservation {
+                owner: PublishOwner::Folder(folder.id),
+                virtual_path: normalize_virtual_path(virtual_path)?,
+            });
+        }
+    }
+
+    Ok(reservations)
+}
+
+fn collect_publish_mappings(
+    repo: &Repository,
+    drive_pairs: &HashMap<i64, DrivePair>,
+) -> anyhow::Result<Vec<PublishMapping>> {
+    let (files, _) = repo.list_tracked_files(None, None, None, 1, i64::MAX)?;
+    let mut mappings = Vec::new();
+
+    for file in files {
+        let Some(virtual_path) = file.virtual_path.as_deref() else {
+            continue;
+        };
+        let pair = drive_pairs
+            .get(&file.drive_pair_id)
+            .ok_or_else(|| anyhow::anyhow!("Drive pair {} not found", file.drive_pair_id))?;
+        mappings.push(PublishMapping {
+            owner: PublishOwner::File(file.id),
+            virtual_path: normalize_virtual_path(virtual_path)?,
+            real_path: file_real_path(pair, &file),
+        });
+    }
+
+    for folder in repo.list_tracked_folders()? {
+        let Some(virtual_path) = folder.virtual_path.as_deref() else {
+            continue;
+        };
+        let pair = drive_pairs
+            .get(&folder.drive_pair_id)
+            .ok_or_else(|| anyhow::anyhow!("Drive pair {} not found", folder.drive_pair_id))?;
+        mappings.push(PublishMapping {
+            owner: PublishOwner::Folder(folder.id),
+            virtual_path: normalize_virtual_path(virtual_path)?,
+            real_path: folder_real_path(pair, &folder),
+        });
+    }
+
+    Ok(mappings)
+}
+
+fn file_real_path(pair: &DrivePair, file: &TrackedFile) -> String {
+    PathBuf::from(pair.active_path())
+        .join(&file.relative_path)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn folder_real_path(pair: &DrivePair, folder: &TrackedFolder) -> String {
+    PathBuf::from(pair.active_path())
+        .join(&folder.folder_path)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn paths_overlap(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn owner_error(owner: PublishOwner, message: &str) -> String {
+    match owner {
+        PublishOwner::File(id) => format!("File {}: {}", id, message),
+        PublishOwner::Folder(id) => format!("Folder {}: {}", id, message),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::tracker;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
     use tempfile::TempDir;
@@ -211,96 +451,169 @@ mod tests {
         Repository::new(pool)
     }
 
-    #[test]
-    fn test_virtual_path_to_real_path_mapping() {
-        let symlink_base = TempDir::new().unwrap();
-        let real_dir = TempDir::new().unwrap();
-        let real_file = real_dir.path().join("doc.txt");
-        fs::write(&real_file, b"content").unwrap();
-
-        create_symlink(
-            symlink_base.path().to_str().unwrap(),
-            "/docs/doc.txt",
-            real_file.to_str().unwrap(),
-        )
-        .unwrap();
-
-        let link = symlink_base.path().join("docs/doc.txt");
-        assert!(link.is_symlink(), "Symlink should exist");
-        let target = fs::read_link(&link).unwrap();
-        assert_eq!(target.to_str().unwrap(), real_file.to_str().unwrap());
-    }
-
-    #[test]
-    fn test_symlink_creation_creates_directories() {
-        let symlink_base = TempDir::new().unwrap();
-        let real_dir = TempDir::new().unwrap();
-        let real_file = real_dir.path().join("deep.txt");
-        fs::write(&real_file, b"deep").unwrap();
-
-        create_symlink(
-            symlink_base.path().to_str().unwrap(),
-            "/a/b/c/deep.txt",
-            real_file.to_str().unwrap(),
-        )
-        .unwrap();
-
-        let link = symlink_base.path().join("a/b/c/deep.txt");
-        assert!(link.is_symlink());
-    }
-
-    #[test]
-    fn test_invalid_virtual_path_rejected() {
-        let repo = setup_repo();
-        let symlink_base = TempDir::new().unwrap();
-        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let file = repo
-            .create_tracked_file(pair.id, "f.txt", "hash", 1, None)
+    fn setup_file(
+        repo: &Repository,
+        primary: &TempDir,
+        secondary: &TempDir,
+        name: &str,
+    ) -> (crate::db::repository::DrivePair, crate::db::repository::TrackedFile) {
+        let pair = repo
+            .create_drive_pair(
+                "pair",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
             .unwrap();
+        fs::write(primary.path().join(name), b"content").unwrap();
+        let file = tracker::track_file(repo, &pair, name, None).unwrap();
+        (pair, file)
+    }
 
-        let result = set_virtual_path(
-            &repo,
-            symlink_base.path().to_str().unwrap(),
-            file.id,
-            "relative/path", // not absolute
-            "/real/path",
+    #[test]
+    fn test_normalize_virtual_path() {
+        assert_eq!(
+            normalize_virtual_path(" /docs/../bad ").unwrap_err().to_string(),
+            "Parent-directory traversal is not allowed in virtual paths"
         );
-        assert!(result.is_err());
+        assert_eq!(normalize_virtual_path("/docs//report.txt").unwrap(), "/docs/report.txt");
     }
 
     #[test]
-    fn test_remove_symlink() {
-        let symlink_base = TempDir::new().unwrap();
-        let real_dir = TempDir::new().unwrap();
-        let real_file = real_dir.path().join("r.txt");
-        fs::write(&real_file, b"data").unwrap();
+    fn test_set_virtual_path_creates_literal_symlink() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+        let (_, file) = setup_file(&repo, &primary, &secondary, "doc.txt");
+        let publish_path = publish_root.path().join("docs/report.txt");
 
-        create_symlink(
-            symlink_base.path().to_str().unwrap(),
-            "/r.txt",
-            real_file.to_str().unwrap(),
-        )
-        .unwrap();
+        set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap();
 
-        let link = symlink_base.path().join("r.txt");
-        assert!(link.is_symlink());
-
-        remove_symlink(symlink_base.path().to_str().unwrap(), "/r.txt").unwrap();
-        assert!(!link.exists());
-        assert!(!link.is_symlink());
+        assert!(publish_path.is_symlink());
+        assert_eq!(
+            fs::read_link(&publish_path).unwrap(),
+            primary.path().join("doc.txt")
+        );
     }
 
     #[test]
-    fn test_bulk_path_prefix_stripping() {
-        // Test that path prefix stripping logic works correctly
-        // From plan: documents/projects/alpha/spec.txt -> /projects/alpha/spec.txt
-        let full_path = "documents/projects/alpha/spec.txt";
-        let strip_prefix = "documents/projects/";
-        let virtual_base = "/projects";
+    fn test_set_virtual_path_refuses_existing_regular_file() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+        let (_, file) = setup_file(&repo, &primary, &secondary, "doc.txt");
+        let publish_path = publish_root.path().join("docs/report.txt");
+        fs::create_dir_all(publish_path.parent().unwrap()).unwrap();
+        fs::write(&publish_path, b"foreign").unwrap();
 
-        let stripped = full_path.strip_prefix(strip_prefix).unwrap_or(full_path);
-        let virtual_path = format!("{}/{}", virtual_base.trim_end_matches('/'), stripped);
+        let error = set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("not a BitProtector-managed symlink"));
+    }
 
-        assert_eq!(virtual_path, "/projects/alpha/spec.txt");
+    #[test]
+    fn test_remove_virtual_path_deletes_symlink() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+        let (_, file) = setup_file(&repo, &primary, &secondary, "doc.txt");
+        let publish_path = publish_root.path().join("docs/report.txt");
+
+        set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap();
+        remove_virtual_path(&repo, file.id).unwrap();
+
+        assert!(!publish_path.exists());
+        assert!(repo.get_tracked_file(file.id).unwrap().virtual_path.is_none());
+    }
+
+    #[test]
+    fn test_folder_virtual_path_creates_directory_symlink() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+        fs::create_dir(primary.path().join("reports")).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "pair",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let folder = tracker::track_folder(&repo, &pair, "reports", None).unwrap();
+        let publish_path = publish_root.path().join("docs");
+
+        set_folder_virtual_path(&repo, folder.id, publish_path.to_str().unwrap()).unwrap();
+
+        assert!(publish_path.is_symlink());
+        assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("reports"));
+    }
+
+    #[test]
+    fn test_overlap_validation_rejects_nested_paths() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+
+        fs::create_dir(primary.path().join("reports")).unwrap();
+        fs::write(primary.path().join("reports/doc.txt"), b"content").unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "pair",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let folder = tracker::track_folder(&repo, &pair, "reports", None).unwrap();
+        let file = tracker::track_file(&repo, &pair, "reports/doc.txt", None).unwrap();
+        let folder_publish = publish_root.path().join("docs");
+        let file_publish = publish_root.path().join("docs/doc.txt");
+
+        set_folder_virtual_path(&repo, folder.id, folder_publish.to_str().unwrap()).unwrap();
+        let error = set_virtual_path(&repo, file.id, file_publish.to_str().unwrap()).unwrap_err();
+
+        assert!(error.to_string().contains("overlaps"));
+    }
+
+    #[test]
+    fn test_refresh_retargets_file_and_folder_symlinks() {
+        let repo = setup_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+
+        fs::create_dir(primary.path().join("docs")).unwrap();
+        fs::create_dir(secondary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/report.txt"), b"content").unwrap();
+        fs::write(secondary.path().join("docs/report.txt"), b"content").unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "pair",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let tracked = tracker::track_file(&repo, &pair, "docs/report.txt", None).unwrap();
+        let folder = tracker::track_folder(&repo, &pair, "docs", None).unwrap();
+
+        let file_publish = publish_root.path().join("published/report.txt");
+        let folder_publish = publish_root.path().join("published/docs");
+        set_virtual_path(&repo, tracked.id, file_publish.to_str().unwrap()).unwrap();
+        set_folder_virtual_path(&repo, folder.id, folder_publish.to_str().unwrap()).unwrap();
+
+        drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
+        drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
+        fs::remove_file(drive::drive_root_marker_path(primary.path().to_str().unwrap())).unwrap();
+
+        let failed_over = drive::load_operational_pair(&repo, pair.id).unwrap();
+        assert_eq!(failed_over.active_role, "secondary");
+        assert_eq!(
+            fs::read_link(&file_publish).unwrap(),
+            secondary.path().join("docs/report.txt")
+        );
+        assert_eq!(fs::read_link(&folder_publish).unwrap(), secondary.path().join("docs"));
     }
 }

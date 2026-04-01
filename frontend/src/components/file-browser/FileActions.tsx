@@ -13,7 +13,7 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
     <div className="flex items-center gap-1" data-testid={`file-actions-${file.id}`}>
       <button
         className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
-        title="Set virtual path"
+        title="Set publish path"
         onClick={() => onSetVirtualPath(file)}
         data-testid="action-set-virtual-path"
       >

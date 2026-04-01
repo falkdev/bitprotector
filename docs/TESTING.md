@@ -69,6 +69,13 @@ npm test
 
 `npm test` also expects Node.js 20.19+ because the current Vite/Vitest stack requires newer Node APIs.
 
+To run the live frontend smoke suite against a manual QEMU guest that is already booted with `./scripts/qemu_manual.sh`:
+
+```bash
+cd frontend
+npm run test:e2e:qemu
+```
+
 ### Run all tests in one integration file
 
 ```bash

@@ -7,9 +7,6 @@ tls_key = "/etc/bitprotector/key.pem"
 [database]
 path = "/var/lib/bitprotector/bitprotector.db"
 
-[virtual_paths]
-symlink_base = "/var/lib/bitprotector/virtual/"
-
 [logging]
 level = "info"
 file = "/var/log/bitprotector/bitprotector.log"

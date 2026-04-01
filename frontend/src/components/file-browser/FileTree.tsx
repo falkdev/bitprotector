@@ -94,7 +94,7 @@ export function FileTree({ virtualPaths, selected, onSelect }: FileTreeProps) {
   if (nodes.length === 0) {
     return (
       <div className="p-4 text-sm text-gray-500 text-center">
-        No virtual paths assigned
+        No publish paths assigned
       </div>
     )
   }

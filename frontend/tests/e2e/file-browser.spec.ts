@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures'
 import { createDrivePair, expectToast, openSidebarRoute } from './support/ui'
 
-test('tracks, mirrors, updates virtual path, and deletes a file through the GUI', async ({ page, qemu }) => {
+test('tracks, mirrors, publishes, and deletes a file through the GUI', async ({ page, qemu }) => {
   const fixture = await qemu.seedDriveFixture()
   const fileName = fixture.fileRelativePath.split('/').at(-1) ?? fixture.fileRelativePath
 
@@ -24,9 +24,9 @@ test('tracks, mirrors, updates virtual path, and deletes a file through the GUI'
   await expect(page.getByTestId('file-details')).toContainText(fixture.fileRelativePath)
 
   await row.getByTestId('action-set-virtual-path').click()
-  await page.getByLabel('Virtual path').fill(fixture.virtualPath)
+  await page.getByLabel('Publish path').fill(fixture.virtualPath)
   await page.getByRole('button', { name: 'Save' }).click()
-  await expectToast(page, 'Virtual path updated')
+  await expectToast(page, 'Publish path updated')
 
   const updatedRow = page
     .locator('[data-testid^="file-row-"]')
@@ -34,13 +34,18 @@ test('tracks, mirrors, updates virtual path, and deletes a file through the GUI'
     .first()
   await updatedRow.click()
   await expect(page.getByTestId('file-details')).toContainText(fixture.virtualPath)
+  await expect(await qemu.resolvePath(fixture.virtualPath)).toBe(fixture.absoluteFilePath)
+  await expect(await qemu.readFile(fixture.virtualPath)).toContain(`report for ${fixture.runId}`)
 
   await updatedRow.getByTestId('action-mirror').click()
   await expectToast(page, 'Mirror requested')
   await expect(updatedRow).toContainText('Mirrored')
+  await expect(await qemu.pathExists(fixture.secondaryFilePath)).toBe(true)
+  await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(`report for ${fixture.runId}`)
 
   await updatedRow.getByTestId('action-delete').click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click()
   await expectToast(page, 'File removed from tracking')
   await expect(updatedRow).toHaveCount(0)
+  await expect(await qemu.pathExists(fixture.virtualPath)).toBe(false)
 })

@@ -1,6 +1,6 @@
 use crate::api::models::ApiError;
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
-use crate::core::{drive, mirror, tracker};
+use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
@@ -136,6 +136,21 @@ pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
 /// DELETE /api/v1/files/{id} — untrack a file
 pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
     let id = path.into_inner();
+    let file = match repo.get_tracked_file(id) {
+        Ok(file) => file,
+        Err(_) => {
+            return HttpResponse::NotFound().json(ApiError::new(
+                "RESOURCE_NOT_FOUND",
+                &format!("Tracked file {} not found", id),
+            ))
+        }
+    };
+    if file.virtual_path.is_some() {
+        if let Err(e) = virtual_path::remove_virtual_path(&repo, id) {
+            return HttpResponse::BadRequest()
+                .json(ApiError::new("VALIDATION_ERROR", &e.to_string()));
+        }
+    }
     match repo.delete_tracked_file(id) {
         Ok(()) => HttpResponse::NoContent().finish(),
         Err(e) => {

@@ -9,12 +9,6 @@ fn cmd(db: &str) -> Command {
     c
 }
 
-fn cmd_with_symlink_base(db: &str, symlink_base: &str) -> Command {
-    let mut c = cmd(db);
-    c.env("BITPROTECTOR_SYMLINK_BASE", symlink_base);
-    c
-}
-
 /// Return a temp db path (the file is kept alive by the returned NamedTempFile).
 fn temp_db() -> NamedTempFile {
     NamedTempFile::new().unwrap()
@@ -179,11 +173,12 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
     let replacement = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let publish_path = publish_root.path().join("docs/report.txt");
 
     fs::write(primary.path().join("report.txt"), b"report").unwrap();
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args([
             "drives",
             "add",
@@ -194,46 +189,44 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
         .assert()
         .success();
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args(["files", "track", "1", "report.txt", "--mirror"])
         .assert()
         .success();
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args([
             "virtual-paths",
             "set",
             "1",
-            "/docs/report.txt",
-            "--symlink-base",
-            symlink_dir.path().to_str().unwrap(),
+            publish_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
     assert_eq!(
-        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        fs::read_link(&publish_path).unwrap(),
         primary.path().join("report.txt"),
     );
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args(["drives", "replace", "mark", "1", "--role", "primary"])
         .assert()
         .success()
         .stdout(predicate::str::contains("quiescing"));
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args(["drives", "replace", "confirm", "1", "--role", "primary"])
         .assert()
         .success()
         .stdout(predicate::str::contains("confirmed failed on primary"));
 
     assert_eq!(
-        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        fs::read_link(&publish_path).unwrap(),
         secondary.path().join("report.txt"),
     );
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
+    cmd(db_path)
         .args([
             "drives",
             "replace",
@@ -247,17 +240,14 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
         .success()
         .stdout(predicate::str::contains("queued 1 rebuild item"));
 
-    cmd_with_symlink_base(db_path, symlink_dir.path().to_str().unwrap())
-        .args(["sync", "process"])
-        .assert()
-        .success();
+    cmd(db_path).args(["sync", "process"]).assert().success();
 
     assert_eq!(
         fs::read(replacement.path().join("report.txt")).unwrap(),
         b"report"
     );
     assert_eq!(
-        fs::read_link(symlink_dir.path().join("docs/report.txt")).unwrap(),
+        fs::read_link(&publish_path).unwrap(),
         replacement.path().join("report.txt"),
     );
 }

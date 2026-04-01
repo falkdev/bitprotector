@@ -87,7 +87,9 @@ export interface SeededDriveFixture {
   folderRelativePath: string
   fileRelativePath: string
   absoluteFilePath: string
+  secondaryFilePath: string
   virtualPath: string
+  folderVirtualPath: string
   backupPath: string
 }
 
@@ -96,6 +98,9 @@ export interface QemuContext {
   env: ReturnType<typeof readEnv>
   seedDriveFixture(): Promise<SeededDriveFixture>
   runBitProtector(args: string[]): Promise<{ stdout: string; stderr: string }>
+  resolvePath(path: string): Promise<string>
+  readFile(path: string): Promise<string>
+  pathExists(path: string): Promise<boolean>
   diagnostics(): Promise<string>
   cleanup(): Promise<void>
 }
@@ -113,7 +118,7 @@ export function createQemuContext(runId: string): QemuContext {
     mirrorRoot: `/mnt/mirror/e2e/${runId}`,
     replacementPrimaryRoot: `/mnt/replacement-primary/e2e/${runId}`,
     spareRoot: `/mnt/spare1/e2e/${runId}`,
-    virtualRoot: `/var/lib/bitprotector/virtual/e2e/${runId}`,
+    publishRoot: `/tmp/bitprotector-publish/${runId}`,
   }
 
   return {
@@ -131,8 +136,10 @@ export function createQemuContext(runId: string): QemuContext {
       const notesFileName = `notes-${uniqueSuffix}.txt`
       const fileRelativePath = `${folderRelativePath}/${fileName}`
       const absoluteFilePath = `${primaryPath}/${fileRelativePath}`
+      const secondaryFilePath = `${secondaryPath}/${fileRelativePath}`
       const backupPath = `${basePaths.spareRoot}/backups`
-      const virtualPath = `/e2e/${runId}/${fileName}`
+      const virtualPath = `${basePaths.publishRoot}/files/${fileName}`
+      const folderVirtualPath = `${basePaths.publishRoot}/folders/${folderRelativePath}`
 
       await runGuestScript(`
 PRIMARY_PATH=${shellQuote(primaryPath)}
@@ -158,7 +165,9 @@ printf 'notes for ${runId}\n' > "$PRIMARY_PATH/$FOLDER_RELATIVE_PATH/$NOTES_FILE
         folderRelativePath,
         fileRelativePath,
         absoluteFilePath,
+        secondaryFilePath,
         virtualPath,
+        folderVirtualPath,
         backupPath,
       }
     },
@@ -166,6 +175,22 @@ printf 'notes for ${runId}\n' > "$PRIMARY_PATH/$FOLDER_RELATIVE_PATH/$NOTES_FILE
       return runGuestScript(
         `sudo /usr/bin/bitprotector ${args.map((arg) => shellQuote(arg)).join(' ')}`
       )
+    },
+    async resolvePath(path: string) {
+      const { stdout } = await runGuestScript(`readlink -f ${shellQuote(path)}`)
+      return stdout.trim()
+    },
+    async readFile(path: string) {
+      const { stdout } = await runGuestScript(`cat ${shellQuote(path)}`)
+      return stdout
+    },
+    async pathExists(path: string) {
+      try {
+        await runGuestScript(`test -e ${shellQuote(path)}`)
+        return true
+      } catch {
+        return false
+      }
     },
     async diagnostics() {
       const { stdout, stderr } = await runGuestScript(`
@@ -184,7 +209,7 @@ sudo rm -rf \
   ${shellQuote(basePaths.mirrorRoot)} \
   ${shellQuote(basePaths.replacementPrimaryRoot)} \
   ${shellQuote(basePaths.spareRoot)} \
-  ${shellQuote(basePaths.virtualRoot)}
+  ${shellQuote(basePaths.publishRoot)}
 `)
     },
   }

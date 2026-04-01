@@ -3,6 +3,7 @@ import { createDrivePair, expectToast, openSidebarRoute } from './support/ui'
 
 test('adds a tracked folder and scans it against the live backend', async ({ page, qemu }) => {
   const fixture = await qemu.seedDriveFixture()
+  const fileName = fixture.fileRelativePath.split('/').at(-1) ?? fixture.fileRelativePath
 
   await createDrivePair(page, {
     name: fixture.driveName,
@@ -14,6 +15,7 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await page.getByTestId('add-folder-button').click()
   await page.getByLabel('Drive Pair').selectOption({ label: fixture.driveName })
   await page.getByLabel('Folder Path').fill(fixture.folderRelativePath)
+  await page.getByLabel('Publish path').fill(fixture.folderVirtualPath)
   await page.getByRole('button', { name: 'Add Folder' }).last().click()
   await expectToast(page, 'Folder added')
 
@@ -23,4 +25,10 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await row.getByRole('button', { name: 'Scan' }).click()
   await expectToast(page, /Scan complete:/)
   await expect(page.getByText(new RegExp(`Scan results for ${fixture.folderRelativePath}:`))).toBeVisible()
+  await expect(await qemu.resolvePath(fixture.folderVirtualPath)).toBe(
+    `${fixture.primaryPath}/${fixture.folderRelativePath}`
+  )
+  await expect(await qemu.readFile(`${fixture.folderVirtualPath}/${fileName}`)).toContain(
+    `report for ${fixture.runId}`
+  )
 })

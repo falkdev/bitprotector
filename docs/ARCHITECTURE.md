@@ -65,7 +65,7 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `mirror.rs` | Copy a file from the primary path to the secondary path, verifying the copy with a post-write checksum. Also responsible for restoring a corrupted copy from its healthy counterpart. |
 | `integrity.rs` | Orchestrate integrity checks: re-hash the current active and standby copies, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted / drive\_unavailable), and trigger automatic recovery only when a healthy counterpart exists. |
 | `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
-| `virtual_path.rs` | Map a tracked file to a user-visible virtual path. Creates and removes symlinks in the `symlink_base` directory and refreshes them whenever `active_role` changes. |
+| `virtual_path.rs` | Map tracked files and folders to literal publish paths. Creates and removes symlinks exactly at those absolute paths and refreshes them whenever `active_role` changes. |
 | `tracker.rs` | Track or untrack individual files and folders. On track: compute initial checksum, store metadata, enqueue mirroring, and operate on the pair's current active side rather than assuming primary is always live. |
 | `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
@@ -150,11 +150,13 @@ CREATE TABLE tracked_folders (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     drive_pair_id        INTEGER NOT NULL REFERENCES drive_pairs(id),
     folder_path          TEXT    NOT NULL,
-    auto_virtual_path    INTEGER NOT NULL DEFAULT 0,
-    default_virtual_base TEXT,
+    virtual_path         TEXT,
     created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(drive_pair_id, folder_path)
 );
+
+-- Legacy migrated databases may still contain `auto_virtual_path` and
+-- `default_virtual_base`, but they are no longer used by the application.
 
 -- Files awaiting action
 CREATE TABLE sync_queue (
@@ -231,7 +233,7 @@ BLAKE3 is faster than SHA-256/SHA-512 on modern hardware and provides sufficient
 
 ### Virtual paths are symlinks on disk
 
-The virtual path system does not intercept file I/O. Instead it creates regular symlinks in a dedicated directory (`symlink_base`). This makes virtual paths transparent to any tool that can follow symlinks, requires no kernel module or FUSE, and is straightforward to regenerate from the database (`POST /virtual-paths/refresh`). During drive failover, the symlink target is refreshed from the pair's `active_role`, so future opens move to the surviving side.
+The virtual path system does not intercept file I/O. Instead it creates regular symlinks directly at the exact absolute publish paths stored in the database. This makes virtual paths transparent to any tool that can follow symlinks, requires no kernel module or FUSE, and is straightforward to regenerate from the database (`POST /virtual-paths/refresh`). During drive failover, the symlink target is refreshed from the pair's `active_role`, so future opens move to the surviving side.
 
 ### Drive failover is stateful, not path-swapping in place
 

@@ -1,4 +1,4 @@
-use crate::core::{drive, mirror, tracker};
+use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use clap::{Args, Subcommand};
 
@@ -142,6 +142,10 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("Mirrored file #{}: {}", id, file.relative_path);
         }
         FilesCommand::Untrack { id } => {
+            let file = repo.get_tracked_file(id)?;
+            if file.virtual_path.is_some() {
+                virtual_path::remove_virtual_path(repo, id)?;
+            }
             repo.delete_tracked_file(id)?;
             println!("Untracked file #{}", id);
         }

@@ -1,5 +1,10 @@
 import { apiClient } from './client'
-import type { TrackedFolder, CreateFolderRequest, ScanFolderResult } from '@/types/folder'
+import type {
+  TrackedFolder,
+  CreateFolderRequest,
+  UpdateFolderRequest,
+  ScanFolderResult,
+} from '@/types/folder'
 
 export const foldersApi = {
   list(): Promise<TrackedFolder[]> {
@@ -12,6 +17,10 @@ export const foldersApi = {
 
   create(data: CreateFolderRequest): Promise<TrackedFolder> {
     return apiClient.post<TrackedFolder>('/folders', data).then((r) => r.data)
+  },
+
+  update(id: number, data: UpdateFolderRequest): Promise<TrackedFolder> {
+    return apiClient.put<TrackedFolder>(`/folders/${id}`, data).then((r) => r.data)
   },
 
   delete(id: number): Promise<void> {

@@ -57,7 +57,7 @@ export function FileGrid({
           <thead className="bg-gray-50">
             <tr>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Name</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide hidden md:table-cell">Virtual path</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide hidden md:table-cell">Publish path</th>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide hidden lg:table-cell">Size</th>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide hidden xl:table-cell">Updated</th>
               <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>

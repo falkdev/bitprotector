@@ -19,8 +19,10 @@ import { z } from 'zod'
 const schema = z.object({
   drive_pair_id: z.coerce.number().min(1, 'Select a drive pair'),
   folder_path: z.string().min(1, 'Folder path is required'),
-  auto_virtual_path: z.boolean().default(false),
-  default_virtual_base: z.string().optional(),
+  virtual_path: z
+    .string()
+    .optional()
+    .refine((value) => !value || value.trim().startsWith('/'), 'Publish path must be absolute'),
 })
 
 type FormData = z.infer<typeof schema>
@@ -78,7 +80,7 @@ export function FoldersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Tracked Folders</h1>
-          <p className="text-sm text-muted-foreground">Folders automatically scanned for file changes</p>
+          <p className="text-sm text-muted-foreground">Track folders for scanning and optionally publish them at an exact path</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
@@ -102,8 +104,7 @@ export function FoldersPage() {
         columns={[
           { key: 'path', header: 'Path', cell: (f) => <span className="font-mono text-xs">{f.folder_path}</span> },
           { key: 'drive', header: 'Drive Pair', cell: (f) => driveName(f.drive_pair_id) },
-          { key: 'auto', header: 'Auto Virtual', cell: (f) => f.auto_virtual_path ? '✓' : '—' },
-          { key: 'base', header: 'Virtual Base', cell: (f) => f.default_virtual_base ?? '—' },
+          { key: 'publish', header: 'Publish Path', cell: (f) => f.virtual_path ? <span className="font-mono text-xs">{f.virtual_path}</span> : '—' },
           { key: 'created', header: 'Created', cell: (f) => formatDate(f.created_at) },
           {
             key: 'actions',
@@ -212,8 +213,7 @@ export function FolderFormModal({
             await onSave({
               drive_pair_id: Number(d.drive_pair_id),
               folder_path: resolution.relativePath,
-              auto_virtual_path: d.auto_virtual_path,
-              default_virtual_base: d.default_virtual_base,
+              virtual_path: d.virtual_path?.trim() || undefined,
             })
           })} className="space-y-4">
           <div>
@@ -258,18 +258,18 @@ export function FolderFormModal({
             ) : null}
             {errors.folder_path && <p className="mt-1 text-xs text-destructive">{errors.folder_path.message}</p>}
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" {...register('auto_virtual_path')} />
-            Auto-assign virtual paths
-          </label>
           <div>
-            <label htmlFor="default-virtual-base" className="mb-1 block text-sm font-medium">Default Virtual Base (optional)</label>
+            <label htmlFor="folder-virtual-path" className="mb-1 block text-sm font-medium">Publish Path (optional)</label>
             <input
-              id="default-virtual-base"
-              {...register('default_virtual_base')}
-              placeholder="/virtual/documents"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              id="folder-virtual-path"
+              {...register('virtual_path')}
+              placeholder="/docs"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              If set, BitProtector will create a symlink exactly at this path to the tracked folder.
+            </p>
+            {errors.virtual_path && <p className="mt-1 text-xs text-destructive">{errors.virtual_path.message}</p>}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors">Cancel</button>

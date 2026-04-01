@@ -4,8 +4,9 @@
 #
 # This helper:
 #   1. Verifies a usable Node.js runtime is available for frontend manual testing
-#   2. Prepares the QEMU guest so PAM login works in the web UI
-#   3. Starts the Vite dev server with its proxy pointed at the QEMU API port
+#   2. Waits for the QEMU VM SSH/API forwards to become reachable
+#   3. Configures guest login and service permissions for frontend and Playwright
+#   4. Starts the Vite dev server with its proxy pointed at the QEMU API port
 #
 # Usage:
 #   ./scripts/frontend_qemu_manual.sh
@@ -22,7 +23,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FRONTEND_DIR="${PROJECT_ROOT}/frontend"
-PREP_SCRIPT="${SCRIPT_DIR}/frontend_qemu_prepare.sh"
 
 QEMU_API_HOST="${QEMU_API_HOST:-localhost}"
 QEMU_API_PORT="${QEMU_API_PORT:-18443}"
@@ -37,6 +37,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 PROXY_TARGET="${BITPROTECTOR_DEV_PROXY_TARGET:-https://${QEMU_API_HOST}:${QEMU_API_PORT}}"
 
 SSH_OPTS=(
+    -T
     -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null
     -o ConnectTimeout=5
@@ -46,7 +47,7 @@ SSH_OPTS=(
 require_commands() {
     local missing=()
     local cmd
-    for cmd in node npm; do
+    for cmd in node npm ssh; do
         if ! command -v "${cmd}" >/dev/null 2>&1; then
             missing+=("${cmd}")
         fi
@@ -56,6 +57,116 @@ require_commands() {
         echo "ERROR: missing required commands: ${missing[*]}" >&2
         exit 1
     fi
+}
+
+fetch_status_code() {
+    local url="$1"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "${url}" 2>/dev/null || true
+        return 0
+    fi
+
+    if command -v wget >/dev/null 2>&1; then
+        wget \
+            --server-response \
+            --spider \
+            --timeout=5 \
+            --tries=1 \
+            --no-check-certificate \
+            "${url}" 2>&1 | awk '/^  HTTP\// { code=$2 } END { print code }'
+        return 0
+    fi
+
+    return 1
+}
+
+wait_for_ssh() {
+    local attempt
+    for attempt in $(seq 1 30); do
+        if ssh "${SSH_OPTS[@]}" "${QEMU_SSH_USER}@${QEMU_SSH_HOST}" true >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "ERROR: could not reach the QEMU VM over SSH at ${QEMU_SSH_HOST}:${QEMU_SSH_PORT}" >&2
+    echo "Start the VM first with ./scripts/qemu_manual.sh" >&2
+    exit 1
+}
+
+report_guest_service_status() {
+    ssh "${SSH_OPTS[@]}" "${QEMU_SSH_USER}@${QEMU_SSH_HOST}" \
+        "bash -c 'sudo systemctl status bitprotector --no-pager -l || true; echo; sudo journalctl -u bitprotector -n 60 --no-pager || true'" \
+        || true
+}
+
+wait_for_api() {
+    local attempt
+    local status
+
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo "WARNING: neither curl nor wget is available, skipping API readiness check." >&2
+        return 0
+    fi
+
+    for attempt in $(seq 1 30); do
+        status="$(fetch_status_code "${PROXY_TARGET}/api/v1/status")"
+        if [[ "${status}" == "200" || "${status}" == "401" ]]; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "WARNING: the API at ${PROXY_TARGET} did not answer before timeout." >&2
+    echo "         The frontend session will still continue, but requests may fail until the VM service is ready." >&2
+    echo "         Guest service diagnostics:" >&2
+    report_guest_service_status >&2
+}
+
+prepare_qemu_guest() {
+    local quoted_user
+    local quoted_password
+    quoted_user="$(printf '%q' "${QEMU_WEB_USER}")"
+    quoted_password="$(printf '%q' "${QEMU_WEB_PASSWORD}")"
+
+    wait_for_ssh
+
+    ssh "${SSH_OPTS[@]}" "${QEMU_SSH_USER}@${QEMU_SSH_HOST}" \
+        "QEMU_WEB_USER=${quoted_user} QEMU_WEB_PASSWORD=${quoted_password} bash -s" <<'EOF' >/dev/null
+            set -euo pipefail
+            printf "%s:%s\n" "$QEMU_WEB_USER" "$QEMU_WEB_PASSWORD" | sudo chpasswd
+            sudo usermod --unlock "$QEMU_WEB_USER"
+            if getent group bitprotector >/dev/null 2>&1; then
+                sudo usermod -a -G bitprotector "$QEMU_WEB_USER" || true
+            fi
+            sudo install -d -m 0770 -o bitprotector -g bitprotector /var/lib/bitprotector
+            sudo install -d -m 0755 -o bitprotector -g bitprotector /var/lib/bitprotector/frontend
+            sudo chown -R bitprotector:bitprotector /var/lib/bitprotector/frontend
+            sudo find /var/lib/bitprotector -maxdepth 1 -name "bitprotector.db*" \
+                -exec chown bitprotector:bitprotector {} +
+            sudo install -d -m 0755 /etc/systemd/system/bitprotector.service.d
+            cat <<'OVERRIDE' | sudo tee /etc/systemd/system/bitprotector.service.d/manual-qemu.conf >/dev/null
+[Service]
+NoNewPrivileges=false
+User=root
+Group=root
+ReadWritePaths=
+ReadWritePaths=/var/lib/bitprotector /var/log/bitprotector /var/lib/bitprotector/virtual /mnt
+ExecStart=
+ExecStart=/usr/bin/bitprotector \
+    --db /var/lib/bitprotector/bitprotector.db \
+    serve \
+    --host 0.0.0.0 \
+    --port 8443 \
+    --tls-cert /etc/bitprotector/tls/cert.pem \
+    --tls-key /etc/bitprotector/tls/key.pem
+OVERRIDE
+            sudo systemctl daemon-reload
+            sudo systemctl restart bitprotector
+EOF
+
+    wait_for_api
 }
 
 check_node_runtime() {
@@ -108,6 +219,7 @@ SSH to the guest:
   ssh -o StrictHostKeyChecking=no -p ${QEMU_SSH_PORT} ${QEMU_SSH_USER}@${QEMU_SSH_HOST}
 
 Notes:
+  - Guest preparation is built into this script (no separate prepare helper required).
   - This script configures a password on the guest user so the PAM-backed web login works.
   - API requests stay same-origin through the Vite proxy, so the guest's self-signed TLS cert is handled server-side.
   - If you do not want npm ci on every run, use SKIP_NPM_CI=1.
@@ -125,7 +237,7 @@ start_frontend() {
 
 require_commands
 check_node_runtime
-bash "${PREP_SCRIPT}"
+prepare_qemu_guest
 install_frontend_dependencies
 print_summary
 start_frontend

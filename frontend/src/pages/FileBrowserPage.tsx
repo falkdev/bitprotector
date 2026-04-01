@@ -24,7 +24,10 @@ const trackSchema = z.object({
 })
 
 const vPathSchema = z.object({
-  virtual_path: z.string().min(1, 'Virtual path is required'),
+  virtual_path: z
+    .string()
+    .min(1, 'Publish path is required')
+    .refine((value) => value.trim().startsWith('/'), 'Publish path must be absolute'),
 })
 
 type TrackFormData = z.infer<typeof trackSchema>
@@ -199,7 +202,7 @@ function VirtualPathModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold mb-1">Set virtual path</h2>
+        <h2 className="text-lg font-semibold mb-1">Publish file at path</h2>
         <p className="text-sm text-gray-500 mb-4 font-mono truncate">{file.relative_path}</p>
         <form
           onSubmit={handleSubmit(async (d) => {
@@ -210,14 +213,17 @@ function VirtualPathModal({
           className="space-y-4"
         >
           <div>
-            <label htmlFor="file-virtual-path" className="block text-sm font-medium text-gray-700 mb-1">Virtual path</label>
+            <label htmlFor="file-virtual-path" className="block text-sm font-medium text-gray-700 mb-1">Publish path</label>
             <input
               id="file-virtual-path"
               type="text"
               {...register('virtual_path')}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="photos/2024/vacation"
+              placeholder="/docs/report.pdf"
             />
+            <p className="mt-1 text-xs text-gray-500">
+              BitProtector will create a symlink exactly at this absolute path.
+            </p>
             {errors.virtual_path && <p className="mt-1 text-xs text-red-500">{errors.virtual_path.message}</p>}
           </div>
           <div className="flex gap-2 justify-end pt-2">
@@ -337,10 +343,10 @@ export function FileBrowserPage() {
   const handleSetVirtualPath = async (fileId: number, vpath: string) => {
     try {
       await virtualPathsApi.set(fileId, { virtual_path: vpath })
-      toast.success('Virtual path updated')
+      toast.success('Publish path updated')
       await loadFiles(params)
     } catch {
-      toast.error('Failed to set virtual path')
+      toast.error('Failed to update publish path')
     }
   }
 

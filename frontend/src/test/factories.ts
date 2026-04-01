@@ -31,8 +31,7 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
     id: 1,
     drive_pair_id: 1,
     folder_path: 'documents',
-    auto_virtual_path: false,
-    default_virtual_base: null,
+    virtual_path: null,
     created_at: DEFAULT_DATE,
     ...overrides,
   }

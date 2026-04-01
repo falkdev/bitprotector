@@ -42,28 +42,31 @@ fn test_set_virtual_path_creates_symlink() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "report.pdf");
+    let publish_path = publish_root.path().join("docs/report.pdf");
 
     handle(
         VirtualPathsCommand::Set(SetArgs {
             file_id: file.id,
-            virtual_path: "/docs/report.pdf".to_string(),
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
+            virtual_path: publish_path.to_str().unwrap().to_string(),
         }),
         &repo,
     )
     .unwrap();
 
-    let symlink = symlink_dir.path().join("docs/report.pdf");
+    let symlink = publish_root.path().join("docs/report.pdf");
     assert!(
         symlink.is_symlink(),
         "Symlink should be created at docs/report.pdf"
     );
 
     let updated = repo.get_tracked_file(file.id).unwrap();
-    assert_eq!(updated.virtual_path, Some("/docs/report.pdf".to_string()));
+    assert_eq!(
+        updated.virtual_path,
+        Some(publish_path.to_string_lossy().to_string())
+    );
 }
 
 #[test]
@@ -71,30 +74,23 @@ fn test_remove_virtual_path_clears_symlink() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "data.csv");
+    let publish_path = publish_root.path().join("data/data.csv");
 
     handle(
         VirtualPathsCommand::Set(SetArgs {
             file_id: file.id,
-            virtual_path: "/data/data.csv".to_string(),
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
+            virtual_path: publish_path.to_str().unwrap().to_string(),
         }),
         &repo,
     )
     .unwrap();
 
-    handle(
-        VirtualPathsCommand::Remove(RemoveArgs {
-            file_id: file.id,
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
-        }),
-        &repo,
-    )
-    .unwrap();
+    handle(VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }), &repo).unwrap();
 
-    let symlink = symlink_dir.path().join("data/data.csv");
+    let symlink = publish_root.path().join("data/data.csv");
     assert!(
         !symlink.is_symlink(),
         "Symlink should be removed after remove command"
@@ -109,15 +105,15 @@ fn test_list_virtual_paths() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "image.png");
+    let publish_path = publish_root.path().join("images/image.png");
 
     handle(
         VirtualPathsCommand::Set(SetArgs {
             file_id: file.id,
-            virtual_path: "/images/image.png".to_string(),
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
+            virtual_path: publish_path.to_str().unwrap().to_string(),
         }),
         &repo,
     )
@@ -132,23 +128,18 @@ fn test_refresh_rebuilds_symlink_from_db_state() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "notes.txt");
+    let publish_path = publish_root.path().join("notes/notes.txt");
 
     // Assign virtual path in DB without going through set command (simulates lost symlink)
-    repo.update_tracked_file_virtual_path(file.id, Some("/notes/notes.txt"))
+    repo.update_tracked_file_virtual_path(file.id, Some(publish_path.to_str().unwrap()))
         .unwrap();
 
-    handle(
-        VirtualPathsCommand::Refresh(RefreshArgs {
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
-        }),
-        &repo,
-    )
-    .unwrap();
+    handle(VirtualPathsCommand::Refresh(RefreshArgs {}), &repo).unwrap();
 
-    let symlink = symlink_dir.path().join("notes/notes.txt");
+    let symlink = publish_root.path().join("notes/notes.txt");
     assert!(
         symlink.is_symlink(),
         "Refresh should recreate missing symlinks"
@@ -160,17 +151,10 @@ fn test_remove_on_file_without_virtual_path_returns_error() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "orphan.txt");
 
-    let result = handle(
-        VirtualPathsCommand::Remove(RemoveArgs {
-            file_id: file.id,
-            symlink_base: symlink_dir.path().to_str().unwrap().to_string(),
-        }),
-        &repo,
-    );
+    let result = handle(VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }), &repo);
 
     assert!(
         result.is_err(),

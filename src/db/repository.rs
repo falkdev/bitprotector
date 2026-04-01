@@ -73,8 +73,7 @@ pub struct TrackedFolder {
     pub id: i64,
     pub drive_pair_id: i64,
     pub folder_path: String,
-    pub auto_virtual_path: bool,
-    pub default_virtual_base: Option<String>,
+    pub virtual_path: Option<String>,
     pub created_at: String,
 }
 
@@ -523,15 +522,14 @@ impl Repository {
         &self,
         drive_pair_id: i64,
         folder_path: &str,
-        auto_virtual_path: bool,
-        default_virtual_base: Option<&str>,
+        virtual_path: Option<&str>,
     ) -> anyhow::Result<TrackedFolder> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO tracked_folders (drive_pair_id, folder_path, auto_virtual_path, default_virtual_base)
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![drive_pair_id, folder_path, auto_virtual_path as i64, default_virtual_base],
+                "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![drive_pair_id, folder_path, virtual_path],
             )?;
             conn.last_insert_rowid()
         };
@@ -541,7 +539,7 @@ impl Repository {
     pub fn get_tracked_folder(&self, id: i64) -> anyhow::Result<TrackedFolder> {
         let conn = self.conn()?;
         let folder = conn.query_row(
-            "SELECT id, drive_pair_id, folder_path, auto_virtual_path, default_virtual_base, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path, created_at
              FROM tracked_folders WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -549,9 +547,8 @@ impl Repository {
                     id: row.get(0)?,
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
-                    auto_virtual_path: row.get::<_, i64>(3)? != 0,
-                    default_virtual_base: row.get(4)?,
-                    created_at: row.get(5)?,
+                    virtual_path: row.get(3)?,
+                    created_at: row.get(4)?,
                 })
             },
         )?;
@@ -561,7 +558,7 @@ impl Repository {
     pub fn list_tracked_folders(&self) -> anyhow::Result<Vec<TrackedFolder>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, drive_pair_id, folder_path, auto_virtual_path, default_virtual_base, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path, created_at
              FROM tracked_folders ORDER BY id",
         )?;
         let folders = stmt
@@ -570,9 +567,8 @@ impl Repository {
                     id: row.get(0)?,
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
-                    auto_virtual_path: row.get::<_, i64>(3)? != 0,
-                    default_virtual_base: row.get(4)?,
-                    created_at: row.get(5)?,
+                    virtual_path: row.get(3)?,
+                    created_at: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -582,20 +578,13 @@ impl Repository {
     pub fn update_tracked_folder(
         &self,
         id: i64,
-        auto_virtual_path: Option<bool>,
-        default_virtual_base: Option<Option<&str>>,
+        virtual_path: Option<Option<&str>>,
     ) -> anyhow::Result<TrackedFolder> {
         {
             let conn = self.conn()?;
-            if let Some(avp) = auto_virtual_path {
+            if let Some(dvb) = virtual_path {
                 conn.execute(
-                    "UPDATE tracked_folders SET auto_virtual_path=?1 WHERE id=?2",
-                    rusqlite::params![avp as i64, id],
-                )?;
-            }
-            if let Some(dvb) = default_virtual_base {
-                conn.execute(
-                    "UPDATE tracked_folders SET default_virtual_base=?1 WHERE id=?2",
+                    "UPDATE tracked_folders SET virtual_path=?1 WHERE id=?2",
                     rusqlite::params![dvb, id],
                 )?;
             }
@@ -1254,15 +1243,15 @@ mod tests {
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
 
         let folder = repo
-            .create_tracked_folder(pair.id, "documents/", true, Some("/docs"))
+            .create_tracked_folder(pair.id, "documents/", Some("/docs"))
             .unwrap();
         assert_eq!(folder.folder_path, "documents/");
-        assert!(folder.auto_virtual_path);
+        assert_eq!(folder.virtual_path.as_deref(), Some("/docs"));
 
         let updated = repo
-            .update_tracked_folder(folder.id, Some(false), None)
+            .update_tracked_folder(folder.id, Some(None))
             .unwrap();
-        assert!(!updated.auto_virtual_path);
+        assert!(updated.virtual_path.is_none());
 
         repo.delete_tracked_folder(folder.id).unwrap();
         assert!(repo.get_tracked_folder(folder.id).is_err());

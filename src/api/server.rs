@@ -337,6 +337,11 @@ pub async fn run_server(
         crate::db::schema::initialize_schema(&conn)?;
     }
     let repo = Repository::new(pool);
+    if let Ok(pairs) = repo.list_drive_pairs() {
+        let pairs_map: std::collections::HashMap<i64, _> =
+            pairs.into_iter().map(|pair| (pair.id, pair)).collect();
+        let _ = crate::core::virtual_path::refresh_all_virtual_paths(&repo, &pairs_map);
+    }
     let repo_arc = Arc::new(repo.clone());
 
     // Create and load the scheduler from persisted DB schedules.

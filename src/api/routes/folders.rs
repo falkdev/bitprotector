@@ -1,22 +1,29 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
-use crate::core::{change_detection, drive, tracker};
+use crate::core::{change_detection, drive, tracker, virtual_path};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Deserialize)]
 pub struct AddFolderRequest {
     pub drive_pair_id: i64,
     pub folder_path: String,
-    pub auto_virtual_path: Option<bool>,
-    pub default_virtual_base: Option<String>,
+    pub virtual_path: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateFolderRequest {
-    pub auto_virtual_path: Option<bool>,
-    /// Pass `null` explicitly to clear the base; omit the field to leave it unchanged.
-    pub default_virtual_base: Option<Option<String>>,
+    /// Pass `null` explicitly to clear the virtual path; omit the field to leave it unchanged.
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub virtual_path: Option<Option<String>>,
+}
+
+fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
 #[derive(Serialize)]
@@ -56,8 +63,7 @@ async fn add_folder(
         &repo,
         &pair,
         &folder_path,
-        body.auto_virtual_path.unwrap_or(false),
-        body.default_virtual_base.as_deref(),
+        body.virtual_path.as_deref(),
     ) {
         Ok(folder) => HttpResponse::Created().json(folder),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
@@ -74,7 +80,19 @@ async fn get_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpRe
 
 /// DELETE /folders/{id}
 async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
-    match repo.delete_tracked_folder(path.into_inner()) {
+    let id = path.into_inner();
+    let folder = match repo.get_tracked_folder(id) {
+        Ok(folder) => folder,
+        Err(e) => return HttpResponse::NotFound().body(e.to_string()),
+    };
+
+    if folder.virtual_path.is_some() {
+        if let Err(e) = virtual_path::remove_folder_virtual_path(&repo, id) {
+            return HttpResponse::BadRequest().body(e.to_string());
+        }
+    }
+
+    match repo.delete_tracked_folder(id) {
         Ok(_) => HttpResponse::NoContent().finish(),
         Err(e) => HttpResponse::NotFound().body(e.to_string()),
     }
@@ -87,18 +105,27 @@ async fn update_folder(
     body: web::Json<UpdateFolderRequest>,
 ) -> HttpResponse {
     let id = path.into_inner();
-    // Map Option<Option<String>> to Option<Option<&str>> for the repository.
-    let dvb: Option<Option<&str>> = body.default_virtual_base.as_ref().map(|opt| opt.as_deref());
-    match repo.update_tracked_folder(id, body.auto_virtual_path, dvb) {
-        Ok(folder) => HttpResponse::Ok().json(folder),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {
-                HttpResponse::NotFound().body(msg)
-            } else {
-                HttpResponse::InternalServerError().body(msg)
+    if let Err(e) = repo.get_tracked_folder(id) {
+        return HttpResponse::NotFound().body(e.to_string());
+    }
+
+    match body.virtual_path.as_ref() {
+        Some(Some(path)) => {
+            if let Err(e) = virtual_path::set_folder_virtual_path(&repo, id, path) {
+                return HttpResponse::BadRequest().body(e.to_string());
             }
         }
+        Some(None) => {
+            if let Err(e) = virtual_path::remove_folder_virtual_path(&repo, id) {
+                return HttpResponse::BadRequest().body(e.to_string());
+            }
+        }
+        None => {}
+    }
+
+    match repo.get_tracked_folder(id) {
+        Ok(folder) => HttpResponse::Ok().json(folder),
+        Err(e) => HttpResponse::NotFound().body(e.to_string()),
     }
 }
 

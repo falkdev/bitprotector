@@ -1,6 +1,5 @@
 export interface SetVirtualPathRequest {
   virtual_path: string
-  symlink_base?: string
 }
 
 export interface BulkAssignEntry {
@@ -10,14 +9,12 @@ export interface BulkAssignEntry {
 
 export interface BulkAssignRequest {
   entries: BulkAssignEntry[]
-  symlink_base?: string
 }
 
 export interface BulkFromRealRequest {
   drive_pair_id: number
   folder_path: string
-  virtual_base: string
-  symlink_base?: string
+  publish_root: string
 }
 
 export interface BulkAssignResult {

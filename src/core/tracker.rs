@@ -1,4 +1,4 @@
-use crate::core::{checksum, drive, mirror};
+use crate::core::{checksum, drive, mirror, virtual_path};
 use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
 use anyhow::Context;
@@ -37,11 +37,18 @@ pub fn track_file(
         relative_path,
         &file_checksum,
         file_size,
-        virtual_path,
+        None,
     )?;
 
+    if let Some(virtual_path) = virtual_path {
+        if let Err(error) = virtual_path::set_virtual_path(repo, tracked.id, virtual_path) {
+            let _ = repo.delete_tracked_file(tracked.id);
+            return Err(error);
+        }
+    }
+
     let _ = event_logger::log_file_tracked(repo, tracked.id, relative_path);
-    Ok(tracked)
+    repo.get_tracked_file(tracked.id)
 }
 
 /// Register a folder so it can be auto-scanned for new files.
@@ -49,8 +56,7 @@ pub fn track_folder(
     repo: &Repository,
     drive_pair: &DrivePair,
     folder_path: &str,
-    auto_virtual_path: bool,
-    default_virtual_base: Option<&str>,
+    virtual_path: Option<&str>,
 ) -> anyhow::Result<TrackedFolder> {
     drive::require_pair_mutation_allowed(drive_pair)?;
     drive::ensure_drive_root_marker(drive_pair.active_path())?;
@@ -62,26 +68,16 @@ pub fn track_folder(
             full_path.display()
         );
     }
-    repo.create_tracked_folder(
-        drive_pair.id,
-        folder_path,
-        auto_virtual_path,
-        default_virtual_base,
-    )
-}
+    let tracked = repo.create_tracked_folder(drive_pair.id, folder_path, None)?;
 
-/// Compute the virtual path for a file being auto-tracked inside a folder.
-/// Strips the folder prefix from the relative_path and prepends default_virtual_base.
-fn compute_virtual_path(folder: &TrackedFolder, relative_path: &str) -> Option<String> {
-    if !folder.auto_virtual_path {
-        return None;
+    if let Some(virtual_path) = virtual_path {
+        if let Err(error) = virtual_path::set_folder_virtual_path(repo, tracked.id, virtual_path) {
+            let _ = repo.delete_tracked_folder(tracked.id);
+            return Err(error);
+        }
     }
-    let base = folder.default_virtual_base.as_deref().unwrap_or("/virtual");
-    let folder_prefix = format!("{}/", folder.folder_path.trim_end_matches('/'));
-    let within_folder = relative_path
-        .strip_prefix(&folder_prefix)
-        .unwrap_or(relative_path);
-    Some(format!("{}/{}", base.trim_end_matches('/'), within_folder))
+
+    repo.get_tracked_folder(tracked.id)
 }
 
 /// Scan a tracked folder on the primary drive and auto-track+mirror any untracked files.
@@ -118,8 +114,7 @@ pub fn auto_track_folder_files(
             continue;
         }
 
-        let virtual_path = compute_virtual_path(folder, &relative_path);
-        let file = track_file(repo, drive_pair, &relative_path, virtual_path.as_deref())?;
+        let file = track_file(repo, drive_pair, &relative_path, None)?;
         if drive_pair.standby_accepts_sync() {
             mirror::mirror_file(drive_pair, &relative_path)?;
             repo.update_tracked_file_mirror_status(file.id, true)?;
@@ -180,10 +175,22 @@ mod tests {
     fn test_track_file_with_virtual_path() {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
+        let publish_root = TempDir::new().unwrap();
+        let publish_path = publish_root.path().join("virtual/doc.txt");
 
         fs::write(primary.path().join("doc.txt"), b"content").unwrap();
-        let tracked = track_file(&repo, &pair, "doc.txt", Some("/virtual/doc.txt")).unwrap();
-        assert_eq!(tracked.virtual_path, Some("/virtual/doc.txt".to_string()));
+        let tracked = track_file(
+            &repo,
+            &pair,
+            "doc.txt",
+            Some(publish_path.to_str().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            tracked.virtual_path,
+            Some(publish_path.to_string_lossy().to_string())
+        );
+        assert!(publish_path.is_symlink());
     }
 
     #[test]
@@ -199,16 +206,16 @@ mod tests {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
         fs::create_dir(primary.path().join("docs")).unwrap();
-        let folder = track_folder(&repo, &pair, "docs", false, None).unwrap();
+        let folder = track_folder(&repo, &pair, "docs", None).unwrap();
         assert_eq!(folder.folder_path, "docs");
-        assert!(!folder.auto_virtual_path);
+        assert!(folder.virtual_path.is_none());
     }
 
     #[test]
     fn test_track_folder_nonexistent_fails() {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
-        let result = track_folder(&repo, &pair, "no_such_dir", false, None);
+        let result = track_folder(&repo, &pair, "no_such_dir", None);
         assert!(result.is_err());
     }
 
@@ -219,7 +226,7 @@ mod tests {
         fs::create_dir(primary.path().join("photos")).unwrap();
         fs::write(primary.path().join("photos/img1.jpg"), b"img1").unwrap();
         fs::write(primary.path().join("photos/img2.jpg"), b"img2").unwrap();
-        let folder = track_folder(&repo, &pair, "photos", false, None).unwrap();
+        let folder = track_folder(&repo, &pair, "photos", None).unwrap();
 
         let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
         assert_eq!(tracked.len(), 2, "Both files should be auto-tracked");
@@ -229,17 +236,19 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_track_applies_default_virtual_path() {
+    fn test_track_folder_with_virtual_path() {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
         fs::create_dir(primary.path().join("reports")).unwrap();
-        fs::write(primary.path().join("reports/q1.pdf"), b"q1 content").unwrap();
-        let folder = track_folder(&repo, &pair, "reports", true, Some("/virtual/reports")).unwrap();
+        let publish_root = TempDir::new().unwrap();
+        let publish_path = publish_root.path().join("virtual/reports");
+        let folder = track_folder(&repo, &pair, "reports", Some(publish_path.to_str().unwrap())).unwrap();
 
-        let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
-        assert_eq!(tracked.len(), 1);
-        let vp = tracked[0].virtual_path.as_deref().unwrap();
-        assert_eq!(vp, "/virtual/reports/q1.pdf");
+        assert_eq!(
+            folder.virtual_path,
+            Some(publish_path.to_string_lossy().to_string())
+        );
+        assert!(publish_path.is_symlink());
     }
 
     #[test]
@@ -252,7 +261,7 @@ mod tests {
         // Track manually first
         track_file(&repo, &pair, "data/file.csv", None).unwrap();
 
-        let folder = track_folder(&repo, &pair, "data", false, None).unwrap();
+        let folder = track_folder(&repo, &pair, "data", None).unwrap();
         let newly_tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
         assert_eq!(
             newly_tracked.len(),

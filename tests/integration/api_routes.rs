@@ -1,7 +1,7 @@
 use actix_web::{test, web, App};
 use bitprotector_lib::api::auth::{issue_token, JwtSecret};
 use bitprotector_lib::api::server::configure_routes;
-use bitprotector_lib::core::{checksum, scheduler::Scheduler, virtual_path};
+use bitprotector_lib::core::{checksum, scheduler::Scheduler, tracker, virtual_path};
 use bitprotector_lib::db::repository::{create_memory_pool, Repository};
 use bitprotector_lib::db::schema::initialize_schema;
 use std::fs;
@@ -472,6 +472,39 @@ async fn test_folders_add() {
 }
 
 #[actix_rt::test]
+async fn test_folders_add_with_virtual_path_creates_symlink() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let sub = primary.path().join("docs");
+    fs::create_dir(&sub).unwrap();
+    let publish_path = publish_root.path().join("published/docs");
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-virtual",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/folders")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "folder_path": "docs",
+            "virtual_path": publish_path.to_str().unwrap()
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["virtual_path"], publish_path.to_str().unwrap());
+    assert!(publish_path.is_symlink());
+}
+
+#[actix_rt::test]
 async fn test_folders_add_accepts_absolute_path_within_active_root() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
@@ -499,6 +532,52 @@ async fn test_folders_add_accepts_absolute_path_within_active_root() {
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["folder_path"], "projects/docs");
+}
+
+#[actix_rt::test]
+async fn test_folders_update_virtual_path() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let sub = primary.path().join("docs");
+    fs::create_dir(&sub).unwrap();
+    let publish_path = publish_root.path().join("published/docs");
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-folder-update",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/v1/folders/{}", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "virtual_path": publish_path.to_str().unwrap()
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["virtual_path"], publish_path.to_str().unwrap());
+    assert!(publish_path.is_symlink());
+
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/v1/folders/{}", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "virtual_path": null
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(body["virtual_path"].is_null());
+    assert!(!publish_path.exists());
 }
 
 #[actix_rt::test]
@@ -543,7 +622,7 @@ async fn test_folders_get_and_delete() {
         )
         .unwrap();
     let folder = repo
-        .create_tracked_folder(pair.id, "reports", false, None)
+        .create_tracked_folder(pair.id, "reports", None)
         .unwrap();
     let app = make_app!(repo).await;
 
@@ -580,7 +659,7 @@ async fn test_folders_scan() {
         )
         .unwrap();
     let folder = repo
-        .create_tracked_folder(pair.id, "scandir", false, None)
+        .create_tracked_folder(pair.id, "scandir", None)
         .unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::post()
@@ -599,7 +678,8 @@ async fn test_folders_scan() {
 async fn test_virtual_paths_set() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let publish_path = publish_root.path().join("data/vp.txt");
     fs::write(primary.path().join("vp.txt"), b"content").unwrap();
     let repo = make_repo();
     let pair = repo
@@ -618,20 +698,20 @@ async fn test_virtual_paths_set() {
         .uri(&format!("/api/v1/virtual-paths/{}", file.id))
         .insert_header(("Authorization", bearer()))
         .set_json(serde_json::json!({
-            "virtual_path": "/data/vp.txt",
-            "symlink_base": symlink_dir.path().to_str().unwrap()
+            "virtual_path": publish_path.to_str().unwrap()
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
-    assert!(symlink_dir.path().join("data/vp.txt").is_symlink());
+    assert!(publish_path.is_symlink());
 }
 
 #[actix_rt::test]
 async fn test_virtual_paths_remove() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let publish_path = publish_root.path().join("virts/rem.txt");
     let content = b"data";
     fs::write(primary.path().join("rem.txt"), content).unwrap();
     let repo = make_repo();
@@ -647,37 +727,22 @@ async fn test_virtual_paths_remove() {
         .create_tracked_file(pair.id, "rem.txt", &hash, 4, None)
         .unwrap();
     // Set the virtual path directly via the library before testing the DELETE endpoint
-    virtual_path::set_virtual_path(
-        &repo,
-        symlink_dir.path().to_str().unwrap(),
-        file.id,
-        "/virts/rem.txt",
-        &primary.path().join("rem.txt").to_string_lossy(),
-    )
-    .unwrap();
+    virtual_path::set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::delete()
-        .uri(&format!(
-            "/api/v1/virtual-paths/{}?symlink_base={}",
-            file.id,
-            symlink_dir.path().to_str().unwrap()
-        ))
+        .uri(&format!("/api/v1/virtual-paths/{}", file.id))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
-    assert!(!symlink_dir.path().join("virts/rem.txt").is_symlink());
+    assert!(!publish_path.is_symlink());
 }
 
 #[actix_rt::test]
 async fn test_virtual_paths_refresh_empty() {
-    let symlink_dir = TempDir::new().unwrap();
     let app = make_app!(make_repo()).await;
     let req = test::TestRequest::post()
-        .uri(&format!(
-            "/api/v1/virtual-paths/refresh?symlink_base={}",
-            symlink_dir.path().to_str().unwrap()
-        ))
+        .uri("/api/v1/virtual-paths/refresh")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -689,14 +754,12 @@ async fn test_virtual_paths_refresh_empty() {
 
 #[actix_rt::test]
 async fn test_virtual_paths_bulk_empty_list() {
-    let symlink_dir = TempDir::new().unwrap();
     let app = make_app!(make_repo()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/virtual-paths/bulk")
         .insert_header(("Authorization", bearer()))
         .set_json(serde_json::json!({
-            "entries": [],
-            "symlink_base": symlink_dir.path().to_str().unwrap()
+            "entries": []
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -710,7 +773,8 @@ async fn test_virtual_paths_bulk_empty_list() {
 async fn test_virtual_paths_bulk_set() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let symlink_dir = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    let publish_path = publish_root.path().join("bulk/bulk.txt");
     let content = b"bulk file";
     fs::write(primary.path().join("bulk.txt"), content).unwrap();
     let repo = make_repo();
@@ -732,16 +796,50 @@ async fn test_virtual_paths_bulk_set() {
         .set_json(serde_json::json!({
             "entries": [{
                 "file_id": file.id,
-                "virtual_path": "/bulk/bulk.txt",
-                "real_path": primary.path().join("bulk.txt").to_str().unwrap()
-            }],
-            "symlink_base": symlink_dir.path().to_str().unwrap()
+                "virtual_path": publish_path.to_str().unwrap()
+            }]
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["succeeded"].as_array().unwrap().len(), 1);
+    assert!(publish_path.is_symlink());
+}
+
+#[actix_rt::test]
+async fn test_virtual_paths_bulk_from_real_uses_publish_root() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let publish_root = TempDir::new().unwrap();
+    fs::create_dir_all(primary.path().join("docs")).unwrap();
+    fs::write(primary.path().join("docs/bulk.txt"), b"bulk").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "vp-bulk-root",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let tracked = tracker::track_file(&repo, &pair, "docs/bulk.txt", None).unwrap();
+    let app = make_app!(repo).await;
+    let publish_path = publish_root.path().join("exports/bulk.txt");
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/virtual-paths/bulk-from-real")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "folder_path": "docs",
+            "publish_root": publish_root.path().join("exports").to_str().unwrap()
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["succeeded"], serde_json::json!([tracked.id]));
+    assert!(publish_path.is_symlink());
 }
 
 // ── Integrity ──────────────────────────────────────────────────────────────

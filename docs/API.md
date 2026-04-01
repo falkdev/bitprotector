@@ -452,7 +452,7 @@ Trigger an immediate mirror of the file to the secondary path. Requires the stan
 
 ## Virtual Paths
 
-Virtual paths expose tracked files through a user-defined path, realised as symlinks under `symlink_base` (see [CONFIGURATION.md](CONFIGURATION.md)).
+Virtual paths expose tracked files through exact absolute filesystem paths. Setting a virtual path creates a symlink directly at that path.
 
 ### PUT `/virtual-paths/{file_id}`
 
@@ -462,12 +462,11 @@ Set or update the virtual path for a tracked file.
 
 ```json
 {
-    "virtual_path": "/docs/report.pdf",
-    "symlink_base": "/var/lib/bitprotector/virtual"
+    "virtual_path": "/docs/report.pdf"
 }
 ```
 
-`symlink_base` is optional and defaults to `/var/lib/bitprotector/virtual` (or the value of the `BITPROTECTOR_SYMLINK_BASE` environment variable).
+`virtual_path` must be an absolute path. BitProtector creates parent directories as needed, refuses to publish to `/`, and will not overwrite non-BitProtector filesystem entries.
 
 **Response `200`:** Plain text confirmation.  
 **Errors:** `404 Not Found`, `500 Internal Server Error`
@@ -478,12 +477,6 @@ Set or update the virtual path for a tracked file.
 
 Remove the virtual path mapping (and its symlink) from a file.
 
-**Query parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `symlink_base` | string | Override the symlink base directory |
-
 **Response `200`:** Plain text confirmation.  
 **Errors:** `404 Not Found`, `400 Bad Request` (file has no virtual path)
 
@@ -491,13 +484,7 @@ Remove the virtual path mapping (and its symlink) from a file.
 
 ### POST `/virtual-paths/refresh`
 
-Regenerate all symlinks on disk from the database. Useful after the `symlink_base` directory is lost or moved.
-
-**Query parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `symlink_base` | string | Override the symlink base directory |
+Regenerate all published symlinks on disk from the database at their stored literal paths. Useful after a restart, failover, or manual removal of the published symlinks.
 
 **Response `200`:**
 
@@ -525,8 +512,7 @@ Tracked folders let BitProtector automatically discover and track new files adde
         "id": 1,
         "drive_pair_id": 1,
         "folder_path": "documents/",
-        "auto_virtual_path": true,
-        "default_virtual_base": "/docs",
+        "virtual_path": "/docs",
         "created_at": "2026-01-01T00:00:00Z"
     }
 ]
@@ -542,12 +528,11 @@ Tracked folders let BitProtector automatically discover and track new files adde
 {
     "drive_pair_id": 1,
     "folder_path": "documents/",
-    "auto_virtual_path": true,
-    "default_virtual_base": "/docs"
+    "virtual_path": "/docs"
 }
 ```
 
-`auto_virtual_path` and `default_virtual_base` are optional.
+`virtual_path` is optional. When present, BitProtector creates a directory symlink exactly at that absolute path.
 
 `folder_path` remains the stored path relative to the selected drive pair's current active root. The web UI path picker may submit an absolute host path, but the server validates that it resolves under the active root and converts it back to a relative path before storing it.
 
@@ -573,12 +558,11 @@ Update a tracked folder's configuration. All fields are optional.
 
 ```json
 {
-    "auto_virtual_path": false,
-    "default_virtual_base": "/new-base"
+    "virtual_path": "/published/documents"
 }
 ```
 
-To clear `default_virtual_base`, pass it explicitly as `null`. Omitting the field leaves the current value unchanged.
+To clear `virtual_path`, pass it explicitly as `null`. Omitting the field leaves the current value unchanged.
 
 **Response `200`:** Updated folder object.  
 **Errors:** `404 Not Found`

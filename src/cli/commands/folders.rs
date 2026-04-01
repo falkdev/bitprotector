@@ -24,12 +24,9 @@ pub struct AddArgs {
     pub drive_pair_id: i64,
     /// Folder path relative to the primary drive root
     pub folder_path: String,
-    /// Auto-assign virtual paths to newly tracked files
+    /// Exact publish path for the tracked folder
     #[arg(long)]
-    pub auto_virtual_path: bool,
-    /// Default virtual path base for auto-assigned virtual paths
-    #[arg(long)]
-    pub virtual_base: Option<String>,
+    pub virtual_path: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -52,8 +49,7 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 repo,
                 &pair,
                 &args.folder_path,
-                args.auto_virtual_path,
-                args.virtual_base.as_deref(),
+                args.virtual_path.as_deref(),
             )?;
             println!(
                 "Registered folder #{}: {} (drive pair #{})",
@@ -66,18 +62,17 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 println!("No tracked folders.");
             } else {
                 println!(
-                    "{:<6} {:<8} {:<40} {:<14} {}",
-                    "ID", "Drive", "Folder Path", "Auto VP", "VP Base"
+                    "{:<6} {:<8} {:<40} {}",
+                    "ID", "Drive", "Folder Path", "Virtual Path"
                 );
-                println!("{}", "-".repeat(80));
+                println!("{}", "-".repeat(96));
                 for f in folders {
                     println!(
-                        "{:<6} {:<8} {:<40} {:<14} {}",
+                        "{:<6} {:<8} {:<40} {}",
                         f.id,
                         f.drive_pair_id,
                         f.folder_path,
-                        if f.auto_virtual_path { "yes" } else { "no" },
-                        f.default_virtual_base.as_deref().unwrap_or("-"),
+                        f.virtual_path.as_deref().unwrap_or("-"),
                     );
                 }
             }
@@ -87,14 +82,14 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("Folder #{}", folder.id);
             println!("  Drive Pair:        #{}", folder.drive_pair_id);
             println!("  Path:              {}", folder.folder_path);
-            println!("  Auto Virtual Path: {}", folder.auto_virtual_path);
             println!(
-                "  VP Base:           {}",
-                folder.default_virtual_base.as_deref().unwrap_or("(none)")
+                "  Virtual Path:      {}",
+                folder.virtual_path.as_deref().unwrap_or("(none)")
             );
             println!("  Created:           {}", folder.created_at);
         }
         FoldersCommand::Remove { id } => {
+            crate::core::virtual_path::remove_folder_virtual_path(repo, id)?;
             repo.delete_tracked_folder(id)?;
             println!("Removed tracked folder #{}", id);
         }
@@ -197,8 +192,7 @@ mod tests {
             FoldersCommand::Add(AddArgs {
                 drive_pair_id: pair.id,
                 folder_path: "docs".to_string(),
-                auto_virtual_path: false,
-                virtual_base: None,
+                virtual_path: None,
             }),
             &repo,
         )
@@ -223,7 +217,7 @@ mod tests {
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("proj")).unwrap();
         let folder = repo
-            .create_tracked_folder(pair.id, "proj", false, None)
+            .create_tracked_folder(pair.id, "proj", None)
             .unwrap();
         handle(FoldersCommand::Show { id: folder.id }, &repo).unwrap();
     }
@@ -236,7 +230,7 @@ mod tests {
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("tmp")).unwrap();
         let folder = repo
-            .create_tracked_folder(pair.id, "tmp", false, None)
+            .create_tracked_folder(pair.id, "tmp", None)
             .unwrap();
         handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
         assert!(repo.list_tracked_folders().unwrap().is_empty());
@@ -251,7 +245,7 @@ mod tests {
         fs::create_dir(primary.path().join("incoming")).unwrap();
         fs::write(primary.path().join("incoming/new.txt"), b"new file").unwrap();
         let folder = repo
-            .create_tracked_folder(pair.id, "incoming", false, None)
+            .create_tracked_folder(pair.id, "incoming", None)
             .unwrap();
 
         handle(FoldersCommand::Scan(ScanArgs { id: folder.id }), &repo).unwrap();
@@ -260,5 +254,29 @@ mod tests {
             .list_tracked_files(Some(pair.id), None, None, 1, 100)
             .unwrap();
         assert_eq!(files.len(), 1, "New file should be auto-tracked by scan");
+    }
+    #[test]
+    fn test_add_folder_with_virtual_path() {
+        let repo = make_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let publish_root = TempDir::new().unwrap();
+        let pair = setup_pair(&repo, &primary, &secondary);
+        fs::create_dir(primary.path().join("photos")).unwrap();
+        let publish_path = publish_root.path().join("gallery");
+
+        handle(
+            FoldersCommand::Add(AddArgs {
+                drive_pair_id: pair.id,
+                folder_path: "photos".to_string(),
+                virtual_path: Some(publish_path.to_str().unwrap().to_string()),
+            }),
+            &repo,
+        )
+        .unwrap();
+
+        let folders = repo.list_tracked_folders().unwrap();
+        assert_eq!(folders[0].virtual_path.as_deref(), Some(publish_path.to_str().unwrap()));
+        assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("photos"));
     }
 }
