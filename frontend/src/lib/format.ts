@@ -11,7 +11,9 @@ export function formatBytes(bytes: number | null | undefined): string {
 /** Format an ISO 8601 timestamp as a locale-aware string */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString()
+  const preferredLanguage =
+    typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined
+  return new Date(iso).toLocaleString(preferredLanguage)
 }
 
 /** Format an ISO 8601 timestamp as a relative time string (e.g. "2 hours ago") */
