@@ -7,6 +7,7 @@ import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
 import {
   makeDrivePair,
+  makeTrackedFile,
   makeTrackingItem,
   makeTrackingListResponse,
 } from '@/test/factories'
@@ -115,5 +116,49 @@ describe('TrackingWorkspacePage', () => {
 
     await screen.findByText('Set Folder Virtual Path')
     expect(screen.getByRole('button', { name: 'Browse' })).toBeInTheDocument()
+  })
+
+  it('shows full BLAKE3 checksum in file details', async () => {
+    const user = userEvent.setup()
+    const checksum = 'd74981efa70a0c880b8d8c1985d075dbcbf679b99a5f9914e5aaf96b831a9e24'
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 11,
+              kind: 'file',
+              path: 'documents/report.pdf',
+            }),
+          ])
+        )
+      ),
+      api.get('/files/:id', () =>
+        HttpResponse.json(
+          makeTrackedFile({
+            id: 11,
+            relative_path: 'documents/report.pdf',
+            checksum,
+          })
+        )
+      ),
+      api.get('/virtual-paths/tree', () =>
+        HttpResponse.json({
+          parent: '/',
+          children: [],
+        })
+      )
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const fileRow = await screen.findByTestId('file-row-11')
+    await user.click(fileRow)
+
+    expect(await screen.findByText('Checksum (BLAKE3)')).toBeInTheDocument()
+    expect(screen.getByText(checksum)).toBeInTheDocument()
+    expect(within(screen.getByTestId('file-details')).getByText('Primary Mirror')).toBeInTheDocument()
   })
 })

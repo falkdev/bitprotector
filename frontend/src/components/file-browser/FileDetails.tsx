@@ -1,13 +1,14 @@
 import { X } from 'lucide-react'
 import type { TrackedFile } from '@/types/file'
-import { formatBytes, formatDate, formatChecksum } from '@/lib/format'
+import { formatBytes, formatDate } from '@/lib/format'
 
 interface FileDetailsProps {
   file: TrackedFile
+  drivePairName?: string
   onClose: () => void
 }
 
-export function FileDetails({ file, onClose }: FileDetailsProps) {
+export function FileDetails({ file, drivePairName, onClose }: FileDetailsProps) {
   const filename = file.relative_path.split('/').pop() ?? file.relative_path
   return (
     <div className="flex flex-col h-full" data-testid="file-details">
@@ -40,12 +41,12 @@ export function FileDetails({ file, onClose }: FileDetailsProps) {
         )}
         <div>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Drive pair</p>
-          <p className="text-sm text-gray-900">ID {file.drive_pair_id}</p>
+          <p className="text-sm text-gray-900">{drivePairName ?? `ID ${file.drive_pair_id}`}</p>
         </div>
         {file.checksum && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Checksum (SHA-256)</p>
-            <p className="text-sm font-mono text-gray-900 break-all">{formatChecksum(file.checksum)}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Checksum (BLAKE3)</p>
+            <p className="text-sm font-mono text-gray-900 break-all">{file.checksum}</p>
           </div>
         )}
         <div>

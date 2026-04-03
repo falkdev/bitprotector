@@ -686,7 +686,11 @@ export function TrackingWorkspacePage() {
 
       {selectedFile ? (
         <aside className="w-80 shrink-0 overflow-auto border-l border-gray-200 bg-white">
-          <FileDetails file={selectedFile} onClose={() => setSelectedFile(null)} />
+          <FileDetails
+            file={selectedFile}
+            drivePairName={driveName(selectedFile.drive_pair_id)}
+            onClose={() => setSelectedFile(null)}
+          />
         </aside>
       ) : null}
 
