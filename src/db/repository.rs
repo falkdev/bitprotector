@@ -62,6 +62,8 @@ pub struct TrackedFile {
     pub file_size: i64,
     pub virtual_path: Option<String>,
     pub is_mirrored: bool,
+    pub tracked_direct: bool,
+    pub tracked_via_folder: bool,
     pub last_verified: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -75,6 +77,44 @@ pub struct TrackedFolder {
     pub folder_path: String,
     pub virtual_path: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackingItemKind {
+    File,
+    Folder,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackingSource {
+    Direct,
+    Folder,
+    Both,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TrackingItem {
+    pub kind: TrackingItemKind,
+    pub id: i64,
+    pub drive_pair_id: i64,
+    pub path: String,
+    pub virtual_path: Option<String>,
+    pub is_mirrored: Option<bool>,
+    pub tracked_direct: Option<bool>,
+    pub tracked_via_folder: Option<bool>,
+    pub source: TrackingSource,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VirtualPathTreeNode {
+    pub name: String,
+    pub path: String,
+    pub item_count: i64,
+    pub has_children: bool,
 }
 
 /// Represents a sync queue item.
@@ -327,12 +367,43 @@ impl Repository {
         file_size: i64,
         virtual_path: Option<&str>,
     ) -> anyhow::Result<TrackedFile> {
+        self.create_tracked_file_with_source(
+            drive_pair_id,
+            relative_path,
+            checksum,
+            file_size,
+            virtual_path,
+            true,
+            false,
+        )
+    }
+
+    pub fn create_tracked_file_with_source(
+        &self,
+        drive_pair_id: i64,
+        relative_path: &str,
+        checksum: &str,
+        file_size: i64,
+        virtual_path: Option<&str>,
+        tracked_direct: bool,
+        tracked_via_folder: bool,
+    ) -> anyhow::Result<TrackedFile> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size, virtual_path)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![drive_pair_id, relative_path, checksum, file_size, virtual_path],
+                "INSERT INTO tracked_files (
+                    drive_pair_id, relative_path, checksum, file_size, virtual_path,
+                    tracked_direct, tracked_via_folder
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    drive_pair_id,
+                    relative_path,
+                    checksum,
+                    file_size,
+                    virtual_path,
+                    tracked_direct as i64,
+                    tracked_via_folder as i64
+                ],
             )?;
             conn.last_insert_rowid()
         };
@@ -343,7 +414,8 @@ impl Repository {
         let conn = self.conn()?;
         let file = conn.query_row(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
-                    is_mirrored, last_verified, created_at, updated_at
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_verified, created_at, updated_at
              FROM tracked_files WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -355,9 +427,11 @@ impl Repository {
                     file_size: row.get(4)?,
                     virtual_path: row.get(5)?,
                     is_mirrored: row.get::<_, i64>(6)? != 0,
-                    last_verified: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_verified: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )?;
@@ -372,7 +446,8 @@ impl Repository {
         let conn = self.conn()?;
         let file = conn.query_row(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
-                    is_mirrored, last_verified, created_at, updated_at
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_verified, created_at, updated_at
              FROM tracked_files WHERE drive_pair_id=?1 AND relative_path=?2",
             rusqlite::params![drive_pair_id, relative_path],
             |row| {
@@ -384,9 +459,11 @@ impl Repository {
                     file_size: row.get(4)?,
                     virtual_path: row.get(5)?,
                     is_mirrored: row.get::<_, i64>(6)? != 0,
-                    last_verified: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_verified: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )?;
@@ -427,7 +504,8 @@ impl Repository {
 
         let query = format!(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
-                    is_mirrored, last_verified, created_at, updated_at
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_verified, created_at, updated_at
              FROM tracked_files {where_clause} ORDER BY id LIMIT {per_page} OFFSET {offset}"
         );
         let count_query = format!("SELECT COUNT(*) FROM tracked_files {where_clause}");
@@ -443,9 +521,11 @@ impl Repository {
                     file_size: row.get(4)?,
                     virtual_path: row.get(5)?,
                     is_mirrored: row.get::<_, i64>(6)? != 0,
-                    last_verified: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_verified: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -505,6 +585,93 @@ impl Repository {
             rusqlite::params![virtual_path, id],
         )?;
         Ok(())
+    }
+
+    pub fn update_tracked_file_sources(
+        &self,
+        id: i64,
+        tracked_direct: bool,
+        tracked_via_folder: bool,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_files
+             SET tracked_direct=?1, tracked_via_folder=?2, updated_at=datetime('now')
+             WHERE id=?3",
+            rusqlite::params![tracked_direct as i64, tracked_via_folder as i64, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn recompute_folder_provenance_for_drive(&self, drive_pair_id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_files
+             SET tracked_via_folder=0, updated_at=datetime('now')
+             WHERE drive_pair_id=?1",
+            rusqlite::params![drive_pair_id],
+        )?;
+        conn.execute(
+            "UPDATE tracked_files
+             SET tracked_via_folder=1, updated_at=datetime('now')
+             WHERE drive_pair_id=?1
+               AND EXISTS (
+                    SELECT 1
+                    FROM tracked_folders
+                    WHERE tracked_folders.drive_pair_id = tracked_files.drive_pair_id
+                      AND (
+                            tracked_files.relative_path = rtrim(tracked_folders.folder_path, '/')
+                            OR tracked_files.relative_path LIKE rtrim(tracked_folders.folder_path, '/') || '/%'
+                      )
+               )",
+            rusqlite::params![drive_pair_id],
+        )?;
+        conn.execute(
+            "UPDATE tracked_files
+             SET tracked_direct=1, updated_at=datetime('now')
+             WHERE drive_pair_id=?1
+               AND tracked_direct=0
+               AND tracked_via_folder=0",
+            rusqlite::params![drive_pair_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_tracked_files_in_folder(
+        &self,
+        drive_pair_id: i64,
+        folder_path: &str,
+    ) -> anyhow::Result<Vec<TrackedFile>> {
+        let conn = self.conn()?;
+        let normalized = folder_path.trim_end_matches('/');
+        let mut stmt = conn.prepare(
+            "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_verified, created_at, updated_at
+             FROM tracked_files
+             WHERE drive_pair_id=?1
+               AND (relative_path=?2 OR relative_path LIKE ?2 || '/%')
+             ORDER BY id",
+        )?;
+        let files = stmt
+            .query_map(rusqlite::params![drive_pair_id, normalized], |row| {
+                Ok(TrackedFile {
+                    id: row.get(0)?,
+                    drive_pair_id: row.get(1)?,
+                    relative_path: row.get(2)?,
+                    checksum: row.get(3)?,
+                    file_size: row.get(4)?,
+                    virtual_path: row.get(5)?,
+                    is_mirrored: row.get::<_, i64>(6)? != 0,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_verified: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(files)
     }
 
     pub fn delete_tracked_file(&self, id: i64) -> anyhow::Result<()> {
@@ -573,6 +740,278 @@ impl Repository {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(folders)
+    }
+
+    pub fn list_tracking_items(
+        &self,
+        drive_pair_id: Option<i64>,
+        query: Option<&str>,
+        publish_prefix: Option<&str>,
+        published: Option<bool>,
+        item_kind: Option<&str>,
+        source: Option<&str>,
+        page: i64,
+        per_page: i64,
+    ) -> anyhow::Result<(Vec<TrackingItem>, i64)> {
+        use rusqlite::types::Value;
+
+        let conn = self.conn()?;
+        let page = page.max(1);
+        let per_page = per_page.clamp(1, 200);
+        let offset = (page - 1) * per_page;
+
+        let item_kind = item_kind.unwrap_or("all");
+        let source = source.unwrap_or("all");
+
+        let include_files = item_kind != "folder";
+        let include_folders = item_kind != "file" && matches!(source, "all" | "folder");
+
+        if !include_files && !include_folders {
+            return Ok((Vec::new(), 0));
+        }
+
+        let mut params: Vec<Value> = Vec::new();
+        let mut branches = Vec::new();
+
+        if include_files {
+            let mut conditions = Vec::new();
+            if let Some(id) = drive_pair_id {
+                conditions.push(format!("drive_pair_id = ?{}", params.len() + 1));
+                params.push(Value::Integer(id));
+            }
+            if let Some(raw_q) = query.map(str::trim).filter(|q| !q.is_empty()) {
+                conditions.push(format!(
+                    "(relative_path LIKE ?{0} OR COALESCE(virtual_path, '') LIKE ?{0})",
+                    params.len() + 1
+                ));
+                params.push(Value::Text(format!("%{}%", raw_q)));
+            }
+            if let Some(prefix) = publish_prefix.map(str::trim).filter(|p| !p.is_empty()) {
+                conditions.push(format!("virtual_path LIKE ?{} || '%'", params.len() + 1));
+                params.push(Value::Text(prefix.to_string()));
+            }
+            if let Some(is_published) = published {
+                conditions.push(if is_published {
+                    "virtual_path IS NOT NULL".to_string()
+                } else {
+                    "virtual_path IS NULL".to_string()
+                });
+            }
+            match source {
+                "direct" => {
+                    conditions.push("tracked_direct = 1 AND tracked_via_folder = 0".to_string())
+                }
+                "folder" => {
+                    conditions.push("tracked_direct = 0 AND tracked_via_folder = 1".to_string())
+                }
+                "both" => {
+                    conditions.push("tracked_direct = 1 AND tracked_via_folder = 1".to_string())
+                }
+                _ => {}
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!("WHERE {}", conditions.join(" AND "))
+            };
+
+            branches.push(format!(
+                "SELECT
+                    'file' AS kind,
+                    id,
+                    drive_pair_id,
+                    relative_path AS path,
+                    virtual_path,
+                    is_mirrored,
+                    tracked_direct,
+                    tracked_via_folder,
+                    CASE
+                        WHEN tracked_direct = 1 AND tracked_via_folder = 1 THEN 'both'
+                        WHEN tracked_via_folder = 1 THEN 'folder'
+                        ELSE 'direct'
+                    END AS source,
+                    created_at,
+                    updated_at
+                 FROM tracked_files {where_clause}"
+            ));
+        }
+
+        if include_folders {
+            let mut conditions = Vec::new();
+            if let Some(id) = drive_pair_id {
+                conditions.push(format!("drive_pair_id = ?{}", params.len() + 1));
+                params.push(Value::Integer(id));
+            }
+            if let Some(raw_q) = query.map(str::trim).filter(|q| !q.is_empty()) {
+                conditions.push(format!(
+                    "(folder_path LIKE ?{0} OR COALESCE(virtual_path, '') LIKE ?{0})",
+                    params.len() + 1
+                ));
+                params.push(Value::Text(format!("%{}%", raw_q)));
+            }
+            if let Some(prefix) = publish_prefix.map(str::trim).filter(|p| !p.is_empty()) {
+                conditions.push(format!("virtual_path LIKE ?{} || '%'", params.len() + 1));
+                params.push(Value::Text(prefix.to_string()));
+            }
+            if let Some(is_published) = published {
+                conditions.push(if is_published {
+                    "virtual_path IS NOT NULL".to_string()
+                } else {
+                    "virtual_path IS NULL".to_string()
+                });
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!("WHERE {}", conditions.join(" AND "))
+            };
+
+            branches.push(format!(
+                "SELECT
+                    'folder' AS kind,
+                    id,
+                    drive_pair_id,
+                    folder_path AS path,
+                    virtual_path,
+                    NULL AS is_mirrored,
+                    NULL AS tracked_direct,
+                    NULL AS tracked_via_folder,
+                    'folder' AS source,
+                    created_at,
+                    created_at AS updated_at
+                 FROM tracked_folders {where_clause}"
+            ));
+        }
+
+        let union = branches.join(" UNION ALL ");
+        let query_sql = format!(
+            "SELECT kind, id, drive_pair_id, path, virtual_path, is_mirrored,
+                    tracked_direct, tracked_via_folder, source, created_at, updated_at
+             FROM ({union})
+             ORDER BY kind, id
+             LIMIT {per_page} OFFSET {offset}"
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM ({union})");
+
+        let items = conn
+            .prepare(&query_sql)?
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                let kind_text: String = row.get(0)?;
+                let source_text: String = row.get(8)?;
+
+                let kind = match kind_text.as_str() {
+                    "folder" => TrackingItemKind::Folder,
+                    _ => TrackingItemKind::File,
+                };
+                let source = match source_text.as_str() {
+                    "both" => TrackingSource::Both,
+                    "folder" => TrackingSource::Folder,
+                    _ => TrackingSource::Direct,
+                };
+
+                Ok(TrackingItem {
+                    kind,
+                    id: row.get(1)?,
+                    drive_pair_id: row.get(2)?,
+                    path: row.get(3)?,
+                    virtual_path: row.get(4)?,
+                    is_mirrored: row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
+                    tracked_direct: row.get::<_, Option<i64>>(6)?.map(|value| value != 0),
+                    tracked_via_folder: row.get::<_, Option<i64>>(7)?.map(|value| value != 0),
+                    source,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let total: i64 = conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(params.iter()),
+            |row| row.get(0),
+        )?;
+
+        Ok((items, total))
+    }
+
+    pub fn list_virtual_path_tree_nodes(
+        &self,
+        parent: &str,
+    ) -> anyhow::Result<Vec<VirtualPathTreeNode>> {
+        let conn = self.conn()?;
+        let parent = if parent.trim().is_empty() {
+            "/".to_string()
+        } else {
+            let mut normalized = parent.trim().to_string();
+            if !normalized.starts_with('/') {
+                normalized = format!("/{normalized}");
+            }
+            if normalized.len() > 1 {
+                normalized = normalized.trim_end_matches('/').to_string();
+            }
+            normalized
+        };
+
+        let search_prefix = if parent == "/" {
+            "/".to_string()
+        } else {
+            format!("{}/", parent)
+        };
+        let pattern = format!("{}%", search_prefix);
+        let segment_start = search_prefix.len() as i64 + 1;
+
+        let mut stmt = conn.prepare(
+            "WITH paths AS (
+                SELECT virtual_path
+                FROM tracked_files
+                WHERE virtual_path IS NOT NULL
+                  AND virtual_path LIKE ?1
+                UNION ALL
+                SELECT virtual_path
+                FROM tracked_folders
+                WHERE virtual_path IS NOT NULL
+                  AND virtual_path LIKE ?1
+            ),
+            suffixes AS (
+                SELECT substr(virtual_path, ?2) AS suffix
+                FROM paths
+                WHERE length(virtual_path) >= (?2 - 1)
+            ),
+            segments AS (
+                SELECT
+                    CASE
+                        WHEN instr(suffix, '/') = 0 THEN suffix
+                        ELSE substr(suffix, 1, instr(suffix, '/') - 1)
+                    END AS name,
+                    CASE WHEN instr(suffix, '/') > 0 THEN 1 ELSE 0 END AS has_children
+                FROM suffixes
+                WHERE suffix <> ''
+            )
+            SELECT
+                name,
+                CASE WHEN ?3 = '/' THEN '/' || name ELSE ?3 || '/' || name END AS path,
+                COUNT(*) AS item_count,
+                MAX(has_children) AS has_children
+            FROM segments
+            WHERE name <> ''
+            GROUP BY name
+            ORDER BY name",
+        )?;
+
+        let nodes = stmt
+            .query_map(rusqlite::params![&pattern, segment_start, &parent], |row| {
+                Ok(VirtualPathTreeNode {
+                    name: row.get(0)?,
+                    path: row.get(1)?,
+                    item_count: row.get(2)?,
+                    has_children: row.get::<_, i64>(3)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(nodes)
     }
 
     pub fn update_tracked_folder(
@@ -1248,9 +1687,7 @@ mod tests {
         assert_eq!(folder.folder_path, "documents/");
         assert_eq!(folder.virtual_path.as_deref(), Some("/docs"));
 
-        let updated = repo
-            .update_tracked_folder(folder.id, Some(None))
-            .unwrap();
+        let updated = repo.update_tracked_folder(folder.id, Some(None)).unwrap();
         assert!(updated.virtual_path.is_none());
 
         repo.delete_tracked_folder(folder.id).unwrap();

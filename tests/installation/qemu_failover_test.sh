@@ -214,6 +214,13 @@ QEMU_PID=$!
 echo "Waiting for failover VM to boot (up to ${TIMEOUT}s)..."
 LAST_SERIAL_LINE=""
 for i in $(seq 1 ${TIMEOUT}); do
+    if ! kill -0 "${QEMU_PID}" 2>/dev/null; then
+        echo "ERROR: QEMU exited before VM became ready"
+        echo "QEMU log:"
+        tail -40 "${WORKDIR}/qemu.log" 2>/dev/null || true
+        exit 1
+    fi
+
     if [[ -f "${WORKDIR}/serial.log" ]]; then
         NEW_LINE=$(tail -1 "${WORKDIR}/serial.log" | sed 's/^\[[ 0-9.]*\] //')
         if [[ "${NEW_LINE}" != "${LAST_SERIAL_LINE}" && -n "${NEW_LINE}" ]]; then

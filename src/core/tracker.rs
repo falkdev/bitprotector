@@ -5,19 +5,13 @@ use anyhow::Context;
 use std::fs;
 use std::path::PathBuf;
 
-/// Track a new file: compute checksum, record in database, and mirror it.
-pub fn track_file(
+fn create_tracked_file_from_disk(
     repo: &Repository,
     drive_pair: &DrivePair,
     relative_path: &str,
-    virtual_path: Option<&str>,
-) -> anyhow::Result<crate::db::repository::TrackedFile> {
-    drive::require_pair_mutation_allowed(drive_pair)?;
-    drive::ensure_drive_root_marker(drive_pair.active_path())?;
-    if drive::path_is_available(drive_pair.standby_path()) {
-        let _ = drive::ensure_drive_root_marker(drive_pair.standby_path());
-    }
-
+    tracked_direct: bool,
+    tracked_via_folder: bool,
+) -> anyhow::Result<TrackedFile> {
     let master_path = PathBuf::from(drive_pair.active_path()).join(relative_path);
 
     if !master_path.exists() {
@@ -32,13 +26,39 @@ pub fn track_file(
         checksum::checksum_file(&master_path).context("Failed to compute file checksum")?;
     let file_size = master_path.metadata()?.len() as i64;
 
-    let tracked = repo.create_tracked_file(
+    repo.create_tracked_file_with_source(
         drive_pair.id,
         relative_path,
         &file_checksum,
         file_size,
         None,
-    )?;
+        tracked_direct,
+        tracked_via_folder,
+    )
+}
+
+/// Track a new file: compute checksum, record in database, and mirror it.
+pub fn track_file(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+    relative_path: &str,
+    virtual_path: Option<&str>,
+) -> anyhow::Result<crate::db::repository::TrackedFile> {
+    drive::require_pair_mutation_allowed(drive_pair)?;
+    drive::ensure_drive_root_marker(drive_pair.active_path())?;
+    if drive::path_is_available(drive_pair.standby_path()) {
+        let _ = drive::ensure_drive_root_marker(drive_pair.standby_path());
+    }
+
+    if let Ok(existing) = repo.get_tracked_file_by_path(drive_pair.id, relative_path) {
+        repo.update_tracked_file_sources(existing.id, true, existing.tracked_via_folder)?;
+        if let Some(virtual_path) = virtual_path {
+            virtual_path::set_virtual_path(repo, existing.id, virtual_path)?;
+        }
+        return repo.get_tracked_file(existing.id);
+    }
+
+    let tracked = create_tracked_file_from_disk(repo, drive_pair, relative_path, true, false)?;
 
     if let Some(virtual_path) = virtual_path {
         if let Err(error) = virtual_path::set_virtual_path(repo, tracked.id, virtual_path) {
@@ -77,6 +97,7 @@ pub fn track_folder(
         }
     }
 
+    repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
     repo.get_tracked_folder(tracked.id)
 }
 
@@ -90,8 +111,6 @@ pub fn auto_track_folder_files(
     drive::require_pair_mutation_allowed(drive_pair)?;
 
     let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
-    let (existing, _) = repo.list_tracked_files(Some(drive_pair.id), None, None, 1, i64::MAX)?;
-
     let mut newly_tracked = Vec::new();
 
     for entry in fs::read_dir(&folder_full_path)
@@ -110,11 +129,14 @@ pub fn auto_track_folder_files(
             .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))?
             .to_string();
 
-        if existing.iter().any(|f| f.relative_path == relative_path) {
+        if repo
+            .get_tracked_file_by_path(drive_pair.id, &relative_path)
+            .is_ok()
+        {
             continue;
         }
 
-        let file = track_file(repo, drive_pair, &relative_path, None)?;
+        let file = create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
         if drive_pair.standby_accepts_sync() {
             mirror::mirror_file(drive_pair, &relative_path)?;
             repo.update_tracked_file_mirror_status(file.id, true)?;
@@ -124,6 +146,7 @@ pub fn auto_track_folder_files(
         newly_tracked.push(repo.get_tracked_file(file.id)?);
     }
 
+    repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
     Ok(newly_tracked)
 }
 
@@ -242,7 +265,13 @@ mod tests {
         fs::create_dir(primary.path().join("reports")).unwrap();
         let publish_root = TempDir::new().unwrap();
         let publish_path = publish_root.path().join("virtual/reports");
-        let folder = track_folder(&repo, &pair, "reports", Some(publish_path.to_str().unwrap())).unwrap();
+        let folder = track_folder(
+            &repo,
+            &pair,
+            "reports",
+            Some(publish_path.to_str().unwrap()),
+        )
+        .unwrap();
 
         assert_eq!(
             folder.virtual_path,

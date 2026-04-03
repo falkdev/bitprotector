@@ -4,7 +4,6 @@ import { cleanup } from '@testing-library/react'
 import { server } from '@/test/msw/server'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrivesStore } from '@/stores/drives-store'
-import { useFilesStore } from '@/stores/files-store'
 import { useLogsStore } from '@/stores/logs-store'
 import { useStatusStore } from '@/stores/status-store'
 import { useSyncStore } from '@/stores/sync-store'
@@ -21,12 +20,6 @@ function resetStores() {
     drives: [],
     loading: false,
     error: null,
-  })
-  useFilesStore.setState({
-    response: null,
-    loading: false,
-    error: null,
-    params: { page: 1, per_page: 50 },
   })
   useLogsStore.setState({
     entries: [],

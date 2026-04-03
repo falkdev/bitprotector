@@ -6,6 +6,8 @@ export interface TrackedFile {
   file_size: number | null
   virtual_path: string | null
   is_mirrored: boolean
+  tracked_direct: boolean
+  tracked_via_folder: boolean
   last_verified: string | null
   created_at: string
   updated_at: string

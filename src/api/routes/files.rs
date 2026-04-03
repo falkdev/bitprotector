@@ -45,6 +45,9 @@ pub async fn track_file(
                 .json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
         }
     };
+    let existed_before = repo
+        .get_tracked_file_by_path(pair.id, &relative_path)
+        .is_ok();
     let tracked =
         match tracker::track_file(&repo, &pair, &relative_path, body.virtual_path.as_deref()) {
             Ok(t) => t,
@@ -65,7 +68,11 @@ pub async fn track_file(
             }
         }
     }
-    HttpResponse::Created().json(tracked)
+    if existed_before {
+        HttpResponse::Ok().json(tracked)
+    } else {
+        HttpResponse::Created().json(tracked)
+    }
 }
 
 /// GET /api/v1/files — list tracked files

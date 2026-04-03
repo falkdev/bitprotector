@@ -46,7 +46,10 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
 
     let raw_path = Path::new(trimmed);
     if !raw_path.is_absolute() {
-        anyhow::bail!("Virtual path must be absolute (start with /): {}", virtual_path);
+        anyhow::bail!(
+            "Virtual path must be absolute (start with /): {}",
+            virtual_path
+        );
     }
 
     let mut segments = Vec::new();
@@ -70,11 +73,7 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
 }
 
 /// Set the virtual path for a tracked file and create/update its publish symlink.
-pub fn set_virtual_path(
-    repo: &Repository,
-    file_id: i64,
-    virtual_path: &str,
-) -> anyhow::Result<()> {
+pub fn set_virtual_path(repo: &Repository, file_id: i64, virtual_path: &str) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(file_id)?;
     let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
     let normalized = validate_virtual_path(repo, PublishOwner::File(file_id), virtual_path)?;
@@ -188,17 +187,17 @@ pub fn bulk_from_real(
     publish_root: &str,
 ) -> anyhow::Result<BulkResult> {
     let normalized_root = normalize_virtual_path(publish_root)?;
-    let (files, _) = repo.list_tracked_files(Some(drive_pair_id), None, None, 1, i64::MAX)?;
+    let files = repo.list_tracked_files_in_folder(drive_pair_id, folder_path)?;
 
-    let folder_norm = folder_path.trim_end_matches('/');
+    let folder_norm = folder_path.trim_end_matches('/').to_string();
     let mut entries: Vec<(i64, String)> = Vec::new();
 
     for file in &files {
         let rel = file.relative_path.as_str();
-        if !rel.starts_with(folder_norm) {
-            continue;
-        }
-        let suffix = rel[folder_norm.len()..].trim_start_matches('/');
+        let suffix = rel
+            .strip_prefix(&folder_norm)
+            .unwrap_or(rel)
+            .trim_start_matches('/');
         let virtual_path = if suffix.is_empty() {
             normalized_root.clone()
         } else {
@@ -325,9 +324,12 @@ fn validate_virtual_path(
                 );
             }
 
-            let owned_by_current = collect_publish_reservations(repo)?
-                .into_iter()
-                .any(|reservation| reservation.owner == owner && reservation.virtual_path == normalized);
+            let owned_by_current =
+                collect_publish_reservations(repo)?
+                    .into_iter()
+                    .any(|reservation| {
+                        reservation.owner == owner && reservation.virtual_path == normalized
+                    });
 
             if !owned_by_current {
                 anyhow::bail!("Virtual path is already in use: {}", normalized);
@@ -456,7 +458,10 @@ mod tests {
         primary: &TempDir,
         secondary: &TempDir,
         name: &str,
-    ) -> (crate::db::repository::DrivePair, crate::db::repository::TrackedFile) {
+    ) -> (
+        crate::db::repository::DrivePair,
+        crate::db::repository::TrackedFile,
+    ) {
         let pair = repo
             .create_drive_pair(
                 "pair",
@@ -472,10 +477,15 @@ mod tests {
     #[test]
     fn test_normalize_virtual_path() {
         assert_eq!(
-            normalize_virtual_path(" /docs/../bad ").unwrap_err().to_string(),
+            normalize_virtual_path(" /docs/../bad ")
+                .unwrap_err()
+                .to_string(),
             "Parent-directory traversal is not allowed in virtual paths"
         );
-        assert_eq!(normalize_virtual_path("/docs//report.txt").unwrap(), "/docs/report.txt");
+        assert_eq!(
+            normalize_virtual_path("/docs//report.txt").unwrap(),
+            "/docs/report.txt"
+        );
     }
 
     #[test]
@@ -508,7 +518,9 @@ mod tests {
         fs::write(&publish_path, b"foreign").unwrap();
 
         let error = set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap_err();
-        assert!(error.to_string().contains("not a BitProtector-managed symlink"));
+        assert!(error
+            .to_string()
+            .contains("not a BitProtector-managed symlink"));
     }
 
     #[test]
@@ -524,7 +536,11 @@ mod tests {
         remove_virtual_path(&repo, file.id).unwrap();
 
         assert!(!publish_path.exists());
-        assert!(repo.get_tracked_file(file.id).unwrap().virtual_path.is_none());
+        assert!(repo
+            .get_tracked_file(file.id)
+            .unwrap()
+            .virtual_path
+            .is_none());
     }
 
     #[test]
@@ -547,7 +563,10 @@ mod tests {
         set_folder_virtual_path(&repo, folder.id, publish_path.to_str().unwrap()).unwrap();
 
         assert!(publish_path.is_symlink());
-        assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("reports"));
+        assert_eq!(
+            fs::read_link(&publish_path).unwrap(),
+            primary.path().join("reports")
+        );
     }
 
     #[test]
@@ -606,7 +625,10 @@ mod tests {
 
         drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
         drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
-        fs::remove_file(drive::drive_root_marker_path(primary.path().to_str().unwrap())).unwrap();
+        fs::remove_file(drive::drive_root_marker_path(
+            primary.path().to_str().unwrap(),
+        ))
+        .unwrap();
 
         let failed_over = drive::load_operational_pair(&repo, pair.id).unwrap();
         assert_eq!(failed_over.active_role, "secondary");
@@ -614,6 +636,9 @@ mod tests {
             fs::read_link(&file_publish).unwrap(),
             secondary.path().join("docs/report.txt")
         );
-        assert_eq!(fs::read_link(&folder_publish).unwrap(), secondary.path().join("docs"));
+        assert_eq!(
+            fs::read_link(&folder_publish).unwrap(),
+            secondary.path().join("docs")
+        );
     }
 }

@@ -222,6 +222,52 @@ async fn test_files_track() {
 }
 
 #[actix_rt::test]
+async fn test_files_track_existing_promotes_direct_source_and_returns_ok() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::write(primary.path().join("doc.txt"), b"file content").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-existing",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let checksum = checksum::checksum_bytes(b"file content");
+    let existing = repo
+        .create_tracked_file_with_source(pair.id, "doc.txt", &checksum, 12, None, false, true)
+        .unwrap();
+    assert!(!existing.tracked_direct);
+    assert!(existing.tracked_via_folder);
+
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "doc.txt"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["tracked_direct"], true);
+    assert_eq!(body["tracked_via_folder"], true);
+
+    let (files, total) = repo
+        .list_tracked_files(Some(pair.id), None, None, 1, 10)
+        .unwrap();
+    assert_eq!(
+        total, 1,
+        "Idempotent track should not create duplicate rows"
+    );
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].relative_path, "doc.txt");
+}
+
+#[actix_rt::test]
 async fn test_files_track_accepts_absolute_path_within_active_root() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
@@ -350,6 +396,232 @@ async fn test_files_list() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["total"], 0);
+}
+
+#[actix_rt::test]
+async fn test_tracking_items_filters() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("tracking", "/p", "/s").unwrap();
+    repo.create_tracked_file_with_source(
+        pair.id,
+        "docs/alpha.txt",
+        "hash-a",
+        10,
+        Some("/published/docs/alpha.txt"),
+        true,
+        false,
+    )
+    .unwrap();
+    repo.create_tracked_file_with_source(
+        pair.id,
+        "docs/beta.txt",
+        "hash-b",
+        12,
+        Some("/published/docs/beta.txt"),
+        true,
+        true,
+    )
+    .unwrap();
+    repo.create_tracked_folder(pair.id, "docs", Some("/published/docs"))
+        .unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/tracking/items?item_kind=file&source=both&publish_prefix=/published/docs")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["source"], "both");
+    assert_eq!(body["items"][0]["kind"], "file");
+}
+
+#[actix_rt::test]
+async fn test_tracking_items_filter_and_pagination_combinations() {
+    let repo = make_repo();
+    let pair_a = repo.create_drive_pair("tracking-a", "/p1", "/s1").unwrap();
+    let pair_b = repo.create_drive_pair("tracking-b", "/p2", "/s2").unwrap();
+
+    repo.create_tracked_file_with_source(pair_a.id, "docs/a.txt", "h1", 10, None, true, false)
+        .unwrap();
+    repo.create_tracked_file_with_source(
+        pair_a.id,
+        "docs/b.txt",
+        "h2",
+        11,
+        Some("/published/docs/b.txt"),
+        true,
+        true,
+    )
+    .unwrap();
+    repo.create_tracked_file_with_source(
+        pair_a.id,
+        "media/c.txt",
+        "h3",
+        12,
+        Some("/published/media/c.txt"),
+        false,
+        true,
+    )
+    .unwrap();
+    repo.create_tracked_file_with_source(
+        pair_b.id,
+        "docs/d.txt",
+        "h4",
+        13,
+        Some("/published/docs/d.txt"),
+        true,
+        false,
+    )
+    .unwrap();
+    repo.create_tracked_folder(pair_a.id, "docs", Some("/published/docs"))
+        .unwrap();
+
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&published=true&source=both&page=1&per_page=1",
+            pair_a.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["path"], "docs/b.txt");
+    assert_eq!(body["items"][0]["source"], "both");
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&page=2&per_page=2",
+            pair_a.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["path"], "media/c.txt");
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=folder&publish_prefix=/published/docs",
+            pair_a.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["kind"], "folder");
+    assert_eq!(body["items"][0]["path"], "docs");
+}
+
+#[actix_rt::test]
+async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_removal() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir_all(primary.path().join("docs")).unwrap();
+    fs::write(primary.path().join("docs/alpha.txt"), b"alpha-content").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "tracking-provenance",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/folders")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "folder_path": "docs"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let folder_body: serde_json::Value = test::read_body_json(resp).await;
+    let folder_id = folder_body["id"].as_i64().unwrap();
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{folder_id}/scan"))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["path"], "docs/alpha.txt");
+    assert_eq!(body["items"][0]["source"], "folder");
+    assert_eq!(body["items"][0]["tracked_direct"], false);
+    assert_eq!(body["items"][0]["tracked_via_folder"], true);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "docs/alpha.txt"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["items"][0]["source"], "both");
+    assert_eq!(body["items"][0]["tracked_direct"], true);
+    assert_eq!(body["items"][0]["tracked_via_folder"], true);
+
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/folders/{folder_id}"))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 204);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["items"][0]["source"], "direct");
+    assert_eq!(body["items"][0]["tracked_direct"], true);
+    assert_eq!(body["items"][0]["tracked_via_folder"], false);
 }
 
 #[actix_rt::test]
@@ -840,6 +1112,105 @@ async fn test_virtual_paths_bulk_from_real_uses_publish_root() {
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["succeeded"], serde_json::json!([tracked.id]));
     assert!(publish_path.is_symlink());
+}
+
+#[actix_rt::test]
+async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("vp-tree", "/p", "/s").unwrap();
+
+    repo.create_tracked_file_with_source(
+        pair.id,
+        "docs/a.txt",
+        "h1",
+        10,
+        Some("/published/docs/a.txt"),
+        true,
+        false,
+    )
+    .unwrap();
+    repo.create_tracked_file_with_source(
+        pair.id,
+        "docs/archive/b.txt",
+        "h2",
+        10,
+        Some("/published/docs/archive/b.txt"),
+        true,
+        false,
+    )
+    .unwrap();
+    repo.create_tracked_file_with_source(
+        pair.id,
+        "media/c.txt",
+        "h3",
+        10,
+        Some("/published/media/c.txt"),
+        true,
+        false,
+    )
+    .unwrap();
+    repo.create_tracked_folder(pair.id, "folder-only", Some("/published/folder-only"))
+        .unwrap();
+
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/virtual-paths/tree?parent=/published")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let children = body["children"].as_array().unwrap();
+
+    let docs = children
+        .iter()
+        .find(|child| child["name"] == "docs")
+        .expect("docs child should exist");
+    assert_eq!(docs["path"], "/published/docs");
+    assert_eq!(docs["item_count"], 2);
+    assert_eq!(docs["has_children"], true);
+
+    let media = children
+        .iter()
+        .find(|child| child["name"] == "media")
+        .expect("media child should exist");
+    assert_eq!(media["path"], "/published/media");
+    assert_eq!(media["item_count"], 1);
+    assert_eq!(media["has_children"], true);
+
+    let folder_only = children
+        .iter()
+        .find(|child| child["name"] == "folder-only")
+        .expect("folder-only child should exist");
+    assert_eq!(folder_only["path"], "/published/folder-only");
+    assert_eq!(folder_only["item_count"], 1);
+    assert_eq!(folder_only["has_children"], false);
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/virtual-paths/tree?parent=/published/docs")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let nested = body["children"].as_array().unwrap();
+
+    let a_txt = nested
+        .iter()
+        .find(|child| child["name"] == "a.txt")
+        .expect("a.txt child should exist");
+    assert_eq!(a_txt["path"], "/published/docs/a.txt");
+    assert_eq!(a_txt["item_count"], 1);
+    assert_eq!(a_txt["has_children"], false);
+
+    let archive = nested
+        .iter()
+        .find(|child| child["name"] == "archive")
+        .expect("archive child should exist");
+    assert_eq!(archive["path"], "/published/docs/archive");
+    assert_eq!(archive["item_count"], 1);
+    assert_eq!(archive["has_children"], true);
 }
 
 // ── Integrity ──────────────────────────────────────────────────────────────

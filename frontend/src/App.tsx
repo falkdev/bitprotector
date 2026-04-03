@@ -4,9 +4,8 @@ import { ProtectedRoute } from '@/components/layout/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
-import { FileBrowserPage } from '@/pages/FileBrowserPage'
+import { TrackingWorkspacePage } from '@/pages/TrackingWorkspacePage'
 import { DrivesPage } from '@/pages/DrivesPage'
-import { FoldersPage } from '@/pages/FoldersPage'
 import { IntegrityPage } from '@/pages/IntegrityPage'
 import { SyncQueuePage } from '@/pages/SyncQueuePage'
 import { VirtualPathManagerPage } from '@/pages/VirtualPathManagerPage'
@@ -29,9 +28,9 @@ export default function App() {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/files" element={<FileBrowserPage />} />
+          <Route path="/files" element={<TrackingWorkspacePage />} />
           <Route path="/drives" element={<DrivesPage />} />
-          <Route path="/folders" element={<FoldersPage />} />
+          <Route path="/folders" element={<Navigate to="/files" replace />} />
           <Route path="/integrity" element={<IntegrityPage />} />
           <Route path="/sync" element={<SyncQueuePage />} />
           <Route path="/virtual-paths" element={<VirtualPathManagerPage />} />

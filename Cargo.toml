@@ -130,6 +130,10 @@ name = "api_routes"
 path = "tests/integration/api_routes.rs"
 
 [[test]]
+name = "scaling_100k"
+path = "tests/integration/scaling_100k.rs"
+
+[[test]]
 name = "api_filesystem_browser"
 path = "tests/integration/api_filesystem_browser.rs"
 

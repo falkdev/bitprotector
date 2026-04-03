@@ -26,8 +26,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
 UBUNTU_IMAGE="${UBUNTU_IMAGE:-${HOME}/images/noble-server-cloudimg-amd64.img}"
-SSH_PORT=2222
-TIMEOUT=600
+SSH_PORT="${SSH_PORT:-2222}"
+API_PORT="${API_PORT:-18443}"
+TIMEOUT="${TIMEOUT:-600}"
 
 require_commands() {
     local missing=()
@@ -125,7 +126,7 @@ qemu-system-x86_64 \
     -drive "file=${WORKDIR}/test.qcow2,format=qcow2,cache=unsafe" \
     -drive "file=${WORKDIR}/seed.iso,format=raw,readonly=on,if=virtio" \
     -net nic \
-    -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::18443-:8443" \
+    -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
     > "${WORKDIR}/qemu.log" 2>&1 &
 QEMU_PID=$!
@@ -133,6 +134,13 @@ QEMU_PID=$!
 echo "Waiting for VM to boot (up to ${TIMEOUT}s)..."
 LAST_SERIAL_LINE=""
 for i in $(seq 1 ${TIMEOUT}); do
+    if ! kill -0 "${QEMU_PID}" 2>/dev/null; then
+        echo "ERROR: QEMU exited before VM became ready"
+        echo "QEMU log:"
+        tail -40 "${WORKDIR}/qemu.log" 2>/dev/null || true
+        exit 1
+    fi
+
     if [[ -f "${WORKDIR}/serial.log" ]]; then
         NEW_LINE=$(tail -1 "${WORKDIR}/serial.log" | sed 's/^\[[ 0-9.]*\] //')
         if [[ "${NEW_LINE}" != "${LAST_SERIAL_LINE}" && -n "${NEW_LINE}" ]]; then

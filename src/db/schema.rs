@@ -63,6 +63,8 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             file_size       INTEGER NOT NULL,
             virtual_path    TEXT,
             is_mirrored     INTEGER NOT NULL DEFAULT 0,
+            tracked_direct  INTEGER NOT NULL DEFAULT 1,
+            tracked_via_folder INTEGER NOT NULL DEFAULT 0,
             last_verified   TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -89,6 +91,49 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
              ADD COLUMN virtual_path TEXT;",
         )?;
     }
+
+    if !column_exists(conn, "tracked_files", "tracked_direct")? {
+        conn.execute_batch(
+            "ALTER TABLE tracked_files
+             ADD COLUMN tracked_direct INTEGER NOT NULL DEFAULT 1;",
+        )?;
+    }
+    if !column_exists(conn, "tracked_files", "tracked_via_folder")? {
+        conn.execute_batch(
+            "ALTER TABLE tracked_files
+             ADD COLUMN tracked_via_folder INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tracked_files_virtual_path
+         ON tracked_files(virtual_path);
+         CREATE INDEX IF NOT EXISTS idx_tracked_files_drive_relative
+         ON tracked_files(drive_pair_id, relative_path);
+         CREATE INDEX IF NOT EXISTS idx_tracked_folders_drive_folder_path
+         ON tracked_folders(drive_pair_id, folder_path);",
+    )?;
+
+    // Backfill folder-derived provenance for pre-migration rows.
+    conn.execute(
+        "UPDATE tracked_files
+         SET tracked_via_folder = 0",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE tracked_files
+         SET tracked_via_folder = 1
+         WHERE EXISTS (
+            SELECT 1
+            FROM tracked_folders
+            WHERE tracked_folders.drive_pair_id = tracked_files.drive_pair_id
+              AND (
+                    tracked_files.relative_path = rtrim(tracked_folders.folder_path, '/')
+                    OR tracked_files.relative_path LIKE rtrim(tracked_folders.folder_path, '/') || '/%'
+              )
+         )",
+        [],
+    )?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_queue (
@@ -159,6 +204,16 @@ mod tests {
 
     fn open_memory_db() -> Connection {
         Connection::open_in_memory().expect("Failed to open in-memory DB")
+    }
+
+    fn index_exists(conn: &Connection, index: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            rusqlite::params![index],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count == 1)
+        .unwrap_or(false)
     }
 
     #[test]
@@ -293,5 +348,124 @@ mod tests {
                 column
             );
         }
+    }
+
+    #[test]
+    fn test_tracked_file_provenance_columns_indexes_and_backfill_migrate_legacy_schema() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE drive_pairs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL UNIQUE,
+                primary_path    TEXT NOT NULL,
+                secondary_path  TEXT NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE tracked_files (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
+                relative_path   TEXT NOT NULL,
+                checksum        TEXT NOT NULL,
+                file_size       INTEGER NOT NULL,
+                virtual_path    TEXT,
+                is_mirrored     INTEGER NOT NULL DEFAULT 0,
+                last_verified   TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(drive_pair_id, relative_path)
+            );
+            CREATE TABLE tracked_folders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
+                folder_path     TEXT NOT NULL,
+                virtual_path    TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(drive_pair_id, folder_path)
+            );",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO drive_pairs (name, primary_path, secondary_path)
+             VALUES ('pair', '/p', '/s')",
+            [],
+        )
+        .unwrap();
+        let pair_id: i64 = conn
+            .query_row("SELECT id FROM drive_pairs LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+
+        conn.execute(
+            "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
+             VALUES (?1, 'docs', '/published/docs')",
+            rusqlite::params![pair_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size)
+             VALUES (?1, 'docs/a.txt', 'h1', 10)",
+            rusqlite::params![pair_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size)
+             VALUES (?1, 'misc/b.txt', 'h2', 10)",
+            rusqlite::params![pair_id],
+        )
+        .unwrap();
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        for column in ["tracked_direct", "tracked_via_folder"] {
+            assert!(
+                column_exists(&conn, "tracked_files", column).unwrap(),
+                "Column '{}' should be added during migration",
+                column
+            );
+        }
+
+        assert!(
+            index_exists(&conn, "idx_tracked_files_virtual_path"),
+            "tracked_files virtual_path index should be present"
+        );
+        assert!(
+            index_exists(&conn, "idx_tracked_files_drive_relative"),
+            "tracked_files drive_pair_id + relative_path index should be present"
+        );
+        assert!(
+            index_exists(&conn, "idx_tracked_folders_drive_folder_path"),
+            "tracked_folders drive_pair_id + folder_path index should be present"
+        );
+
+        let docs_flags: (i64, i64) = conn
+            .query_row(
+                "SELECT tracked_direct, tracked_via_folder
+                 FROM tracked_files
+                 WHERE relative_path='docs/a.txt'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            docs_flags,
+            (1, 1),
+            "File under tracked folder should be marked both"
+        );
+
+        let misc_flags: (i64, i64) = conn
+            .query_row(
+                "SELECT tracked_direct, tracked_via_folder
+                 FROM tracked_files
+                 WHERE relative_path='misc/b.txt'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            misc_flags,
+            (1, 0),
+            "File outside tracked folders should remain directly tracked only"
+        );
     }
 }

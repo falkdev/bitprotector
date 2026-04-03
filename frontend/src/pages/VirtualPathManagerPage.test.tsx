@@ -8,9 +8,8 @@ import { server } from '@/test/msw/server'
 import {
   makeBulkAssignResult,
   makeDrivePair,
-  makeTrackedFile,
-  makeTrackedFileListResponse,
-  makeTrackedFolder,
+  makeTrackingItem,
+  makeTrackingListResponse,
 } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
@@ -20,15 +19,14 @@ describe('VirtualPathManagerPage', () => {
     let requestBody: unknown = null
 
     server.use(
-      api.get('/files', () =>
+      api.get('/tracking/items', () =>
         HttpResponse.json(
-          makeTrackedFileListResponse([
-            makeTrackedFile({ id: 5, relative_path: 'documents/report.pdf' }),
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 5, kind: 'file', path: 'documents/report.pdf' }),
           ])
         )
       ),
       api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
-      api.get('/folders', () => HttpResponse.json([makeTrackedFolder()])),
       api.post('/virtual-paths/bulk-from-real', async ({ request }) => {
         requestBody = await request.json()
         return HttpResponse.json(makeBulkAssignResult({ succeeded: [5] }))
@@ -55,11 +53,14 @@ describe('VirtualPathManagerPage', () => {
     const user = userEvent.setup()
 
     server.use(
-      api.get('/files', () =>
-        HttpResponse.json(makeTrackedFileListResponse([makeTrackedFile({ id: 5 })]))
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 5, kind: 'file', path: 'documents/report.pdf' }),
+          ])
+        )
       ),
-      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
-      api.get('/folders', () => HttpResponse.json([makeTrackedFolder()]))
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()]))
     )
 
     renderWithApp(<VirtualPathManagerPage />)

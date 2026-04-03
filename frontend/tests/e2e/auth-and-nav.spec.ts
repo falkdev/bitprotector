@@ -11,14 +11,14 @@ test('logs in through the live backend, visits protected pages, and logs out', a
   await openSidebarRoute(page, 'drives')
   await expect(page.getByRole('heading', { level: 1, name: 'Drive Pairs' })).toBeVisible()
 
-  await openSidebarRoute(page, 'folders')
-  await expect(page.getByRole('heading', { level: 1, name: 'Tracked Folders' })).toBeVisible()
-
   await openSidebarRoute(page, 'sync')
   await expect(page.getByRole('heading', { level: 1, name: 'Sync Queue' })).toBeVisible()
 
   await openSidebarRoute(page, 'files')
   await expect(page.getByTestId('file-browser-page')).toBeVisible()
+
+  await page.goto('/folders')
+  await expect(page).toHaveURL(/\/files$/)
 
   await page.getByTestId('logout-button').click()
   await expect(page).toHaveURL(/\/login$/)

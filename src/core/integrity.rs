@@ -202,6 +202,8 @@ mod tests {
             file_size: 100,
             virtual_path: None,
             is_mirrored: true,
+            tracked_direct: true,
+            tracked_via_folder: false,
             last_verified: None,
             created_at: "".to_string(),
             updated_at: "".to_string(),

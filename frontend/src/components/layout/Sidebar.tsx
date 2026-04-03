@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   Files,
   HardDrive,
-  FolderOpen,
   ShieldCheck,
   RefreshCw,
   GitBranch,
@@ -15,9 +14,8 @@ import { cn } from '@/lib/utils'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/files', label: 'File Browser', icon: Files },
+  { to: '/files', label: 'Tracking Workspace', icon: Files },
   { to: '/drives', label: 'Drives', icon: HardDrive },
-  { to: '/folders', label: 'Folders', icon: FolderOpen },
   { to: '/integrity', label: 'Integrity', icon: ShieldCheck },
   { to: '/sync', label: 'Sync Queue', icon: RefreshCw },
   { to: '/virtual-paths', label: 'Publish Paths', icon: GitBranch },

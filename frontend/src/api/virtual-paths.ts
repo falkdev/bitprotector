@@ -1,10 +1,12 @@
 import { apiClient } from './client'
+import { isAxiosError } from 'axios'
 import type {
   SetVirtualPathRequest,
   BulkAssignRequest,
   BulkFromRealRequest,
   BulkAssignResult,
   RefreshSymlinksResult,
+  VirtualPathTreeResponse,
 } from '@/types/virtual-path'
 
 export const virtualPathsApi = {
@@ -18,6 +20,24 @@ export const virtualPathsApi = {
 
   refresh(): Promise<RefreshSymlinksResult> {
     return apiClient.post<RefreshSymlinksResult>('/virtual-paths/refresh').then((r) => r.data)
+  },
+
+  async tree(parent?: string): Promise<VirtualPathTreeResponse> {
+    try {
+      return await apiClient
+        .get<VirtualPathTreeResponse>('/virtual-paths/tree', {
+          params: parent ? { parent } : undefined,
+        })
+        .then((r) => r.data)
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 404) {
+        return {
+          parent: parent || '/',
+          children: [],
+        }
+      }
+      throw error
+    }
   },
 
   bulk(data: BulkAssignRequest): Promise<BulkAssignResult> {

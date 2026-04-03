@@ -9,4 +9,5 @@ pub mod logs;
 pub mod scheduler;
 pub mod status;
 pub mod sync;
+pub mod tracking;
 pub mod virtual_paths;

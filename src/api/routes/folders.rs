@@ -59,12 +59,7 @@ async fn add_folder(
             return HttpResponse::BadRequest().body(e.to_string());
         }
     };
-    match tracker::track_folder(
-        &repo,
-        &pair,
-        &folder_path,
-        body.virtual_path.as_deref(),
-    ) {
+    match tracker::track_folder(&repo, &pair, &folder_path, body.virtual_path.as_deref()) {
         Ok(folder) => HttpResponse::Created().json(folder),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
@@ -93,7 +88,12 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
     }
 
     match repo.delete_tracked_folder(id) {
-        Ok(_) => HttpResponse::NoContent().finish(),
+        Ok(_) => {
+            if let Err(e) = repo.recompute_folder_provenance_for_drive(folder.drive_pair_id) {
+                return HttpResponse::InternalServerError().body(e.to_string());
+            }
+            HttpResponse::NoContent().finish()
+        }
         Err(e) => HttpResponse::NotFound().body(e.to_string()),
     }
 }

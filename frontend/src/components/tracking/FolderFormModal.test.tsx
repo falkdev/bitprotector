@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { FolderFormModal } from './FoldersPage'
+import { FolderFormModal } from '@/components/tracking/FolderFormModal'
 import type { DrivePair } from '@/types/drive'
 
 vi.mock('@/components/shared/PathPickerDialog', () => ({

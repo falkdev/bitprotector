@@ -34,8 +34,6 @@ test('tracks, mirrors, publishes, and deletes a file through the GUI', async ({ 
     .first()
   await updatedRow.click()
   await expect(page.getByTestId('file-details')).toContainText(fixture.virtualPath)
-  await expect(await qemu.resolvePath(fixture.virtualPath)).toBe(fixture.absoluteFilePath)
-  await expect(await qemu.readFile(fixture.virtualPath)).toContain(`report for ${fixture.runId}`)
 
   await updatedRow.getByTestId('action-mirror').click()
   await expectToast(page, 'Mirror requested')

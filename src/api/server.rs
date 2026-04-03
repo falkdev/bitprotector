@@ -226,7 +226,7 @@ where
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     use crate::api::routes::{
         auth, database, drives, files, filesystem, folders, integrity, logs, scheduler, status,
-        sync, virtual_paths,
+        sync, tracking, virtual_paths,
     };
     cfg.service(
         web::scope("/api/v1")
@@ -242,6 +242,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                     .configure(filesystem::configure)
                     .configure(files::configure)
                     .configure(virtual_paths::configure)
+                    .configure(tracking::configure)
                     .configure(integrity::configure)
                     .configure(folders::configure)
                     .configure(sync::configure)

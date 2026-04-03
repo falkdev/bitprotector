@@ -27,6 +27,11 @@ pub struct BulkFromRealRequest {
     pub publish_root: String,
 }
 
+#[derive(Deserialize)]
+struct TreeQuery {
+    parent: Option<String>,
+}
+
 #[derive(Serialize)]
 struct RefreshResponse {
     created: u32,
@@ -46,6 +51,12 @@ struct BulkFailureEntry {
     error: String,
 }
 
+#[derive(Serialize)]
+struct TreeResponse {
+    parent: String,
+    children: Vec<crate::db::repository::VirtualPathTreeNode>,
+}
+
 /// PUT /virtual-paths/{file_id}
 async fn set_virtual_path(
     repo: web::Data<Repository>,
@@ -60,10 +71,7 @@ async fn set_virtual_path(
 }
 
 /// DELETE /virtual-paths/{file_id}
-async fn remove_virtual_path(
-    repo: web::Data<Repository>,
-    path: web::Path<i64>,
-) -> HttpResponse {
+async fn remove_virtual_path(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
     let file_id = path.into_inner();
     match virtual_path::remove_virtual_path(&repo, file_id) {
         Ok(_) => HttpResponse::Ok().body(format!("Virtual path removed for file #{}", file_id)),
@@ -145,9 +153,40 @@ async fn bulk_from_real(
     }
 }
 
+/// GET /virtual-paths/tree
+///
+/// Return one level of path-segment children under a parent publish prefix.
+async fn virtual_path_tree(
+    repo: web::Data<Repository>,
+    query: web::Query<TreeQuery>,
+) -> HttpResponse {
+    let parent = query
+        .parent
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("/");
+
+    if !parent.starts_with('/') {
+        return HttpResponse::BadRequest().body("Parent publish prefix must be absolute");
+    }
+    if parent.contains("..") {
+        return HttpResponse::BadRequest().body("Parent publish prefix may not contain '..'");
+    }
+
+    match repo.list_virtual_path_tree_nodes(parent) {
+        Ok(children) => HttpResponse::Ok().json(TreeResponse {
+            parent: parent.to_string(),
+            children,
+        }),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/virtual-paths")
+            .route("/tree", web::get().to(virtual_path_tree))
             .route("/refresh", web::post().to(refresh_symlinks))
             .route("/bulk", web::post().to(bulk_set_virtual_paths))
             .route("/bulk-from-real", web::post().to(bulk_from_real))

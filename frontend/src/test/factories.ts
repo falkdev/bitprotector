@@ -7,6 +7,7 @@ import type { EventLogEntry } from '@/types/log'
 import type { ScheduleConfig } from '@/types/scheduler'
 import type { SystemStatus } from '@/types/status'
 import type { SyncQueueItem } from '@/types/sync'
+import type { TrackingItem, TrackingListResponse } from '@/types/tracking'
 import type { BulkAssignResult, RefreshSymlinksResult } from '@/types/virtual-path'
 
 const DEFAULT_DATE = '2026-01-01T00:00:00Z'
@@ -54,6 +55,8 @@ export function makeTrackedFile(overrides: Partial<TrackedFile> = {}): TrackedFi
     file_size: 1024,
     virtual_path: null,
     is_mirrored: false,
+    tracked_direct: true,
+    tracked_via_folder: false,
     last_verified: DEFAULT_DATE,
     created_at: DEFAULT_DATE,
     updated_at: DEFAULT_DATE,
@@ -68,6 +71,36 @@ export function makeTrackedFileListResponse(
   return {
     files,
     total: files.length,
+    page: 1,
+    per_page: 50,
+    ...overrides,
+  }
+}
+
+export function makeTrackingItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
+  return {
+    kind: 'file',
+    id: 1,
+    drive_pair_id: 1,
+    path: 'documents/report.pdf',
+    virtual_path: null,
+    is_mirrored: false,
+    tracked_direct: true,
+    tracked_via_folder: false,
+    source: 'direct',
+    created_at: DEFAULT_DATE,
+    updated_at: DEFAULT_DATE,
+    ...overrides,
+  }
+}
+
+export function makeTrackingListResponse(
+  items: TrackingItem[],
+  overrides: Partial<TrackingListResponse> = {}
+): TrackingListResponse {
+  return {
+    items,
+    total: items.length,
     page: 1,
     per_page: 50,
     ...overrides,

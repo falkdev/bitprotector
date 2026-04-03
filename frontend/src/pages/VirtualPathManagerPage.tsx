@@ -2,8 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { RefreshCw, Link2, Wand2 } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
-import { filesApi } from '@/api/files'
-import { foldersApi } from '@/api/folders'
+import { trackingApi } from '@/api/tracking'
 import { virtualPathsApi } from '@/api/virtual-paths'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
@@ -13,11 +12,28 @@ import { Pagination } from '@/components/shared/Pagination'
 import { formatPath } from '@/lib/format'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
-import type { TrackedFolder } from '@/types/folder'
+import type { TrackingItem } from '@/types/tracking'
 import type { BulkAssignResult } from '@/types/virtual-path'
 
 function isAbsolutePath(value: string) {
   return value.trim().startsWith('/')
+}
+
+function toTrackedFile(item: TrackingItem): TrackedFile {
+  return {
+    id: item.id,
+    drive_pair_id: item.drive_pair_id,
+    relative_path: item.path,
+    checksum: null,
+    file_size: null,
+    virtual_path: item.virtual_path,
+    is_mirrored: item.is_mirrored ?? false,
+    tracked_direct: item.tracked_direct ?? false,
+    tracked_via_folder: item.tracked_via_folder ?? false,
+    last_verified: null,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  }
 }
 
 function VirtualPathModal({
@@ -106,9 +122,14 @@ function VirtualPathModal({
 export function VirtualPathManagerPage() {
   const [response, setResponse] = useState<TrackedFileListResponse | null>(null)
   const [drives, setDrives] = useState<DrivePair[]>([])
-  const [folders, setFolders] = useState<TrackedFolder[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
+  const [filters, setFilters] = useState({
+    drive_id: '',
+    q: '',
+    publish_prefix: '',
+    published: 'all',
+  })
   const [editingFile, setEditingFile] = useState<TrackedFile | null>(null)
   const [removeTarget, setRemoveTarget] = useState<TrackedFile | null>(null)
   const [bulkInput, setBulkInput] = useState('')
@@ -127,27 +148,48 @@ export function VirtualPathManagerPage() {
   const loadFiles = useCallback(async (nextPage = page) => {
     setLoading(true)
     try {
-      const nextResponse = await filesApi.list({ page: nextPage, per_page: 50 })
-      setResponse(nextResponse)
+      const tracking = await trackingApi.list({
+        item_kind: 'file',
+        source: 'all',
+        page: nextPage,
+        per_page: 50,
+        drive_id: filters.drive_id ? Number(filters.drive_id) : undefined,
+        q: filters.q.trim() || undefined,
+        publish_prefix: filters.publish_prefix.trim() || undefined,
+        published:
+          filters.published === 'all'
+            ? undefined
+            : filters.published === 'published',
+      })
+
+      const files = tracking.items
+        .filter((item) => item.kind === 'file')
+        .map(toTrackedFile)
+
+      setResponse({
+        files,
+        total: tracking.total,
+        page: tracking.page,
+        per_page: tracking.per_page,
+      })
     } catch {
       toast.error('Failed to load tracked files')
     } finally {
       setLoading(false)
     }
-  }, [page])
+  }, [filters.drive_id, filters.publish_prefix, filters.published, filters.q, page])
 
   useEffect(() => {
     let active = true
 
     const loadSupportData = async () => {
       try {
-        const [nextDrives, nextFolders] = await Promise.all([drivesApi.list(), foldersApi.list()])
+        const nextDrives = await drivesApi.list()
         if (active) {
           setDrives(nextDrives)
-          setFolders(nextFolders)
         }
       } catch {
-        toast.error('Failed to load drive and folder metadata')
+        toast.error('Failed to load drive metadata')
       }
     }
 
@@ -288,6 +330,54 @@ export function VirtualPathManagerPage() {
         </button>
       </div>
 
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <select
+          value={filters.drive_id}
+          onChange={(event) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, drive_id: event.target.value }))
+          }}
+          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="">All drives</option>
+          {drives.map((drive) => (
+            <option key={drive.id} value={String(drive.id)}>
+              {drive.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={filters.q}
+          onChange={(event) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, q: event.target.value }))
+          }}
+          placeholder="Search relative path"
+          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        <input
+          value={filters.publish_prefix}
+          onChange={(event) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, publish_prefix: event.target.value }))
+          }}
+          placeholder="Publish prefix (/docs)"
+          className="rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+        />
+        <select
+          value={filters.published}
+          onChange={(event) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, published: event.target.value }))
+          }}
+          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="all">Published + Unpublished</option>
+          <option value="published">Published only</option>
+          <option value="unpublished">Unpublished only</option>
+        </select>
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <div className="space-y-4 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center gap-2">
@@ -377,11 +467,6 @@ export function VirtualPathManagerPage() {
           >
             Generate Publish Paths
           </button>
-          {folders.length > 0 && (
-            <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-              Tracked folders: {folders.map((folder) => folder.folder_path).join(', ')}
-            </div>
-          )}
         </div>
       </div>
 

@@ -7,7 +7,8 @@ interface BreadcrumbNavProps {
 }
 
 export function BreadcrumbNav({ path, onNavigate }: BreadcrumbNavProps) {
-  const parts = path ? path.split('/').filter(Boolean) : []
+  const normalized = path?.trim() || ''
+  const parts = normalized ? normalized.split('/').filter(Boolean) : []
 
   return (
     <nav className="flex items-center gap-1 text-sm" aria-label="Breadcrumb" data-testid="breadcrumb-nav">
@@ -19,7 +20,7 @@ export function BreadcrumbNav({ path, onNavigate }: BreadcrumbNavProps) {
         <span>All</span>
       </button>
       {parts.map((part, idx) => {
-        const segPath = parts.slice(0, idx + 1).join('/')
+        const segPath = `/${parts.slice(0, idx + 1).join('/')}`
         const isLast = idx === parts.length - 1
         return (
           <span key={segPath} className="flex items-center gap-1">
