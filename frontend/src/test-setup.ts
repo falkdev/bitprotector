@@ -7,7 +7,6 @@ import { useDrivesStore } from '@/stores/drives-store'
 import { useLogsStore } from '@/stores/logs-store'
 import { useStatusStore } from '@/stores/status-store'
 import { useSyncStore } from '@/stores/sync-store'
-import { useVirtualPathsStore } from '@/stores/virtual-paths-store'
 
 function resetStores() {
   useAuthStore.setState({
@@ -37,11 +36,6 @@ function resetStores() {
     loading: false,
     error: null,
     filter: 'all',
-  })
-  useVirtualPathsStore.setState({
-    files: [],
-    loading: false,
-    error: null,
   })
 }
 

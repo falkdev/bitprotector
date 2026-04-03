@@ -28,7 +28,7 @@ export function FileDetails({ file, onClose }: FileDetailsProps) {
         </div>
         {file.virtual_path && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Publish path</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Virtual path</p>
             <p className="text-sm text-gray-900 break-all font-mono">{file.virtual_path}</p>
           </div>
         )}

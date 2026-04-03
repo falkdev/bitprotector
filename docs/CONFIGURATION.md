@@ -103,11 +103,11 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 
 ---
 
-## Virtual Path Publishing
+## Virtual Paths
 
-BitProtector no longer uses a global publish root such as `symlink_base`. Each file or folder virtual path is the exact absolute filesystem path where BitProtector will create a symlink.
+BitProtector no longer uses a global virtual root such as `symlink_base`. Each file or folder virtual path is the exact absolute filesystem path where BitProtector will create a symlink.
 
-Make sure the service user has permission to create parent directories and symlinks at whatever publish paths you assign through the CLI, API, or web UI.
+Make sure the service user has permission to create parent directories and symlinks at whatever virtual paths you assign through the CLI, API, or web UI.
 
 ---
 

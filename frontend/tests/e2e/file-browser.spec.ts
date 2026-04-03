@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures'
 import { createDrivePair, expectToast, openSidebarRoute } from './support/ui'
 
-test('tracks, mirrors, publishes, and deletes a file through the GUI', async ({ page, qemu }) => {
+test('tracks, mirrors, sets virtual path, and deletes a file through the GUI', async ({ page, qemu }) => {
   const fixture = await qemu.seedDriveFixture()
   const fileName = fixture.fileRelativePath.split('/').at(-1) ?? fixture.fileRelativePath
 
@@ -24,9 +24,9 @@ test('tracks, mirrors, publishes, and deletes a file through the GUI', async ({ 
   await expect(page.getByTestId('file-details')).toContainText(fixture.fileRelativePath)
 
   await row.getByTestId('action-set-virtual-path').click()
-  await page.getByLabel('Publish path').fill(fixture.virtualPath)
+  await page.getByLabel('Virtual Path').fill(fixture.virtualPath)
   await page.getByRole('button', { name: 'Save' }).click()
-  await expectToast(page, 'Publish path updated')
+  await expectToast(page, 'Virtual path updated')
 
   const updatedRow = page
     .locator('[data-testid^="file-row-"]')

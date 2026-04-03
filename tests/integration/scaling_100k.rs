@@ -72,9 +72,9 @@ fn seed_repo_with_100k_files() -> (Repository, i64) {
 
                 let virtual_path = if i % 3 == 0 {
                     if i % 2 == 0 {
-                        Some(format!("/published/docs/item-{i:06}.dat"))
+                        Some(format!("/virtual/docs/item-{i:06}.dat"))
                     } else {
-                        Some(format!("/published/media/item-{i:06}.dat"))
+                        Some(format!("/virtual/media/item-{i:06}.dat"))
                     }
                 } else {
                     None
@@ -141,34 +141,34 @@ async fn test_tracking_items_scales_to_100k_with_pagination_filters_and_budgets(
     let started = Instant::now();
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&published=true&publish_prefix=/published/docs&page=1&per_page=200"
+            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&has_virtual_path=true&virtual_prefix=/virtual/docs&page=1&per_page=200"
         ))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     let elapsed = started.elapsed();
     assert_eq!(resp.status(), 200);
-    assert_budget("publish prefix + published filter", elapsed);
+    assert_budget("virtual prefix + has_virtual_path filter", elapsed);
 
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["total"], 16_667);
     assert_eq!(body["items"].as_array().unwrap().len(), 200);
     for item in body["items"].as_array().unwrap() {
         let vpath = item["virtual_path"].as_str().unwrap_or_default();
-        assert!(vpath.starts_with("/published/docs/"));
+        assert!(vpath.starts_with("/virtual/docs/"));
     }
 
     let started = Instant::now();
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&published=true&source=both&page=1&per_page=200"
+            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&has_virtual_path=true&source=both&page=1&per_page=200"
         ))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     let elapsed = started.elapsed();
     assert_eq!(resp.status(), 200);
-    assert_budget("published + source=both filter", elapsed);
+    assert_budget("has_virtual_path + source=both filter", elapsed);
 
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["total"], 6_666);

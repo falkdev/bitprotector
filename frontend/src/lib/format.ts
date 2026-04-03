@@ -36,7 +36,7 @@ export function formatChecksum(checksum: string | null | undefined): string {
   return checksum.slice(0, 12) + '…'
 }
 
-/** Format a publish path or real path for display */
+/** Format a virtual path or real path for display */
 export function formatPath(path: string | null | undefined): string {
   if (!path) return '—'
   return path

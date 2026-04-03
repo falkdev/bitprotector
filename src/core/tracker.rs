@@ -198,22 +198,22 @@ mod tests {
     fn test_track_file_with_virtual_path() {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
-        let publish_root = TempDir::new().unwrap();
-        let publish_path = publish_root.path().join("virtual/doc.txt");
+        let virtual_root = TempDir::new().unwrap();
+        let virtual_path_on_disk = virtual_root.path().join("virtual/doc.txt");
 
         fs::write(primary.path().join("doc.txt"), b"content").unwrap();
         let tracked = track_file(
             &repo,
             &pair,
             "doc.txt",
-            Some(publish_path.to_str().unwrap()),
+            Some(virtual_path_on_disk.to_str().unwrap()),
         )
         .unwrap();
         assert_eq!(
             tracked.virtual_path,
-            Some(publish_path.to_string_lossy().to_string())
+            Some(virtual_path_on_disk.to_string_lossy().to_string())
         );
-        assert!(publish_path.is_symlink());
+        assert!(virtual_path_on_disk.is_symlink());
     }
 
     #[test]
@@ -263,21 +263,21 @@ mod tests {
         let (primary, secondary, repo) = setup();
         let pair = make_pair(&primary, &secondary, &repo);
         fs::create_dir(primary.path().join("reports")).unwrap();
-        let publish_root = TempDir::new().unwrap();
-        let publish_path = publish_root.path().join("virtual/reports");
+        let virtual_root = TempDir::new().unwrap();
+        let virtual_path_on_disk = virtual_root.path().join("virtual/reports");
         let folder = track_folder(
             &repo,
             &pair,
             "reports",
-            Some(publish_path.to_str().unwrap()),
+            Some(virtual_path_on_disk.to_str().unwrap()),
         )
         .unwrap();
 
         assert_eq!(
             folder.virtual_path,
-            Some(publish_path.to_string_lossy().to_string())
+            Some(virtual_path_on_disk.to_string_lossy().to_string())
         );
-        assert!(publish_path.is_symlink());
+        assert!(virtual_path_on_disk.is_symlink());
     }
 
     #[test]

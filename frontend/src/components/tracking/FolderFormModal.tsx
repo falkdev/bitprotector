@@ -13,7 +13,7 @@ const schema = z.object({
   virtual_path: z
     .string()
     .optional()
-    .refine((value) => !value || value.trim().startsWith('/'), 'Publish path must be absolute'),
+    .refine((value) => !value || value.trim().startsWith('/'), 'Virtual path must be absolute'),
 })
 
 type FormData = z.infer<typeof schema>
@@ -130,7 +130,7 @@ export function FolderFormModal({
             </div>
             <div>
               <label htmlFor="folder-virtual-path" className="mb-1 block text-sm font-medium">
-                Publish Path (optional)
+                Virtual Path (optional)
               </label>
               <div className="flex gap-2">
                 <input
@@ -189,12 +189,12 @@ export function FolderFormModal({
       />
       <PathPickerDialog
         open={showVirtualPicker}
-        title="Select Folder Publish Path"
-        description="Choose the absolute publish location for this tracked folder."
+        title="Select Folder Virtual Path"
+        description="Choose the absolute virtual path for this tracked folder."
         mode="directory"
         value={rawVirtualPath}
         startPath={rawVirtualPath || '/'}
-        confirmLabel="Use Publish Path"
+        confirmLabel="Use Virtual Path"
         onClose={() => setShowVirtualPicker(false)}
         onPick={(path) => {
           setValue('virtual_path', path, { shouldDirty: true, shouldValidate: true })

@@ -398,7 +398,7 @@ mod tests {
 
         conn.execute(
             "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
-             VALUES (?1, 'docs', '/published/docs')",
+             VALUES (?1, 'docs', '/virtual/docs')",
             rusqlite::params![pair_id],
         )
         .unwrap();

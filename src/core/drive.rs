@@ -621,7 +621,7 @@ mod tests {
         let repo = make_repo();
         let primary = TempDir::new().unwrap();
         let secondary = TempDir::new().unwrap();
-        let publish_root = TempDir::new().unwrap();
+        let virtual_root = TempDir::new().unwrap();
         let primary_path = primary.path().to_path_buf();
         let secondary_path = secondary.path().to_path_buf();
 
@@ -641,7 +641,7 @@ mod tests {
         virtual_path::set_virtual_path(
             &repo,
             tracked.id,
-            publish_root
+            virtual_root
                 .path()
                 .join("docs/doc.txt")
                 .to_str()
@@ -654,7 +654,7 @@ mod tests {
         drop(primary);
 
         let failed_over = load_operational_pair(&repo, pair.id).unwrap();
-        let link_target = std::fs::read_link(publish_root.path().join("docs/doc.txt")).unwrap();
+        let link_target = std::fs::read_link(virtual_root.path().join("docs/doc.txt")).unwrap();
 
         assert_eq!(failed_over.active_role, "secondary");
         assert_eq!(failed_over.primary_state, "failed");

@@ -8,7 +8,6 @@ import type { ScheduleConfig } from '@/types/scheduler'
 import type { SystemStatus } from '@/types/status'
 import type { SyncQueueItem } from '@/types/sync'
 import type { TrackingItem, TrackingListResponse } from '@/types/tracking'
-import type { BulkAssignResult, RefreshSymlinksResult } from '@/types/virtual-path'
 
 const DEFAULT_DATE = '2026-01-01T00:00:00Z'
 
@@ -203,25 +202,6 @@ export function makeSchedule(overrides: Partial<ScheduleConfig> = {}): ScheduleC
     next_run: '2026-01-02T00:00:00Z',
     created_at: DEFAULT_DATE,
     updated_at: DEFAULT_DATE,
-    ...overrides,
-  }
-}
-
-export function makeBulkAssignResult(overrides: Partial<BulkAssignResult> = {}): BulkAssignResult {
-  return {
-    succeeded: [1],
-    failed: [],
-    ...overrides,
-  }
-}
-
-export function makeRefreshSymlinksResult(
-  overrides: Partial<RefreshSymlinksResult> = {}
-): RefreshSymlinksResult {
-  return {
-    created: 2,
-    removed: 1,
-    errors: [],
     ...overrides,
   }
 }

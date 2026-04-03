@@ -29,9 +29,9 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
    - Mirror corrupted → restore from primary.
    - Primary corrupted → restore from mirror.
    - Both corrupted → flag for user action.
-4. If the active drive fails, BitProtector can fail over to the surviving side and retarget publish paths to it.
+4. If the active drive fails, BitProtector can fail over to the surviving side and retarget virtual paths to it.
 5. When a replacement drive is mounted, BitProtector can queue a rebuild back onto that slot and return the pair to a fully mirrored state.
-6. A **virtual path** layer exposes tracked files and folders at exact absolute filesystem paths by creating symlinks directly at those publish locations.
+6. A **virtual path** layer exposes tracked files and folders at exact absolute filesystem paths by creating symlinks directly at those virtual locations.
 
 ---
 
@@ -139,7 +139,7 @@ bitprotector drives replace assign <drive-pair-id> --role primary /mnt/new-prima
 bitprotector sync process
 ```
 
-During failover, published symlinks automatically follow the pair's current `active_role`. Planned replacements use `mark` then `confirm` so you can quiesce external I/O before switching over.
+During failover, virtual path symlinks automatically follow the pair's current `active_role`. Planned replacements use `mark` then `confirm` so you can quiesce external I/O before switching over.
 
 For a full list of commands and flags, run:
 

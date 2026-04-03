@@ -1,7 +1,7 @@
 # Backend Implementation Plan
 ## Distributed File Mirror and Integrity Protection System
 
-> Historical planning note: sections that mention `symlink_base`, `auto_virtual_path`, `default_virtual_base`, or hidden virtual-path roots predate the literal publish-path overhaul. The current behavior is documented in `README.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/CONFIGURATION.md`.
+> Historical planning note: sections that mention `symlink_base`, `auto_virtual_path`, `default_virtual_base`, or hidden virtual-path roots predate the literal virtual-path overhaul. The current behavior is documented in `README.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/CONFIGURATION.md`.
 
 ---
 
@@ -454,23 +454,7 @@ Trigger an immediate integrity check on a specific file.
 
 ### 3.4 Virtual Paths
 
-#### GET `/virtual-paths`
-List all virtual path mappings.
-
-**Response (200):**
-```json
-{
-    "virtual_paths": [
-        {
-            "file_id": 1,
-            "virtual_path": "/docs/report.pdf",
-            "real_path": "/mnt/primary1/documents/report.pdf"
-        }
-    ]
-}
-```
-
-#### PUT `/files/{id}/virtual-path`
+#### PUT `/virtual-paths/{file_id}`
 Set or update the virtual path for a tracked file.
 
 **Request:**
@@ -480,81 +464,34 @@ Set or update the virtual path for a tracked file.
 }
 ```
 
-**Response (200):** Updated file object.
-**Errors:** `404 Not Found`, `409 Conflict` (path already in use)
+**Response (200):** Plain text confirmation.
+**Errors:** `400 Bad Request`, `404 Not Found`
 
-#### DELETE `/files/{id}/virtual-path`
+#### DELETE `/virtual-paths/{file_id}`
 Remove virtual path mapping from a tracked file.
 
-**Response (204):** No content.
-**Errors:** `404 Not Found`
+**Response (200):** Plain text confirmation.
+**Errors:** `400 Bad Request`, `404 Not Found`
 
-#### POST `/virtual-paths/bulk`
-Bulk-assign virtual paths to multiple files.
+#### GET `/virtual-paths/tree`
+Return one lazy tree level of virtual-path children under an absolute parent prefix.
 
-**Request:**
+**Response (200):**
 ```json
 {
-    "assignments": [
+    "parent": "/virtual",
+    "children": [
         {
-            "file_id": 1,
-            "virtual_path": "/docs/report.pdf"
+            "name": "docs",
+            "path": "/virtual/docs",
+            "item_count": 2,
+            "has_children": true
         }
     ]
 }
 ```
 
-**Response (200):**
-```json
-{
-    "updated": 5,
-    "failed": [
-        {
-            "file_id": 3,
-            "error": "Virtual path already in use"
-        }
-    ]
-}
-```
-
-#### POST `/virtual-paths/bulk-from-real`
-Bulk-assign virtual paths by copying portions of the real path.
-
-**Request:**
-```json
-{
-    "drive_pair_id": 1,
-    "source_folder": "documents/projects",
-    "virtual_base": "/projects",
-    "strip_prefix": "documents/"
-}
-```
-
-**Response (200):**
-```json
-{
-    "updated": 10,
-    "mappings": [
-        {
-            "file_id": 1,
-            "real_path": "documents/projects/alpha/spec.txt",
-            "virtual_path": "/projects/alpha/spec.txt"
-        }
-    ]
-}
-```
-
-#### POST `/virtual-paths/refresh-symlinks`
-Regenerate all symlinks on disk from virtual path database entries.
-
-**Response (200):**
-```json
-{
-    "created": 45,
-    "removed": 2,
-    "errors": []
-}
-```
+**Errors:** `400 Bad Request`, `500 Internal Server Error`
 
 ---
 
@@ -1001,18 +938,16 @@ Get overall system status (also used for SSH login message).
 **Steps:**
 1. Implement virtual path assignment (`core/virtual_path.rs`)
 2. Implement symlink creation and management
-3. Implement bulk virtual path assignment (folder-based, path-copy)
-4. Implement CLI and API endpoints for virtual paths
-5. Implement symlink refresh operation
+3. Implement CLI and API endpoints for virtual paths
+4. Implement symlink refresh operation
 
 **Tests:**
 - Unit: Virtual path to real path mapping
 - Unit: Symlink creation and validation
-- Unit: Bulk assignment with path prefix stripping
 - Module: End-to-end virtual path with symlink verification
 - Integration: CLI virtual path commands with temp directories
 
-**Commit:** `feat: virtual path system with symlink support and bulk assignment`
+**Commit:** `feat: virtual path system with symlink support`
 
 ---
 

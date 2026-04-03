@@ -15,7 +15,7 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await page.getByTestId('add-folder-button').click()
   await page.getByLabel('Drive Pair').selectOption({ label: fixture.driveName })
   await page.getByLabel('Folder Path').fill(fixture.folderRelativePath)
-  await page.getByLabel(/Publish Path/i).fill(fixture.folderVirtualPath)
+  await page.getByLabel(/Virtual Path/i).fill(fixture.folderVirtualPath)
   await page.getByRole('button', { name: 'Add Folder' }).last().click()
   await expectToast(page, 'Folder added')
 

@@ -25,11 +25,10 @@ export interface TrackingListResponse {
 export interface TrackingListParams {
   drive_id?: number
   q?: string
-  publish_prefix?: string
-  published?: boolean
+  virtual_prefix?: string
+  has_virtual_path?: boolean
   item_kind?: 'file' | 'folder' | 'all'
   source?: 'direct' | 'folder' | 'both' | 'all'
   page?: number
   per_page?: number
 }
-

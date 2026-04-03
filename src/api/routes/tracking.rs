@@ -7,8 +7,8 @@ use serde::Deserialize;
 pub struct ListTrackingItemsQuery {
     pub drive_id: Option<i64>,
     pub q: Option<String>,
-    pub publish_prefix: Option<String>,
-    pub published: Option<bool>,
+    pub virtual_prefix: Option<String>,
+    pub has_virtual_path: Option<bool>,
     pub item_kind: Option<String>,
     pub source: Option<String>,
     pub page: Option<i64>,
@@ -25,8 +25,8 @@ pub async fn list_tracking_items(
     match repo.list_tracking_items(
         query.drive_id,
         query.q.as_deref(),
-        query.publish_prefix.as_deref(),
-        query.published,
+        query.virtual_prefix.as_deref(),
+        query.has_virtual_path,
         query.item_kind.as_deref(),
         query.source.as_deref(),
         page,

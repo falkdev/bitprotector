@@ -50,14 +50,14 @@ function includeBySource(item: TrackingItem, source: TrackingListParams['source'
   return item.source === source
 }
 
-function includeByPublished(item: TrackingItem, published: boolean | undefined) {
-  if (published == null) return true
-  return published ? !!item.virtual_path : !item.virtual_path
+function includeByHasVirtualPath(item: TrackingItem, hasVirtualPath: boolean | undefined) {
+  if (hasVirtualPath == null) return true
+  return hasVirtualPath ? !!item.virtual_path : !item.virtual_path
 }
 
-function includeByPublishPrefix(item: TrackingItem, publishPrefix: string | undefined) {
-  if (!publishPrefix) return true
-  return (item.virtual_path ?? '').startsWith(publishPrefix)
+function includeByVirtualPrefix(item: TrackingItem, virtualPrefix: string | undefined) {
+  if (!virtualPrefix) return true
+  return (item.virtual_path ?? '').startsWith(virtualPrefix)
 }
 
 function includeByQuery(item: TrackingItem, query: string | undefined) {
@@ -74,7 +74,7 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
     apiClient.get<{ files: TrackedFile[] }>('/files', {
       params: {
         drive_id: params?.drive_id,
-        virtual_prefix: params?.publish_prefix,
+        virtual_prefix: params?.virtual_prefix,
         page,
         per_page: perPage,
       },
@@ -90,8 +90,8 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
     if (params?.drive_id != null && item.drive_pair_id !== params.drive_id) return false
     if (itemKind !== 'all' && item.kind !== itemKind) return false
     if (!includeBySource(item, params?.source)) return false
-    if (!includeByPublished(item, params?.published)) return false
-    if (!includeByPublishPrefix(item, params?.publish_prefix)) return false
+    if (!includeByHasVirtualPath(item, params?.has_virtual_path)) return false
+    if (!includeByVirtualPrefix(item, params?.virtual_prefix)) return false
     if (!includeByQuery(item, params?.q)) return false
     return true
   })

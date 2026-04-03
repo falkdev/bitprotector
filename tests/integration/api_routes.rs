@@ -1,7 +1,7 @@
 use actix_web::{test, web, App};
 use bitprotector_lib::api::auth::{issue_token, JwtSecret};
 use bitprotector_lib::api::server::configure_routes;
-use bitprotector_lib::core::{checksum, scheduler::Scheduler, tracker, virtual_path};
+use bitprotector_lib::core::{checksum, scheduler::Scheduler, virtual_path};
 use bitprotector_lib::db::repository::{create_memory_pool, Repository};
 use bitprotector_lib::db::schema::initialize_schema;
 use std::fs;
@@ -407,7 +407,7 @@ async fn test_tracking_items_filters() {
         "docs/alpha.txt",
         "hash-a",
         10,
-        Some("/published/docs/alpha.txt"),
+        Some("/virtual/docs/alpha.txt"),
         true,
         false,
     )
@@ -417,17 +417,17 @@ async fn test_tracking_items_filters() {
         "docs/beta.txt",
         "hash-b",
         12,
-        Some("/published/docs/beta.txt"),
+        Some("/virtual/docs/beta.txt"),
         true,
         true,
     )
     .unwrap();
-    repo.create_tracked_folder(pair.id, "docs", Some("/published/docs"))
+    repo.create_tracked_folder(pair.id, "docs", Some("/virtual/docs"))
         .unwrap();
 
     let app = make_app!(repo).await;
     let req = test::TestRequest::get()
-        .uri("/api/v1/tracking/items?item_kind=file&source=both&publish_prefix=/published/docs")
+        .uri("/api/v1/tracking/items?item_kind=file&source=both&virtual_prefix=/virtual/docs")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -451,7 +451,7 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
         "docs/b.txt",
         "h2",
         11,
-        Some("/published/docs/b.txt"),
+        Some("/virtual/docs/b.txt"),
         true,
         true,
     )
@@ -461,7 +461,7 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
         "media/c.txt",
         "h3",
         12,
-        Some("/published/media/c.txt"),
+        Some("/virtual/media/c.txt"),
         false,
         true,
     )
@@ -471,19 +471,19 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
         "docs/d.txt",
         "h4",
         13,
-        Some("/published/docs/d.txt"),
+        Some("/virtual/docs/d.txt"),
         true,
         false,
     )
     .unwrap();
-    repo.create_tracked_folder(pair_a.id, "docs", Some("/published/docs"))
+    repo.create_tracked_folder(pair_a.id, "docs", Some("/virtual/docs"))
         .unwrap();
 
     let app = make_app!(repo).await;
 
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={}&item_kind=file&published=true&source=both&page=1&per_page=1",
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&has_virtual_path=true&source=both&page=1&per_page=1",
             pair_a.id
         ))
         .insert_header(("Authorization", bearer()))
@@ -511,7 +511,7 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
 
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={}&item_kind=folder&publish_prefix=/published/docs",
+            "/api/v1/tracking/items?drive_id={}&item_kind=folder&virtual_prefix=/virtual/docs",
             pair_a.id
         ))
         .insert_header(("Authorization", bearer()))
@@ -747,10 +747,10 @@ async fn test_folders_add() {
 async fn test_folders_add_with_virtual_path_creates_symlink() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
+    let virtual_root = TempDir::new().unwrap();
     let sub = primary.path().join("docs");
     fs::create_dir(&sub).unwrap();
-    let publish_path = publish_root.path().join("published/docs");
+    let virtual_path_on_disk = virtual_root.path().join("virtual/docs");
     let repo = make_repo();
     let pair = repo
         .create_drive_pair(
@@ -766,14 +766,14 @@ async fn test_folders_add_with_virtual_path_creates_symlink() {
         .set_json(serde_json::json!({
             "drive_pair_id": pair.id,
             "folder_path": "docs",
-            "virtual_path": publish_path.to_str().unwrap()
+            "virtual_path": virtual_path_on_disk.to_str().unwrap()
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["virtual_path"], publish_path.to_str().unwrap());
-    assert!(publish_path.is_symlink());
+    assert_eq!(body["virtual_path"], virtual_path_on_disk.to_str().unwrap());
+    assert!(virtual_path_on_disk.is_symlink());
 }
 
 #[actix_rt::test]
@@ -810,10 +810,10 @@ async fn test_folders_add_accepts_absolute_path_within_active_root() {
 async fn test_folders_update_virtual_path() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
+    let virtual_root = TempDir::new().unwrap();
     let sub = primary.path().join("docs");
     fs::create_dir(&sub).unwrap();
-    let publish_path = publish_root.path().join("published/docs");
+    let virtual_path_on_disk = virtual_root.path().join("virtual/docs");
     let repo = make_repo();
     let pair = repo
         .create_drive_pair(
@@ -829,14 +829,14 @@ async fn test_folders_update_virtual_path() {
         .uri(&format!("/api/v1/folders/{}", folder.id))
         .insert_header(("Authorization", bearer()))
         .set_json(serde_json::json!({
-            "virtual_path": publish_path.to_str().unwrap()
+            "virtual_path": virtual_path_on_disk.to_str().unwrap()
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["virtual_path"], publish_path.to_str().unwrap());
-    assert!(publish_path.is_symlink());
+    assert_eq!(body["virtual_path"], virtual_path_on_disk.to_str().unwrap());
+    assert!(virtual_path_on_disk.is_symlink());
 
     let req = test::TestRequest::put()
         .uri(&format!("/api/v1/folders/{}", folder.id))
@@ -849,7 +849,7 @@ async fn test_folders_update_virtual_path() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert!(body["virtual_path"].is_null());
-    assert!(!publish_path.exists());
+    assert!(!virtual_path_on_disk.exists());
 }
 
 #[actix_rt::test]
@@ -950,8 +950,8 @@ async fn test_folders_scan() {
 async fn test_virtual_paths_set() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
-    let publish_path = publish_root.path().join("data/vp.txt");
+    let virtual_root = TempDir::new().unwrap();
+    let virtual_path_on_disk = virtual_root.path().join("data/vp.txt");
     fs::write(primary.path().join("vp.txt"), b"content").unwrap();
     let repo = make_repo();
     let pair = repo
@@ -970,20 +970,20 @@ async fn test_virtual_paths_set() {
         .uri(&format!("/api/v1/virtual-paths/{}", file.id))
         .insert_header(("Authorization", bearer()))
         .set_json(serde_json::json!({
-            "virtual_path": publish_path.to_str().unwrap()
+            "virtual_path": virtual_path_on_disk.to_str().unwrap()
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
-    assert!(publish_path.is_symlink());
+    assert!(virtual_path_on_disk.is_symlink());
 }
 
 #[actix_rt::test]
 async fn test_virtual_paths_remove() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
-    let publish_path = publish_root.path().join("virts/rem.txt");
+    let virtual_root = TempDir::new().unwrap();
+    let virtual_path_on_disk = virtual_root.path().join("virts/rem.txt");
     let content = b"data";
     fs::write(primary.path().join("rem.txt"), content).unwrap();
     let repo = make_repo();
@@ -999,7 +999,7 @@ async fn test_virtual_paths_remove() {
         .create_tracked_file(pair.id, "rem.txt", &hash, 4, None)
         .unwrap();
     // Set the virtual path directly via the library before testing the DELETE endpoint
-    virtual_path::set_virtual_path(&repo, file.id, publish_path.to_str().unwrap()).unwrap();
+    virtual_path::set_virtual_path(&repo, file.id, virtual_path_on_disk.to_str().unwrap()).unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::delete()
         .uri(&format!("/api/v1/virtual-paths/{}", file.id))
@@ -1007,111 +1007,7 @@ async fn test_virtual_paths_remove() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
-    assert!(!publish_path.is_symlink());
-}
-
-#[actix_rt::test]
-async fn test_virtual_paths_refresh_empty() {
-    let app = make_app!(make_repo()).await;
-    let req = test::TestRequest::post()
-        .uri("/api/v1/virtual-paths/refresh")
-        .insert_header(("Authorization", bearer()))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["created"], 0);
-    assert_eq!(body["removed"], 0);
-}
-
-#[actix_rt::test]
-async fn test_virtual_paths_bulk_empty_list() {
-    let app = make_app!(make_repo()).await;
-    let req = test::TestRequest::post()
-        .uri("/api/v1/virtual-paths/bulk")
-        .insert_header(("Authorization", bearer()))
-        .set_json(serde_json::json!({
-            "entries": []
-        }))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["succeeded"].as_array().unwrap().len(), 0);
-    assert_eq!(body["failed"].as_array().unwrap().len(), 0);
-}
-
-#[actix_rt::test]
-async fn test_virtual_paths_bulk_set() {
-    let primary = TempDir::new().unwrap();
-    let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
-    let publish_path = publish_root.path().join("bulk/bulk.txt");
-    let content = b"bulk file";
-    fs::write(primary.path().join("bulk.txt"), content).unwrap();
-    let repo = make_repo();
-    let pair = repo
-        .create_drive_pair(
-            "bp",
-            primary.path().to_str().unwrap(),
-            secondary.path().to_str().unwrap(),
-        )
-        .unwrap();
-    let hash = checksum::checksum_bytes(content);
-    let file = repo
-        .create_tracked_file(pair.id, "bulk.txt", &hash, content.len() as i64, None)
-        .unwrap();
-    let app = make_app!(repo).await;
-    let req = test::TestRequest::post()
-        .uri("/api/v1/virtual-paths/bulk")
-        .insert_header(("Authorization", bearer()))
-        .set_json(serde_json::json!({
-            "entries": [{
-                "file_id": file.id,
-                "virtual_path": publish_path.to_str().unwrap()
-            }]
-        }))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["succeeded"].as_array().unwrap().len(), 1);
-    assert!(publish_path.is_symlink());
-}
-
-#[actix_rt::test]
-async fn test_virtual_paths_bulk_from_real_uses_publish_root() {
-    let primary = TempDir::new().unwrap();
-    let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
-    fs::create_dir_all(primary.path().join("docs")).unwrap();
-    fs::write(primary.path().join("docs/bulk.txt"), b"bulk").unwrap();
-    let repo = make_repo();
-    let pair = repo
-        .create_drive_pair(
-            "vp-bulk-root",
-            primary.path().to_str().unwrap(),
-            secondary.path().to_str().unwrap(),
-        )
-        .unwrap();
-    let tracked = tracker::track_file(&repo, &pair, "docs/bulk.txt", None).unwrap();
-    let app = make_app!(repo).await;
-    let publish_path = publish_root.path().join("exports/bulk.txt");
-
-    let req = test::TestRequest::post()
-        .uri("/api/v1/virtual-paths/bulk-from-real")
-        .insert_header(("Authorization", bearer()))
-        .set_json(serde_json::json!({
-            "drive_pair_id": pair.id,
-            "folder_path": "docs",
-            "publish_root": publish_root.path().join("exports").to_str().unwrap()
-        }))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["succeeded"], serde_json::json!([tracked.id]));
-    assert!(publish_path.is_symlink());
+    assert!(!virtual_path_on_disk.is_symlink());
 }
 
 #[actix_rt::test]
@@ -1124,7 +1020,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         "docs/a.txt",
         "h1",
         10,
-        Some("/published/docs/a.txt"),
+        Some("/virtual/docs/a.txt"),
         true,
         false,
     )
@@ -1134,7 +1030,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         "docs/archive/b.txt",
         "h2",
         10,
-        Some("/published/docs/archive/b.txt"),
+        Some("/virtual/docs/archive/b.txt"),
         true,
         false,
     )
@@ -1144,18 +1040,18 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         "media/c.txt",
         "h3",
         10,
-        Some("/published/media/c.txt"),
+        Some("/virtual/media/c.txt"),
         true,
         false,
     )
     .unwrap();
-    repo.create_tracked_folder(pair.id, "folder-only", Some("/published/folder-only"))
+    repo.create_tracked_folder(pair.id, "folder-only", Some("/virtual/folder-only"))
         .unwrap();
 
     let app = make_app!(repo).await;
 
     let req = test::TestRequest::get()
-        .uri("/api/v1/virtual-paths/tree?parent=/published")
+        .uri("/api/v1/virtual-paths/tree?parent=/virtual")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -1167,7 +1063,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         .iter()
         .find(|child| child["name"] == "docs")
         .expect("docs child should exist");
-    assert_eq!(docs["path"], "/published/docs");
+    assert_eq!(docs["path"], "/virtual/docs");
     assert_eq!(docs["item_count"], 2);
     assert_eq!(docs["has_children"], true);
 
@@ -1175,7 +1071,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         .iter()
         .find(|child| child["name"] == "media")
         .expect("media child should exist");
-    assert_eq!(media["path"], "/published/media");
+    assert_eq!(media["path"], "/virtual/media");
     assert_eq!(media["item_count"], 1);
     assert_eq!(media["has_children"], true);
 
@@ -1183,12 +1079,12 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         .iter()
         .find(|child| child["name"] == "folder-only")
         .expect("folder-only child should exist");
-    assert_eq!(folder_only["path"], "/published/folder-only");
+    assert_eq!(folder_only["path"], "/virtual/folder-only");
     assert_eq!(folder_only["item_count"], 1);
     assert_eq!(folder_only["has_children"], false);
 
     let req = test::TestRequest::get()
-        .uri("/api/v1/virtual-paths/tree?parent=/published/docs")
+        .uri("/api/v1/virtual-paths/tree?parent=/virtual/docs")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -1200,7 +1096,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         .iter()
         .find(|child| child["name"] == "a.txt")
         .expect("a.txt child should exist");
-    assert_eq!(a_txt["path"], "/published/docs/a.txt");
+    assert_eq!(a_txt["path"], "/virtual/docs/a.txt");
     assert_eq!(a_txt["item_count"], 1);
     assert_eq!(a_txt["has_children"], false);
 
@@ -1208,7 +1104,7 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
         .iter()
         .find(|child| child["name"] == "archive")
         .expect("archive child should exist");
-    assert_eq!(archive["path"], "/published/docs/archive");
+    assert_eq!(archive["path"], "/virtual/docs/archive");
     assert_eq!(archive["item_count"], 1);
     assert_eq!(archive["has_children"], true);
 }

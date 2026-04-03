@@ -234,7 +234,7 @@ File: `tests/integration/scaling_100k.rs`
 This test seeds `100,000` tracked-file rows and validates the scaled tracking endpoint (`GET /api/v1/tracking/items`) for:
 
 - server pagination behavior (including per-page cap to 200)
-- publish-path filtering and source filtering correctness
+- virtual-path filtering and source filtering correctness
 - targeted search correctness
 - query-duration budget checks for representative list/filter requests
 

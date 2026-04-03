@@ -8,7 +8,6 @@ import { TrackingWorkspacePage } from '@/pages/TrackingWorkspacePage'
 import { DrivesPage } from '@/pages/DrivesPage'
 import { IntegrityPage } from '@/pages/IntegrityPage'
 import { SyncQueuePage } from '@/pages/SyncQueuePage'
-import { VirtualPathManagerPage } from '@/pages/VirtualPathManagerPage'
 import { SchedulerPage } from '@/pages/SchedulerPage'
 import { LogsPage } from '@/pages/LogsPage'
 import { DatabaseBackupsPage } from '@/pages/DatabaseBackupsPage'
@@ -33,7 +32,7 @@ export default function App() {
           <Route path="/folders" element={<Navigate to="/files" replace />} />
           <Route path="/integrity" element={<IntegrityPage />} />
           <Route path="/sync" element={<SyncQueuePage />} />
-          <Route path="/virtual-paths" element={<VirtualPathManagerPage />} />
+          <Route path="/virtual-paths" element={<Navigate to="/files" replace />} />
           <Route path="/scheduler" element={<SchedulerPage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/database" element={<DatabaseBackupsPage />} />

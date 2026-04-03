@@ -141,16 +141,16 @@ fn test_folders_add_with_virtual_path() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
+    let virtual_root = TempDir::new().unwrap();
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("photos")).unwrap();
-    let publish_path = publish_root.path().join("gallery");
+    let virtual_path_on_disk = virtual_root.path().join("gallery");
 
     handle(
         FoldersCommand::Add(AddArgs {
             drive_pair_id: pair.id,
             folder_path: "photos".to_string(),
-            virtual_path: Some(publish_path.to_str().unwrap().to_string()),
+            virtual_path: Some(virtual_path_on_disk.to_str().unwrap().to_string()),
         }),
         &repo,
     )
@@ -159,9 +159,9 @@ fn test_folders_add_with_virtual_path() {
     let folders = repo.list_tracked_folders().unwrap();
     assert_eq!(
         folders[0].virtual_path,
-        Some(publish_path.to_string_lossy().to_string())
+        Some(virtual_path_on_disk.to_string_lossy().to_string())
     );
-    assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("photos"));
+    assert_eq!(fs::read_link(&virtual_path_on_disk).unwrap(), primary.path().join("photos"));
 }
 
 #[test]

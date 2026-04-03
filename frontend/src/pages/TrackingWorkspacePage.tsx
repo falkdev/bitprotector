@@ -113,7 +113,7 @@ function FolderVirtualPathModal({
   const submit = async () => {
     const trimmed = value.trim()
     if (trimmed && !trimmed.startsWith('/')) {
-      toast.error('Publish path must be absolute')
+      toast.error('Virtual path must be absolute')
       return
     }
 
@@ -130,15 +130,15 @@ function FolderVirtualPathModal({
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-          <h2 className="mb-1 text-lg font-semibold">Set Folder Publish Path</h2>
+          <h2 className="mb-1 text-lg font-semibold">Set Folder Virtual Path</h2>
           <p className="mb-4 truncate font-mono text-sm text-gray-500">{folder.folder_path}</p>
           <div className="space-y-3">
-            <label htmlFor="folder-publish-path" className="mb-1 block text-sm font-medium text-gray-700">
-              Publish Path
+            <label htmlFor="folder-virtual-path" className="mb-1 block text-sm font-medium text-gray-700">
+              Virtual Path
             </label>
             <div className="flex gap-2">
               <input
-                id="folder-publish-path"
+                id="folder-virtual-path"
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
                 placeholder="/docs"
@@ -152,7 +152,7 @@ function FolderVirtualPathModal({
                 Browse
               </button>
             </div>
-            <p className="text-xs text-gray-500">Leave empty to clear the folder publish path.</p>
+            <p className="text-xs text-gray-500">Leave empty to clear the folder virtual path.</p>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <button
@@ -175,12 +175,12 @@ function FolderVirtualPathModal({
       </div>
       <PathPickerDialog
         open={showPicker}
-        title="Select Folder Publish Path"
-        description="Choose the absolute publish location for this tracked folder."
+        title="Select Folder Virtual Path"
+        description="Choose the absolute virtual path for this tracked folder."
         mode="directory"
         value={value}
         startPath={value || '/'}
-        confirmLabel="Use Publish Path"
+        confirmLabel="Use Virtual Path"
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
           setValue(path)
@@ -191,7 +191,7 @@ function FolderVirtualPathModal({
   )
 }
 
-function PublishTree({
+function VirtualPathTree({
   selected,
   onSelect,
 }: {
@@ -214,7 +214,7 @@ function PublishTree({
       const children = response.children.map((child) => ({ ...child, loaded: false, children: [] }))
       setNodes((current) => updateTreeChildren(current, parent, children))
     } catch {
-      toast.error('Failed to load publish path tree')
+      toast.error('Failed to load virtual path tree')
     } finally {
       setNodes((current) => setTreeLoading(current, parent, false))
     }
@@ -263,10 +263,10 @@ function PublishTree({
         }`}
         onClick={() => onSelect('')}
       >
-        All publish paths
+        All virtual paths
       </button>
       {nodes.length === 0 ? (
-        <div className="px-2 py-2 text-xs text-gray-500">No publish paths assigned</div>
+        <div className="px-2 py-2 text-xs text-gray-500">No virtual paths assigned</div>
       ) : (
         nodes.map((node) => renderNode(node, 0))
       )}
@@ -296,7 +296,7 @@ export function TrackingWorkspacePage() {
   const [deleteTarget, setDeleteTarget] = useState<TrackingItem | null>(null)
   const [filePathModal, setFilePathModal] = useState<TrackedFile | null>(null)
 
-  const publishPrefix = params.publish_prefix ?? ''
+  const virtualPrefix = params.virtual_prefix ?? ''
 
   const load = useCallback(async (nextParams: TrackingListParams) => {
     setLoading(true)
@@ -394,10 +394,10 @@ export function TrackingWorkspacePage() {
   const handleSetFolderVirtualPath = async (folderId: number, virtualPath: string | null) => {
     try {
       await foldersApi.update(folderId, { virtual_path: virtualPath })
-      toast.success('Folder publish path updated')
+      toast.success('Folder virtual path updated')
       await load(params)
     } catch {
-      toast.error('Failed to update folder publish path')
+      toast.error('Failed to update folder virtual path')
     }
   }
 
@@ -432,10 +432,10 @@ export function TrackingWorkspacePage() {
   const handleSetFileVirtualPath = async (fileId: number, vpath: string) => {
     try {
       await virtualPathsApi.set(fileId, { virtual_path: vpath })
-      toast.success('Publish path updated')
+      toast.success('Virtual path updated')
       await load(params)
     } catch {
-      toast.error('Failed to update publish path')
+      toast.error('Failed to update virtual path')
     }
   }
 
@@ -443,11 +443,11 @@ export function TrackingWorkspacePage() {
     <div className="flex h-full gap-0" data-testid="file-browser-page">
       <aside className="w-64 shrink-0 overflow-auto border-r border-gray-200 bg-white">
         <div className="border-b p-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Publish paths</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Virtual paths</h2>
         </div>
-        <PublishTree
-          selected={publishPrefix}
-          onSelect={(path) => updateParams({ publish_prefix: path || undefined, page: 1 })}
+        <VirtualPathTree
+          selected={virtualPrefix}
+          onSelect={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
         />
       </aside>
 
@@ -455,8 +455,8 @@ export function TrackingWorkspacePage() {
         <div className="border-b bg-white px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-4">
             <BreadcrumbNav
-              path={publishPrefix}
-              onNavigate={(path) => updateParams({ publish_prefix: path || undefined, page: 1 })}
+              path={virtualPrefix}
+              onNavigate={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
             />
             <div className="flex items-center gap-2">
               <button
@@ -523,23 +523,23 @@ export function TrackingWorkspacePage() {
               <option value="both">Both</option>
             </select>
             <select
-              value={params.published == null ? 'all' : params.published ? 'yes' : 'no'}
+              value={params.has_virtual_path == null ? 'all' : params.has_virtual_path ? 'yes' : 'no'}
               onChange={(event) => {
                 const value = event.target.value
                 updateParams({
-                  published: value === 'all' ? undefined : value === 'yes',
+                  has_virtual_path: value === 'all' ? undefined : value === 'yes',
                 })
               }}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
-              <option value="all">Published + Unpublished</option>
-              <option value="yes">Published only</option>
-              <option value="no">Unpublished only</option>
+              <option value="all">With + Without Virtual Path</option>
+              <option value="yes">With Virtual Path</option>
+              <option value="no">Without Virtual Path</option>
             </select>
             <input
-              value={params.publish_prefix ?? ''}
-              onChange={(event) => updateParams({ publish_prefix: event.target.value || undefined })}
-              placeholder="Publish prefix (/docs)"
+              value={params.virtual_prefix ?? ''}
+              onChange={(event) => updateParams({ virtual_prefix: event.target.value || undefined })}
+              placeholder="Virtual path prefix (/docs)"
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
             />
           </div>
@@ -580,8 +580,8 @@ export function TrackingWorkspacePage() {
                     cell: (item) => driveName(item.drive_pair_id),
                   },
                   {
-                    key: 'publish',
-                    header: 'Publish Path',
+                    key: 'virtual_path',
+                    header: 'Virtual Path',
                     cell: (item) =>
                       item.virtual_path ? (
                         <span className="font-mono text-xs">{item.virtual_path}</span>
@@ -721,8 +721,8 @@ export function TrackingWorkspacePage() {
         title={deleteTarget?.kind === 'folder' ? 'Remove tracked folder' : 'Remove tracked file'}
         description={
           deleteTarget?.kind === 'folder'
-            ? `Remove tracked folder \"${deleteTarget.path}\"?`
-            : `Remove tracked file \"${deleteTarget?.path}\"?`
+            ? `Remove tracked folder "${deleteTarget.path}"?`
+            : `Remove tracked file "${deleteTarget?.path}"?`
         }
         destructive
         onConfirm={handleDelete}
@@ -774,7 +774,7 @@ function FileVirtualPathModal({
     const trimmed = value.trim()
     if (!trimmed) return
     if (!trimmed.startsWith('/')) {
-      toast.error('Publish path must be absolute')
+      toast.error('Virtual path must be absolute')
       return
     }
 
@@ -791,16 +791,16 @@ function FileVirtualPathModal({
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
-          <h2 className="text-lg font-semibold">Publish File At Path</h2>
+          <h2 className="text-lg font-semibold">Set File Virtual Path</h2>
           <p className="mt-1 font-mono text-sm text-muted-foreground">{file.relative_path}</p>
 
           <div className="mt-4 space-y-3">
-            <label htmlFor="file-publish-path" className="mb-1 block text-sm font-medium">
-              Publish Path
+            <label htmlFor="file-virtual-path" className="mb-1 block text-sm font-medium">
+              Virtual Path
             </label>
             <div className="flex gap-2">
               <input
-                id="file-publish-path"
+                id="file-virtual-path"
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
                 placeholder="/docs/report.pdf"
@@ -837,12 +837,12 @@ function FileVirtualPathModal({
       </div>
       <PathPickerDialog
         open={showPicker}
-        title="Select File Publish Path"
-        description="Choose the absolute publish location for this tracked file."
+        title="Select File Virtual Path"
+        description="Choose the absolute virtual path for this tracked file."
         mode="file"
         value={value}
         startPath={value || '/'}
-        confirmLabel="Use Publish Path"
+        confirmLabel="Use Virtual Path"
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
           setValue(path)

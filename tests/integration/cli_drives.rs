@@ -173,8 +173,8 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
     let replacement = TempDir::new().unwrap();
-    let publish_root = TempDir::new().unwrap();
-    let publish_path = publish_root.path().join("docs/report.txt");
+    let virtual_root = TempDir::new().unwrap();
+    let virtual_path_on_disk = virtual_root.path().join("docs/report.txt");
 
     fs::write(primary.path().join("report.txt"), b"report").unwrap();
 
@@ -199,13 +199,13 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
             "virtual-paths",
             "set",
             "1",
-            publish_path.to_str().unwrap(),
+            virtual_path_on_disk.to_str().unwrap(),
         ])
         .assert()
         .success();
 
     assert_eq!(
-        fs::read_link(&publish_path).unwrap(),
+        fs::read_link(&virtual_path_on_disk).unwrap(),
         primary.path().join("report.txt"),
     );
 
@@ -222,7 +222,7 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
         .stdout(predicate::str::contains("confirmed failed on primary"));
 
     assert_eq!(
-        fs::read_link(&publish_path).unwrap(),
+        fs::read_link(&virtual_path_on_disk).unwrap(),
         secondary.path().join("report.txt"),
     );
 
@@ -247,7 +247,7 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
         b"report"
     );
     assert_eq!(
-        fs::read_link(&publish_path).unwrap(),
+        fs::read_link(&virtual_path_on_disk).unwrap(),
         replacement.path().join("report.txt"),
     );
 }

@@ -60,14 +60,14 @@ describe('TrackingWorkspacePage', () => {
     expect(within(folderRow).getAllByText('Folder').length).toBeGreaterThan(0)
   })
 
-  it('keeps absolute publish prefixes when selecting virtual tree nodes', async () => {
-    const seenPublishPrefixes: Array<string | null> = []
+  it('keeps absolute virtual prefixes when selecting virtual tree nodes', async () => {
+    const seenVirtualPrefixes: Array<string | null> = []
 
     server.use(
       api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
       api.get('/tracking/items', ({ request }) => {
-        const publishPrefix = new URL(request.url).searchParams.get('publish_prefix')
-        seenPublishPrefixes.push(publishPrefix)
+        const virtualPrefix = new URL(request.url).searchParams.get('virtual_prefix')
+        seenVirtualPrefixes.push(virtualPrefix)
         return HttpResponse.json(makeTrackingListResponse([]))
       }),
       api.get('/virtual-paths/tree', ({ request }) => {
@@ -89,11 +89,11 @@ describe('TrackingWorkspacePage', () => {
     await user.click(docsNode)
 
     await waitFor(() => {
-      expect(seenPublishPrefixes).toContain('/docs')
+      expect(seenVirtualPrefixes).toContain('/docs')
     })
   })
 
-  it('shows folder publish path browse control in the set-path flow', async () => {
+  it('shows folder virtual path browse control in the set-path flow', async () => {
     const user = userEvent.setup()
 
     mockBaseTrackingPage([
@@ -113,7 +113,7 @@ describe('TrackingWorkspacePage', () => {
     await screen.findByTestId('folder-row-31')
     await user.click(screen.getByRole('button', { name: 'Set Path' }))
 
-    await screen.findByText('Set Folder Publish Path')
+    await screen.findByText('Set Folder Virtual Path')
     expect(screen.getByRole('button', { name: 'Browse' })).toBeInTheDocument()
   })
 })

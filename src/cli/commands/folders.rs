@@ -24,7 +24,7 @@ pub struct AddArgs {
     pub drive_pair_id: i64,
     /// Folder path relative to the primary drive root
     pub folder_path: String,
-    /// Exact publish path for the tracked folder
+    /// Exact virtual path for the tracked folder
     #[arg(long)]
     pub virtual_path: Option<String>,
 }
@@ -260,23 +260,23 @@ mod tests {
         let repo = make_repo();
         let primary = TempDir::new().unwrap();
         let secondary = TempDir::new().unwrap();
-        let publish_root = TempDir::new().unwrap();
+        let virtual_root = TempDir::new().unwrap();
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("photos")).unwrap();
-        let publish_path = publish_root.path().join("gallery");
+        let virtual_path_on_disk = virtual_root.path().join("gallery");
 
         handle(
             FoldersCommand::Add(AddArgs {
                 drive_pair_id: pair.id,
                 folder_path: "photos".to_string(),
-                virtual_path: Some(publish_path.to_str().unwrap().to_string()),
+                virtual_path: Some(virtual_path_on_disk.to_str().unwrap().to_string()),
             }),
             &repo,
         )
         .unwrap();
 
         let folders = repo.list_tracked_folders().unwrap();
-        assert_eq!(folders[0].virtual_path.as_deref(), Some(publish_path.to_str().unwrap()));
-        assert_eq!(fs::read_link(&publish_path).unwrap(), primary.path().join("photos"));
+        assert_eq!(folders[0].virtual_path.as_deref(), Some(virtual_path_on_disk.to_str().unwrap()));
+        assert_eq!(fs::read_link(&virtual_path_on_disk).unwrap(), primary.path().join("photos"));
     }
 }

@@ -637,43 +637,6 @@ impl Repository {
         Ok(())
     }
 
-    pub fn list_tracked_files_in_folder(
-        &self,
-        drive_pair_id: i64,
-        folder_path: &str,
-    ) -> anyhow::Result<Vec<TrackedFile>> {
-        let conn = self.conn()?;
-        let normalized = folder_path.trim_end_matches('/');
-        let mut stmt = conn.prepare(
-            "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
-                    is_mirrored, tracked_direct, tracked_via_folder,
-                    last_verified, created_at, updated_at
-             FROM tracked_files
-             WHERE drive_pair_id=?1
-               AND (relative_path=?2 OR relative_path LIKE ?2 || '/%')
-             ORDER BY id",
-        )?;
-        let files = stmt
-            .query_map(rusqlite::params![drive_pair_id, normalized], |row| {
-                Ok(TrackedFile {
-                    id: row.get(0)?,
-                    drive_pair_id: row.get(1)?,
-                    relative_path: row.get(2)?,
-                    checksum: row.get(3)?,
-                    file_size: row.get(4)?,
-                    virtual_path: row.get(5)?,
-                    is_mirrored: row.get::<_, i64>(6)? != 0,
-                    tracked_direct: row.get::<_, i64>(7)? != 0,
-                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
-                    last_verified: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(files)
-    }
-
     pub fn delete_tracked_file(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
@@ -746,8 +709,8 @@ impl Repository {
         &self,
         drive_pair_id: Option<i64>,
         query: Option<&str>,
-        publish_prefix: Option<&str>,
-        published: Option<bool>,
+        virtual_prefix: Option<&str>,
+        has_virtual_path: Option<bool>,
         item_kind: Option<&str>,
         source: Option<&str>,
         page: i64,
@@ -786,12 +749,12 @@ impl Repository {
                 ));
                 params.push(Value::Text(format!("%{}%", raw_q)));
             }
-            if let Some(prefix) = publish_prefix.map(str::trim).filter(|p| !p.is_empty()) {
+            if let Some(prefix) = virtual_prefix.map(str::trim).filter(|p| !p.is_empty()) {
                 conditions.push(format!("virtual_path LIKE ?{} || '%'", params.len() + 1));
                 params.push(Value::Text(prefix.to_string()));
             }
-            if let Some(is_published) = published {
-                conditions.push(if is_published {
+            if let Some(has_path) = has_virtual_path {
+                conditions.push(if has_path {
                     "virtual_path IS NOT NULL".to_string()
                 } else {
                     "virtual_path IS NULL".to_string()
@@ -850,12 +813,12 @@ impl Repository {
                 ));
                 params.push(Value::Text(format!("%{}%", raw_q)));
             }
-            if let Some(prefix) = publish_prefix.map(str::trim).filter(|p| !p.is_empty()) {
+            if let Some(prefix) = virtual_prefix.map(str::trim).filter(|p| !p.is_empty()) {
                 conditions.push(format!("virtual_path LIKE ?{} || '%'", params.len() + 1));
                 params.push(Value::Text(prefix.to_string()));
             }
-            if let Some(is_published) = published {
-                conditions.push(if is_published {
+            if let Some(has_path) = has_virtual_path {
+                conditions.push(if has_path {
                     "virtual_path IS NOT NULL".to_string()
                 } else {
                     "virtual_path IS NULL".to_string()

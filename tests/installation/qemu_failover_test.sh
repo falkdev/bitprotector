@@ -246,7 +246,7 @@ echo "=== Scenario 1: Planned primary failover and replacement rebuild ==="
 ssh_vm '
 set -euo pipefail
 DB=/tmp/failover.db
-PUBLISH_FILE=/tmp/bitprotector-publish/docs/report.txt
+VIRTUAL_FILE=/tmp/bitprotector-virtual/docs/report.txt
 
 mkdir -p /mnt/primary/docs
 printf "before failover\n" > /mnt/primary/docs/report.txt
@@ -254,17 +254,17 @@ printf "before failover\n" > /mnt/primary/docs/report.txt
 bitprotector --db "${DB}" drives add lab /mnt/primary /mnt/mirror
 bitprotector --db "${DB}" files track 1 docs/report.txt --mirror
 bitprotector --db "${DB}" folders add 1 docs
-bitprotector --db "${DB}" virtual-paths set 1 "${PUBLISH_FILE}"
+bitprotector --db "${DB}" virtual-paths set 1 "${VIRTUAL_FILE}"
 
-readlink -f "${PUBLISH_FILE}" | grep -q "^/mnt/primary/"
-cat "${PUBLISH_FILE}" | grep -q "before failover"
+readlink -f "${VIRTUAL_FILE}" | grep -q "^/mnt/primary/"
+cat "${VIRTUAL_FILE}" | grep -q "before failover"
 
 bitprotector --db "${DB}" drives replace mark 1 --role primary
 bitprotector --db "${DB}" drives replace confirm 1 --role primary
 bitprotector --db "${DB}" drives show 1 | grep -q "Active Role:     secondary"
-readlink -f "${PUBLISH_FILE}" | grep -q "^/mnt/mirror/"
+readlink -f "${VIRTUAL_FILE}" | grep -q "^/mnt/mirror/"
 
-printf "after planned failover\n" >> "${PUBLISH_FILE}"
+printf "after planned failover\n" >> "${VIRTUAL_FILE}"
 bitprotector --db "${DB}" folders scan 1
 bitprotector --db "${DB}" files show 1 | grep -q "Mirrored:      no"
 
@@ -272,8 +272,8 @@ bitprotector --db "${DB}" drives replace assign 1 --role primary /mnt/replacemen
 bitprotector --db "${DB}" sync process
 
 test -f /mnt/replacement-primary/docs/report.txt
-diff -u "${PUBLISH_FILE}" /mnt/replacement-primary/docs/report.txt
-readlink -f "${PUBLISH_FILE}" | grep -q "^/mnt/replacement-primary/"
+diff -u "${VIRTUAL_FILE}" /mnt/replacement-primary/docs/report.txt
+readlink -f "${VIRTUAL_FILE}" | grep -q "^/mnt/replacement-primary/"
 '
 
 echo "PASS: planned failover and rebuild completed"
@@ -287,15 +287,15 @@ sleep 5
 ssh_vm '
 set -euo pipefail
 DB=/tmp/failover.db
-PUBLISH_FILE=/tmp/bitprotector-publish/docs/report.txt
+VIRTUAL_FILE=/tmp/bitprotector-virtual/docs/report.txt
 
 # Existing open file handles may fail after sudden device loss.
 # We assert the supported contract: a follow-up operation triggers failover,
-# then new opens through the publish path work from the surviving mirror.
+# then new opens through the virtual path work from the surviving mirror.
 bitprotector --db "${DB}" integrity check 1
 bitprotector --db "${DB}" drives show 1 | grep -q "Active Role:     secondary"
-readlink -f "${PUBLISH_FILE}" | grep -q "^/mnt/mirror/"
-cat "${PUBLISH_FILE}" | grep -q "after planned failover"
+readlink -f "${VIRTUAL_FILE}" | grep -q "^/mnt/mirror/"
+cat "${VIRTUAL_FILE}" | grep -q "after planned failover"
 '
 
 echo "PASS: emergency failover redirected future opens to the mirror"

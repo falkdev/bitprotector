@@ -118,7 +118,7 @@ export function createQemuContext(runId: string): QemuContext {
     mirrorRoot: `/mnt/mirror/e2e/${runId}`,
     replacementPrimaryRoot: `/mnt/replacement-primary/e2e/${runId}`,
     spareRoot: `/mnt/spare1/e2e/${runId}`,
-    publishRoot: `/tmp/bitprotector-publish/${runId}`,
+    virtualRoot: `/tmp/bitprotector-virtual/${runId}`,
   }
 
   return {
@@ -138,8 +138,8 @@ export function createQemuContext(runId: string): QemuContext {
       const absoluteFilePath = `${primaryPath}/${fileRelativePath}`
       const secondaryFilePath = `${secondaryPath}/${fileRelativePath}`
       const backupPath = `${basePaths.spareRoot}/backups`
-      const virtualPath = `${basePaths.publishRoot}/files/${fileName}`
-      const folderVirtualPath = `${basePaths.publishRoot}/folders/${folderRelativePath}`
+      const virtualPath = `${basePaths.virtualRoot}/files/${fileName}`
+      const folderVirtualPath = `${basePaths.virtualRoot}/folders/${folderRelativePath}`
 
       await runGuestScript(`
 PRIMARY_PATH=${shellQuote(primaryPath)}
@@ -209,7 +209,7 @@ sudo rm -rf \
   ${shellQuote(basePaths.mirrorRoot)} \
   ${shellQuote(basePaths.replacementPrimaryRoot)} \
   ${shellQuote(basePaths.spareRoot)} \
-  ${shellQuote(basePaths.publishRoot)}
+  ${shellQuote(basePaths.virtualRoot)}
 `)
     },
   }

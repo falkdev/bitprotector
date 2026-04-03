@@ -2,7 +2,7 @@
 
 ## Distributed File Mirror and Integrity Protection System
 
-> Historical planning note: sections that mention `symlink_base`, `auto_virtual_path`, `default_virtual_base`, or hidden virtual-path roots predate the literal publish-path overhaul. The current behavior is documented in `README.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/CONFIGURATION.md`.
+> Historical planning note: sections that mention `symlink_base`, `auto_virtual_path`, `default_virtual_base`, or hidden virtual-path roots predate the literal virtual-path overhaul. The current behavior is documented in `README.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/CONFIGURATION.md`.
 
 ---
 
@@ -101,7 +101,7 @@ frontend/
 │   │   ├── auth.ts                  # Auth API calls (login, validate)
 │   │   ├── drives.ts               # Drive pair CRUD + replacement workflow
 │   │   ├── files.ts                # File tracking + mirror API calls
-│   │   ├── virtual-paths.ts        # Virtual path set/remove/bulk/refresh
+│   │   ├── virtual-paths.ts        # Virtual path set/remove/tree
 │   │   ├── folders.ts              # Tracked folder CRUD + scan
 │   │   ├── integrity.ts            # Integrity check (single + batch)
 │   │   ├── sync.ts                 # Sync queue + process + run task
@@ -113,7 +113,6 @@ frontend/
 │   │   ├── auth-store.ts           # Auth state (token, user)
 │   │   ├── drives-store.ts         # Drive pairs state
 │   │   ├── files-store.ts          # Tracked files state
-│   │   ├── virtual-paths-store.ts  # Virtual path state
 │   │   ├── sync-store.ts           # Sync queue state
 │   │   ├── logs-store.ts           # Event logs state
 │   │   └── status-store.ts         # System status state
@@ -127,8 +126,7 @@ frontend/
 │   │   ├── SyncQueuePage.tsx
 │   │   ├── SchedulerPage.tsx
 │   │   ├── LogsPage.tsx
-│   │   ├── DatabaseBackupsPage.tsx
-│   │   └── VirtualPathManagerPage.tsx
+│   │   └── DatabaseBackupsPage.tsx
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── AppLayout.tsx        # Main layout with sidebar
@@ -159,10 +157,6 @@ frontend/
 │   │   │   ├── SyncQueueTable.tsx
 │   │   │   ├── SyncQueueItem.tsx
 │   │   │   └── ResolveDialog.tsx
-│   │   ├── virtual-paths/
-│   │   │   ├── VirtualPathTree.tsx
-│   │   │   ├── BulkAssignDialog.tsx
-│   │   │   └── PathMappingForm.tsx
 │   │   ├── scheduler/
 │   │   │   ├── ScheduleList.tsx
 │   │   │   └── ScheduleForm.tsx
@@ -191,7 +185,7 @@ frontend/
 │   │   ├── drive.ts                 # Drive pair with states + replacement types
 │   │   ├── file.ts                  # Tracked file (relative_path, checksum, etc.)
 │   │   ├── folder.ts                # Tracked folder + scan result
-│   │   ├── virtual-path.ts          # Virtual path bulk request/response types
+│   │   ├── virtual-path.ts          # Virtual path request/response types
 │   │   ├── integrity.ts             # Integrity result + all status values
 │   │   ├── sync.ts                  # Sync queue item + resolve request
 │   │   ├── scheduler.ts             # Schedule config types
@@ -221,7 +215,6 @@ frontend/
 │       ├── drives.spec.ts
 │       ├── integrity.spec.ts
 │       ├── sync-queue.spec.ts
-│       ├── virtual-paths.spec.ts
 │       ├── scheduler.spec.ts
 │       ├── logs.spec.ts
 │       └── database-backups.spec.ts
@@ -428,31 +421,6 @@ frontend/
 - "Add Queue Item" form → `POST /api/v1/sync/queue` with `tracked_file_id` and `action`
 
 **Data Source:** `GET /api/v1/sync/queue`, `POST /api/v1/sync/process`, `POST /api/v1/sync/run/{task}`, `POST /api/v1/sync/queue/{id}/resolve`
-
----
-
-### 2.8 Virtual Path Manager Page (`VirtualPathManagerPage.tsx`)
-
-**Purpose:** Dedicated page for managing virtual path assignments, including bulk operations.
-
-**Components:**
-
-- `VirtualPathTree` — tree view of current virtual path structure (built from `virtual_path` fields on tracked files)
-- `PathMappingForm` — form to assign/edit a single file's virtual path
-  - Fields: file selector, `virtual_path`, optional `symlink_base` override
-  - Calls `PUT /virtual-paths/{file_id}`
-- `BulkAssignDialog` — dialog for bulk operations:
-  - **Explicit bulk** (`POST /virtual-paths/bulk`): array of `{ file_id, virtual_path }` entries
-  - **Folder-based bulk** (`POST /virtual-paths/bulk-from-real`): select drive pair (`drive_pair_id`), folder path (`folder_path`), virtual base (`virtual_base`)
-  - Both return `{ succeeded: [file_ids], failed: [{ file_id, error }] }`
-  - Preview of resulting mappings before applying
-- `RemoveVirtualPath` — action to remove a file's virtual path: `DELETE /virtual-paths/{file_id}`
-- "Refresh Symlinks" button → `POST /virtual-paths/refresh` (regenerates all symlinks on disk)
-  - Returns: `{ created, removed, errors }`
-
-**Data Source:** `GET /api/v1/files` (files with virtual_path), `PUT /api/v1/virtual-paths/{file_id}`, `DELETE /api/v1/virtual-paths/{file_id}`, `POST /api/v1/virtual-paths/bulk`, `POST /api/v1/virtual-paths/bulk-from-real`, `POST /api/v1/virtual-paths/refresh`
-
-> **Note:** There is no dedicated `GET /virtual-paths` list endpoint. Virtual path data is obtained from the `virtual_path` field on tracked files (`GET /files?virtual_prefix=...`). The `symlink_base` parameter can optionally override the default symlink directory on any virtual path operation.
 
 ---
 
@@ -680,9 +648,8 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 
 1. Implement file types (`types/file.ts` — `id`, `drive_pair_id`, `relative_path`, `checksum`, `file_size`, `virtual_path`, `is_mirrored`, `last_verified`, `created_at`, `updated_at`; `types/virtual-path.ts`)
 2. Implement files API client (`api/files.ts` — list with pagination, get, track, mirror, delete)
-3. Implement virtual paths API client (`api/virtual-paths.ts` — set, remove, bulk, bulk-from-real, refresh)
+3. Implement virtual paths API client (`api/virtual-paths.ts` — set, remove, tree)
 4. Implement files store (`stores/files-store.ts`)
-5. Implement virtual paths store (`stores/virtual-paths-store.ts` — built from file virtual_path fields)
 6. Implement `FileBrowserPage.tsx`
 7. Implement `FileTree.tsx` — virtual path tree sidebar (built from `virtual_path` fields on files)
 8. Implement `BreadcrumbNav.tsx`
@@ -730,36 +697,6 @@ Used for monitoring changing state (sync queue progress, system status refresh):
 - E2E: Edit virtual path for a file
 
 **Commit:** `feat: file browser details panel and file actions`
-
----
-
-### Milestone 7: Virtual Path Management
-
-**Objective:** Implement dedicated virtual path management with bulk operations.
-
-**Steps:**
-
-1. Implement `VirtualPathManagerPage.tsx`
-2. Implement `VirtualPathTree.tsx` — full tree view (built from file `virtual_path` fields)
-3. Implement `PathMappingForm.tsx` — single file virtual path assignment via `PUT /virtual-paths/{file_id}`
-4. Implement `BulkAssignDialog.tsx`:
-   - **Explicit bulk mode** — list of `{ file_id, virtual_path }` entries → `POST /virtual-paths/bulk`
-   - **Folder-based mode** — drive pair selector, `folder_path`, `virtual_base` → `POST /virtual-paths/bulk-from-real`
-   - Both return `{ succeeded: [...], failed: [...] }`
-   - Preview table of resulting mappings
-   - Apply button
-5. Implement `RemoveVirtualPath` action → `DELETE /virtual-paths/{file_id}`
-6. Implement "Refresh Symlinks" action → `POST /virtual-paths/refresh`
-
-**Tests:**
-
-- Component: VirtualPathTree — renders full path hierarchy
-- Component: PathMappingForm — validates and submits path mapping
-- Component: BulkAssignDialog — preview shows correct computed paths
-- Component: BulkAssignDialog — apply triggers correct API call (bulk or bulk-from-real)
-- E2E: Bulk assign virtual paths from folder, verify preview, apply
-
-**Commit:** `feat: virtual path manager with bulk assignment and symlink refresh`
 
 ---
 
@@ -989,7 +926,6 @@ Each E2E spec covers a full user workflow:
 | `drives.spec.ts`           | Create, edit, delete drive pair; replacement workflow  |
 | `integrity.spec.ts`        | Trigger single + batch check, view results            |
 | `sync-queue.spec.ts`       | View queue, filter, resolve user_action_required item |
-| `virtual-paths.spec.ts`    | Assign path, bulk assign, bulk-from-real, refresh     |
 | `scheduler.spec.ts`        | Create, toggle, delete schedule                       |
 | `logs.spec.ts`             | Filter by type, date range, expand details            |
 | `database-backups.spec.ts` | Add destination, trigger backup with db_path, results |

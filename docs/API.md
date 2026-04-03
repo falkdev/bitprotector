@@ -362,9 +362,9 @@ List tracking items across files and folders in one response.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `drive_id` | integer | Filter by drive pair ID |
-| `q` | string | Case-insensitive contains match against tracked path and publish path |
-| `publish_prefix` | string | Filter to publish paths under this absolute prefix |
-| `published` | boolean | `true` = has publish path, `false` = no publish path |
+| `q` | string | Case-insensitive contains match against tracked path and virtual path |
+| `virtual_prefix` | string | Filter to virtual paths under this absolute prefix |
+| `has_virtual_path` | boolean | `true` = has virtual path, `false` = no virtual path |
 | `item_kind` | string | `file`, `folder`, or `all` (default) |
 | `source` | string | `direct`, `folder`, `both`, or `all` (default) |
 | `page` | integer | Page number (default: 1) |
@@ -382,7 +382,7 @@ List tracking items across files and folders in one response.
             "id": 1,
             "drive_pair_id": 1,
             "path": "docs/report.pdf",
-            "virtual_path": "/published/docs/report.pdf",
+            "virtual_path": "/virtual/docs/report.pdf",
             "is_mirrored": true,
             "tracked_direct": true,
             "tracked_via_folder": true,
@@ -395,7 +395,7 @@ List tracking items across files and folders in one response.
             "id": 2,
             "drive_pair_id": 1,
             "path": "docs",
-            "virtual_path": "/published/docs",
+            "virtual_path": "/virtual/docs",
             "is_mirrored": null,
             "tracked_direct": null,
             "tracked_via_folder": null,
@@ -535,7 +535,7 @@ Set or update the virtual path for a tracked file.
 }
 ```
 
-`virtual_path` must be an absolute path. BitProtector creates parent directories as needed, refuses to publish to `/`, and will not overwrite non-BitProtector filesystem entries.
+`virtual_path` must be an absolute path. BitProtector creates parent directories as needed, refuses using `/` as a virtual path, and will not overwrite non-BitProtector filesystem entries.
 
 **Response `200`:** Plain text confirmation.  
 **Errors:** `404 Not Found`, `500 Internal Server Error`
@@ -551,25 +551,9 @@ Remove the virtual path mapping (and its symlink) from a file.
 
 ---
 
-### POST `/virtual-paths/refresh`
-
-Regenerate all published symlinks on disk from the database at their stored literal paths. Useful after a restart, failover, or manual removal of the published symlinks.
-
-**Response `200`:**
-
-```json
-{
-    "created": 45,
-    "removed": 2,
-    "errors": []
-}
-```
-
----
-
 ### GET `/virtual-paths/tree`
 
-Return one lazy tree level of publish-path children under an absolute parent prefix.
+Return one lazy tree level of virtual-path children under an absolute parent prefix.
 
 **Query parameters:**
 
@@ -581,17 +565,17 @@ Return one lazy tree level of publish-path children under an absolute parent pre
 
 ```json
 {
-    "parent": "/published",
+    "parent": "/virtual",
     "children": [
         {
             "name": "docs",
-            "path": "/published/docs",
+            "path": "/virtual/docs",
             "item_count": 2,
             "has_children": true
         },
         {
             "name": "media",
-            "path": "/published/media",
+            "path": "/virtual/media",
             "item_count": 1,
             "has_children": true
         }
@@ -599,7 +583,7 @@ Return one lazy tree level of publish-path children under an absolute parent pre
 }
 ```
 
-`item_count` is the number of file/folder publish-path entries under that immediate child segment.
+`item_count` is the number of file/folder virtual-path entries under that immediate child segment.
 
 **Errors:** `400 Bad Request` (non-absolute `parent` or contains `..`)
 
@@ -665,7 +649,7 @@ Update a tracked folder's configuration. All fields are optional.
 
 ```json
 {
-    "virtual_path": "/published/documents"
+    "virtual_path": "/virtual/documents"
 }
 ```
 
