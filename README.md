@@ -184,6 +184,7 @@ The REST API remains available at `https://localhost:8443/api/v1`.
 
 In the web UI:
 
+- `/files` is the unified **Tracking Workspace** for both tracked files and tracked folders (`/folders` redirects to `/files`)
 - tracked file and tracked folder forms use a filesystem browser dialog powered by the server
 - drive pair and replacement-drive forms can also fill directory paths from the same browser
 - tracked file/folder submissions are validated against the selected drive pair's active root before they are stored

@@ -12,6 +12,7 @@
 - [Health](#health)
 - [Drive Pairs](#drive-pairs)
 - [Filesystem Browser](#filesystem-browser)
+- [Tracking Workspace](#tracking-workspace)
 - [File Tracking](#file-tracking)
 - [Virtual Paths](#virtual-paths)
 - [Tracked Folders](#tracked-folders)
@@ -52,11 +53,11 @@ Authenticate with a local system account.
 {
     "token": "<jwt>",
     "username": "alice",
-    "expires_in": 86400
+    "expires_at": "2026-01-02T00:00:00Z"
 }
 ```
 
-`expires_in` is the token lifetime in seconds (fixed at 86400 — 24 hours).
+`expires_at` is an RFC3339 UTC timestamp. Token lifetime is fixed at 24 hours.
 
 **Errors:** `401 Unauthorized`
 
@@ -348,6 +349,69 @@ List one directory level of children for a host path.
 
 ---
 
+## Tracking Workspace
+
+The web UI unified tracking page reads from a mixed file+folder listing endpoint designed for server-side filtering and pagination.
+
+### GET `/tracking/items`
+
+List tracking items across files and folders in one response.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `drive_id` | integer | Filter by drive pair ID |
+| `q` | string | Case-insensitive contains match against tracked path and publish path |
+| `publish_prefix` | string | Filter to publish paths under this absolute prefix |
+| `published` | boolean | `true` = has publish path, `false` = no publish path |
+| `item_kind` | string | `file`, `folder`, or `all` (default) |
+| `source` | string | `direct`, `folder`, `both`, or `all` (default) |
+| `page` | integer | Page number (default: 1) |
+| `per_page` | integer | Items per page (default: 50, max: 200) |
+
+`source` filtering applies to file rows by provenance flags. Folder rows are included when `item_kind=folder`, or when `item_kind=all` with `source=all|folder`.
+
+**Response `200`:**
+
+```json
+{
+    "items": [
+        {
+            "kind": "file",
+            "id": 1,
+            "drive_pair_id": 1,
+            "path": "docs/report.pdf",
+            "virtual_path": "/published/docs/report.pdf",
+            "is_mirrored": true,
+            "tracked_direct": true,
+            "tracked_via_folder": true,
+            "source": "both",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        },
+        {
+            "kind": "folder",
+            "id": 2,
+            "drive_pair_id": 1,
+            "path": "docs",
+            "virtual_path": "/published/docs",
+            "is_mirrored": null,
+            "tracked_direct": null,
+            "tracked_via_folder": null,
+            "source": "folder",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }
+    ],
+    "total": 2,
+    "page": 1,
+    "per_page": 50
+}
+```
+
+---
+
 ## File Tracking
 
 ### GET `/files`
@@ -377,6 +441,8 @@ List tracked files with optional filtering and pagination.
             "file_size": 1048576,
             "virtual_path": "/docs/report.pdf",
             "is_mirrored": true,
+            "tracked_direct": true,
+            "tracked_via_folder": false,
             "last_verified": "2026-03-14T12:00:00Z",
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-03-14T12:00:00Z"
@@ -392,7 +458,7 @@ List tracked files with optional filtering and pagination.
 
 ### POST `/files`
 
-Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an initial mirror from the pair's current active side.
+Track a file by path. BitProtector computes its BLAKE3 checksum and records provenance/source flags.
 
 **Request body:**
 
@@ -411,8 +477,11 @@ Start tracking a file. BitProtector computes its BLAKE3 checksum and enqueues an
 
 Inputs that contain parent-directory traversal (`..`) or canonicalize outside the selected active root are rejected with `400 Bad Request`.
 
+If the file path is already tracked in the same drive pair, this endpoint is idempotent: it updates the existing row to `tracked_direct=true` and returns the existing file with `200 OK` (no duplicate row is created).
+
 **Response `201`:** Newly created file object.  
-**Errors:** `400 Bad Request`, `404 Not Found` (file not on primary drive), `409 Conflict`
+**Response `200`:** Existing tracked file promoted to direct tracking.  
+**Errors:** `400 Bad Request`, `404 Not Found` (drive pair not found)
 
 ---
 
@@ -495,6 +564,44 @@ Regenerate all published symlinks on disk from the database at their stored lite
     "errors": []
 }
 ```
+
+---
+
+### GET `/virtual-paths/tree`
+
+Return one lazy tree level of publish-path children under an absolute parent prefix.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `parent` | string | Absolute parent prefix (default: `/`) |
+
+**Response `200`:**
+
+```json
+{
+    "parent": "/published",
+    "children": [
+        {
+            "name": "docs",
+            "path": "/published/docs",
+            "item_count": 2,
+            "has_children": true
+        },
+        {
+            "name": "media",
+            "path": "/published/media",
+            "item_count": 1,
+            "has_children": true
+        }
+    ]
+}
+```
+
+`item_count` is the number of file/folder publish-path entries under that immediate child segment.
+
+**Errors:** `400 Bad Request` (non-absolute `parent` or contains `..`)
 
 ---
 

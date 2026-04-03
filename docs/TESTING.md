@@ -11,6 +11,7 @@ This document explains how to run the test suite, what each test category covers
 - [Integration Tests](#integration-tests)
   - [CLI Integration Tests](#cli-integration-tests)
   - [Auth / API Integration Tests](#auth--api-integration-tests)
+  - [Tracking Scale Integration Test (100k rows)](#tracking-scale-integration-test-100k-rows)
   - [Packaging Tests](#packaging-tests)
 - [Unit Tests](#unit-tests)
 - [QEMU Installation Tests](#qemu-installation-tests)
@@ -37,6 +38,7 @@ tests/
 │   ├── core_mirror.rs        # File mirroring and restore mechanics
 │   ├── core_change_detection.rs  # File change detection and re-mirroring
 │   ├── core_scheduler.rs     # Background task scheduling
+│   ├── scaling_100k.rs       # 100k-row tracking listing/filtering performance budgets
 │   └── packaging.rs          # Verifies packaging artifacts exist
 └── installation/
     ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
@@ -81,6 +83,7 @@ npm run test:e2e:qemu
 ```bash
 cargo test --test cli_drives
 cargo test --test cli_auth
+cargo test --test scaling_100k
 cargo test --test packaging
 ```
 
@@ -223,6 +226,19 @@ These tests cover the read-only filesystem route that powers the web UI path pic
 - directory-only filtering for directory pickers
 
 The tracked file/folder validation edge cases remain covered in `tests/integration/api_routes.rs`, where absolute-path submissions are accepted only when they resolve under the selected drive pair's active root.
+
+### Tracking Scale Integration Test (100k rows)
+
+File: `tests/integration/scaling_100k.rs`
+
+This test seeds `100,000` tracked-file rows and validates the scaled tracking endpoint (`GET /api/v1/tracking/items`) for:
+
+- server pagination behavior (including per-page cap to 200)
+- publish-path filtering and source filtering correctness
+- targeted search correctness
+- query-duration budget checks for representative list/filter requests
+
+The current budget enforced in the test is `3000 ms` per measured query path.
 
 ### Packaging Tests
 
@@ -374,9 +390,13 @@ The package is written to `target/debian/bitprotector_*.deb`.
 
 # Full failover / replacement suite
 ./tests/installation/qemu_failover_test.sh
+
+# Optional port/timeout overrides (useful when another VM is running)
+SSH_PORT=2224 API_PORT=18445 TIMEOUT=240 ./tests/installation/qemu_test.sh
+SSH_PORT=2225 API_PORT=18446 TIMEOUT=360 ./tests/installation/qemu_failover_test.sh
 ```
 
-Both scripts stream serial console lines to your terminal as the VM boots. The failover suite uses a longer default timeout because it provisions and mounts extra disks inside the guest.
+Both scripts stream serial console lines to your terminal as the VM boots. They also fail fast if the QEMU process exits early instead of waiting out the full timeout.
 
 ### What gets tested
 

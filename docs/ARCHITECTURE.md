@@ -80,7 +80,7 @@ HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, an
 | `auth.rs` | PAM authentication (`pam` crate) to verify system credentials. Issues and validates JWT tokens (`jsonwebtoken` crate). Provides `JwtAuth` as an actix-web extractor for protecting routes. |
 | `models.rs` | Request and response DTOs (`serde::Deserialize` / `Serialize`). Kept separate from the database structs in `src/db/`. |
 | `path_resolution.rs` | API-layer helper for validating host paths submitted by the web UI and converting tracked file/folder selections back into drive-relative paths. Rejects traversal and canonicalized escapes before core tracking logic runs. |
-| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. This now includes a read-only filesystem browse route used by the web UI path picker. See [API.md](API.md) for the full endpoint reference. |
+| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. This includes the read-only filesystem browse route (`/filesystem/children`), the mixed tracking listing route (`/tracking/items`), and lazy publish-tree route (`/virtual-paths/tree`) used by the web UI. See [API.md](API.md) for the full endpoint reference. |
 
 ### src/cli/
 
@@ -139,6 +139,8 @@ CREATE TABLE tracked_files (
     file_size     INTEGER NOT NULL,
     virtual_path  TEXT,
     is_mirrored   INTEGER NOT NULL DEFAULT 0,
+    tracked_direct INTEGER NOT NULL DEFAULT 1,
+    tracked_via_folder INTEGER NOT NULL DEFAULT 0,
     last_verified TEXT,
     created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -154,6 +156,15 @@ CREATE TABLE tracked_folders (
     created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(drive_pair_id, folder_path)
 );
+
+CREATE INDEX idx_tracked_files_virtual_path
+    ON tracked_files(virtual_path);
+
+CREATE INDEX idx_tracked_files_drive_relative
+    ON tracked_files(drive_pair_id, relative_path);
+
+CREATE INDEX idx_tracked_folders_drive_folder_path
+    ON tracked_folders(drive_pair_id, folder_path);
 
 -- Legacy migrated databases may still contain `auto_virtual_path` and
 -- `default_virtual_base`, but they are no longer used by the application.
