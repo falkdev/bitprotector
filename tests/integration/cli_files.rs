@@ -63,9 +63,18 @@ fn test_files_track_with_mirror() {
         .args(["files", "track", "--mirror", "1", "to_mirror.txt"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Mirrored:  yes"));
+        .stdout(predicate::str::contains("Mirror queued: yes"));
 
-    assert!(secondary.path().join("to_mirror.txt").exists());
+    assert!(
+        !secondary.path().join("to_mirror.txt").exists(),
+        "Track should enqueue mirror work, not copy immediately"
+    );
+
+    cmd(db.path().to_str().unwrap())
+        .args(["sync", "list", "--status", "pending"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mirror"));
 }
 
 #[test]

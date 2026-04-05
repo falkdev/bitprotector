@@ -19,6 +19,23 @@ pub async fn list_tracking_items(
     repo: web::Data<Repository>,
     query: web::Query<ListTrackingItemsQuery>,
 ) -> impl Responder {
+    if let Some(source) = query.source.as_deref() {
+        if !matches!(source, "all" | "direct" | "folder") {
+            return HttpResponse::BadRequest().json(ApiError::new(
+                "VALIDATION_ERROR",
+                "source must be one of: all, direct, folder",
+            ));
+        }
+    }
+    if let Some(kind) = query.item_kind.as_deref() {
+        if !matches!(kind, "all" | "file" | "folder") {
+            return HttpResponse::BadRequest().json(ApiError::new(
+                "VALIDATION_ERROR",
+                "item_kind must be one of: all, file, folder",
+            ));
+        }
+    }
+
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).clamp(1, 200);
 

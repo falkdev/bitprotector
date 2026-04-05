@@ -134,6 +134,13 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
          )",
         [],
     )?;
+    conn.execute(
+        "UPDATE tracked_files
+         SET tracked_via_folder = 0
+         WHERE tracked_direct = 1
+           AND tracked_via_folder = 1",
+        [],
+    )?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_queue (
@@ -449,8 +456,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             docs_flags,
-            (1, 1),
-            "File under tracked folder should be marked both"
+            (1, 0),
+            "Directly tracked files should stay direct-only after provenance backfill"
         );
 
         let misc_flags: (i64, i64) = conn

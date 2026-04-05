@@ -22,7 +22,7 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 ## How It Works
 
 1. You register **drive pairs** — a primary path and a secondary (mirror) path.
-2. You **track files** (individually or by folder). BitProtector computes a BLAKE3 checksum and mirrors the file to the secondary path.
+2. You **track files** (individually or by folder). BitProtector computes a BLAKE3 checksum and queues mirror work in `sync_queue` by default.
    - In the web UI, tracked file/folder forms now open a real server-side path picker backed by the host filesystem.
    - Those web selections may start as absolute host paths in the UI, but BitProtector still stores tracked file/folder paths relative to the selected drive pair's active root.
 3. Scheduled **integrity checks** re-hash both copies and compare them against the stored baseline:
@@ -115,22 +115,32 @@ sudo cp -r frontend/dist/* /var/lib/bitprotector/frontend/
 # 1. Register a drive pair
 bitprotector drives add mybackup /mnt/primary /mnt/mirror
 
-# 2. Track a file (mirrors it immediately)
+# 2. Track a file (queues mirror work by default)
 bitprotector files track <drive-pair-id> documents/report.pdf
 
-# 3. Track all files in a folder
+# 3. Track a folder, then scan it to discover files (scan queues mirror work)
 bitprotector folders add <drive-pair-id> documents
+bitprotector folders scan <folder-id>
 
-# 4. Run an integrity check
+# 4. Process queued mirror/sync work
+bitprotector sync process
+
+# 5. Optional: mirror immediately without waiting for queue processing
+bitprotector files mirror <file-id>
+
+# 6. Optional: mirror all unmirrored tracked files under one folder now
+bitprotector folders mirror <folder-id>
+
+# 7. Run an integrity check
 bitprotector integrity check all
 
-# 5. Show overall status
+# 8. Show overall status
 bitprotector status
 
-# 6. Assign a virtual path (creates a symlink exactly at this absolute path)
+# 9. Assign a virtual path (creates a symlink exactly at this absolute path)
 bitprotector virtual-paths set <file-id> /docs/report.pdf
 
-# 7. Planned primary replacement workflow
+# 10. Planned primary replacement workflow
 bitprotector drives replace mark <drive-pair-id> --role primary
 # (optional) cancel if you change your mind:
 bitprotector drives replace cancel <drive-pair-id> --role primary
@@ -188,6 +198,7 @@ In the web UI:
 - tracked file and tracked folder forms use a filesystem browser dialog powered by the server
 - drive pair and replacement-drive forms can also fill directory paths from the same browser
 - tracked file/folder submissions are validated against the selected drive pair's active root before they are stored
+- tracking and folder scans queue mirror work by default; use explicit mirror actions or sync processing for immediate copies
 
 For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
 

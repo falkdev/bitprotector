@@ -1,5 +1,5 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
-use crate::core::{change_detection, drive, tracker, virtual_path};
+use crate::core::{change_detection, drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -30,6 +30,11 @@ where
 struct ScanResult {
     new_files: usize,
     changed_files: usize,
+}
+
+#[derive(Serialize)]
+struct MirrorResult {
+    mirrored_files: usize,
 }
 
 /// GET /folders
@@ -161,6 +166,41 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
     })
 }
 
+/// POST /folders/{id}/mirror
+async fn mirror_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
+    let folder = match repo.get_tracked_folder(path.into_inner()) {
+        Ok(f) => f,
+        Err(e) => return HttpResponse::NotFound().body(e.to_string()),
+    };
+    let pair = match drive::load_operational_pair(&repo, folder.drive_pair_id) {
+        Ok(p) => p,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+    if !pair.standby_accepts_sync() {
+        return HttpResponse::BadRequest()
+            .body("Standby drive is not currently available for mirroring");
+    }
+
+    let files = match repo.list_tracked_files_under_folder(pair.id, &folder.folder_path) {
+        Ok(files) => files,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let mut mirrored_files = 0usize;
+    for file in files.into_iter().filter(|file| !file.is_mirrored) {
+        if let Err(e) = mirror::mirror_file(&pair, &file.relative_path) {
+            return HttpResponse::InternalServerError().body(e.to_string());
+        }
+        if let Err(e) = repo.update_tracked_file_mirror_status(file.id, true) {
+            return HttpResponse::InternalServerError().body(e.to_string());
+        }
+        let _ = repo.complete_pending_mirror_queue_for_file(file.id);
+        mirrored_files += 1;
+    }
+
+    HttpResponse::Ok().json(MirrorResult { mirrored_files })
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/folders")
@@ -169,6 +209,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::get().to(get_folder))
             .route("/{id}", web::put().to(update_folder))
             .route("/{id}", web::delete().to(delete_folder))
+            .route("/{id}/mirror", web::post().to(mirror_folder))
             .route("/{id}/scan", web::post().to(scan_folder)),
     );
 }

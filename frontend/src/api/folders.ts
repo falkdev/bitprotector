@@ -4,6 +4,7 @@ import type {
   CreateFolderRequest,
   UpdateFolderRequest,
   ScanFolderResult,
+  MirrorFolderResult,
 } from '@/types/folder'
 
 export const foldersApi = {
@@ -29,5 +30,9 @@ export const foldersApi = {
 
   scan(id: number): Promise<ScanFolderResult> {
     return apiClient.post<ScanFolderResult>(`/folders/${id}/scan`).then((r) => r.data)
+  },
+
+  mirror(id: number): Promise<MirrorFolderResult> {
+    return apiClient.post<MirrorFolderResult>(`/folders/${id}/mirror`).then((r) => r.data)
   },
 }

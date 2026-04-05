@@ -66,7 +66,7 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `integrity.rs` | Orchestrate integrity checks: re-hash the current active and standby copies, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted / drive\_unavailable), and trigger automatic recovery only when a healthy counterpart exists. |
 | `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
 | `virtual_path.rs` | Map tracked files and folders to literal virtual paths. Creates and removes symlinks exactly at those absolute paths and refreshes them whenever `active_role` changes. |
-| `tracker.rs` | Track or untrack individual files and folders. On track: compute initial checksum, store metadata, enqueue mirroring, and operate on the pair's current active side rather than assuming primary is always live. |
+| `tracker.rs` | Track or untrack individual files and folders. On track/scan: compute initial checksum, store metadata, enqueue mirror work by default, and operate on the pair's current active side rather than assuming primary is always live. |
 | `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
 
@@ -80,7 +80,7 @@ HTTP layer. Translates HTTP requests into calls to `src/core/` and `src/db/`, an
 | `auth.rs` | PAM authentication (`pam` crate) to verify system credentials. Issues and validates JWT tokens (`jsonwebtoken` crate). Provides `JwtAuth` as an actix-web extractor for protecting routes. |
 | `models.rs` | Request and response DTOs (`serde::Deserialize` / `Serialize`). Kept separate from the database structs in `src/db/`. |
 | `path_resolution.rs` | API-layer helper for validating host paths submitted by the web UI and converting tracked file/folder selections back into drive-relative paths. Rejects traversal and canonicalized escapes before core tracking logic runs. |
-| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. This includes the read-only filesystem browse route (`/filesystem/children`), the mixed tracking listing route (`/tracking/items`), and lazy virtual-path tree route (`/virtual-paths/tree`) used by the web UI. See [API.md](API.md) for the full endpoint reference. |
+| `routes/` | One file per resource group, each registering its own `actix_web::web::ServiceConfig`. This includes the read-only filesystem browse route (`/filesystem/children`), the mixed tracking listing route (`/tracking/items`) with effective virtual-path derivation and folder aggregate status, and lazy virtual-path tree route (`/virtual-paths/tree`) used by the web UI. See [API.md](API.md) for the full endpoint reference. |
 
 ### src/cli/
 
@@ -139,8 +139,8 @@ CREATE TABLE tracked_files (
     file_size     INTEGER NOT NULL,
     virtual_path  TEXT,
     is_mirrored   INTEGER NOT NULL DEFAULT 0,
-    tracked_direct INTEGER NOT NULL DEFAULT 1,
-    tracked_via_folder INTEGER NOT NULL DEFAULT 0,
+    tracked_direct INTEGER NOT NULL DEFAULT 1,      -- direct vs folder provenance are runtime-mutually-exclusive
+    tracked_via_folder INTEGER NOT NULL DEFAULT 0,  -- legacy dual-source rows are normalized to direct
     last_verified TEXT,
     created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -241,6 +241,23 @@ The REST API authenticates against the host's system accounts via PAM. There is 
 ### BLAKE3 for checksums
 
 BLAKE3 is faster than SHA-256/SHA-512 on modern hardware and provides sufficient collision resistance. The stored checksum is a hex-encoded 256-bit (32-byte) hash.
+
+### Queue-first mirroring with explicit immediate actions
+
+Tracking files and folder scans enqueue deduplicated `mirror` work when the standby slot can accept sync. Immediate mirroring is an explicit action (`files mirror`, `POST /files/{id}/mirror`, `folders mirror`, `POST /folders/{id}/mirror`) and reconciles pending mirror-queue rows after success.
+
+### Direct and folder provenance are mutually exclusive
+
+`tracked_direct` and `tracked_via_folder` are kept mutually exclusive in runtime behavior. If both are present in legacy rows, migration and recomputation normalize to direct tracking (`tracked_direct=1`, `tracked_via_folder=0`).
+
+### Effective virtual paths are derived for folder-origin files
+
+Tracking listings and virtual-path tree queries compute an effective file virtual path as:
+
+1. explicit file `virtual_path`, otherwise
+2. closest matching tracked folder virtual path + relative suffix.
+
+This keeps filtering and left-pane tree counts consistent for files originating from tracked folders.
 
 ### Virtual paths are symlinks on disk
 

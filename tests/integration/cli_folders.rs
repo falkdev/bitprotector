@@ -112,9 +112,45 @@ fn test_folders_scan_auto_tracks_new_files() {
         "Both files should be auto-tracked during scan"
     );
     assert!(
-        files.iter().all(|f| f.is_mirrored),
-        "All files should be mirrored"
+        files.iter().all(|f| !f.is_mirrored),
+        "Scanned files should be queued, not mirrored immediately"
     );
+    let (queue_items, total_queue) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total_queue, 2);
+    assert!(queue_items.iter().all(|item| item.action == "mirror"));
+}
+
+#[test]
+fn test_folders_mirror_command_mirrors_scanned_unmirrored_files() {
+    let repo = make_repo();
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let pair = setup_pair(&repo, &primary, &secondary);
+    fs::create_dir(primary.path().join("docs")).unwrap();
+    fs::create_dir(secondary.path().join("docs")).unwrap();
+    fs::write(primary.path().join("docs/a.txt"), b"a").unwrap();
+    fs::write(primary.path().join("docs/b.txt"), b"b").unwrap();
+
+    handle(
+        FoldersCommand::Add(AddArgs {
+            drive_pair_id: pair.id,
+            folder_path: "docs".to_string(),
+            virtual_path: None,
+        }),
+        &repo,
+    )
+    .unwrap();
+    let folder = repo.list_tracked_folders().unwrap().remove(0);
+    handle(FoldersCommand::Scan(ScanArgs { id: folder.id }), &repo).unwrap();
+
+    handle(FoldersCommand::Mirror { id: folder.id }, &repo).unwrap();
+
+    assert!(secondary.path().join("docs/a.txt").exists());
+    assert!(secondary.path().join("docs/b.txt").exists());
+    let (queue_items, _) = repo.list_sync_queue(None, 1, 20).unwrap();
+    assert!(queue_items
+        .iter()
+        .all(|item| item.status == "completed"));
 }
 
 #[test]

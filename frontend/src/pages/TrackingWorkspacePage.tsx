@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderPlus, Plus } from 'lucide-react'
+import { FolderPlus, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
@@ -79,15 +79,44 @@ function toTrackedFile(item: TrackingItem): TrackedFile {
 }
 
 function SourceBadge({ source }: { source: TrackingItem['source'] }) {
-  const label = source === 'both' ? 'Both' : source === 'folder' ? 'Folder' : 'Direct'
-  const className =
-    source === 'both'
-      ? 'bg-purple-100 text-purple-700'
-      : source === 'folder'
-        ? 'bg-yellow-100 text-yellow-700'
-        : 'bg-blue-100 text-blue-700'
+  const label = source === 'folder' ? 'Folder' : 'Direct'
+  const className = source === 'folder' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
 
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{label}</span>
+}
+
+function FolderStatusBadge({
+  status,
+  mirrored,
+  total,
+}: {
+  status: NonNullable<TrackingItem['folder_status']>
+  mirrored: number
+  total: number
+}) {
+  const label =
+    status === 'mirrored'
+      ? 'Mirrored'
+      : status === 'tracked'
+        ? 'Tracked'
+        : status === 'partial'
+          ? 'Partial'
+          : 'Empty'
+  const className =
+    status === 'mirrored'
+      ? 'bg-green-100 text-green-700'
+      : status === 'tracked'
+        ? 'bg-slate-100 text-slate-700'
+        : status === 'partial'
+          ? 'bg-amber-100 text-amber-700'
+          : 'bg-gray-100 text-gray-600'
+
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
+      {label}
+      {status !== 'empty' ? ` (${mirrored}/${total})` : ''}
+    </span>
+  )
 }
 
 function FolderVirtualPathModal({
@@ -194,9 +223,11 @@ function FolderVirtualPathModal({
 function VirtualPathTree({
   selected,
   onSelect,
+  refreshKey,
 }: {
   selected: string
   onSelect: (path: string) => void
+  refreshKey: number
 }) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -221,8 +252,10 @@ function VirtualPathTree({
   }, [])
 
   useEffect(() => {
+    setNodes([])
+    setOpen({})
     void loadChildren('/')
-  }, [loadChildren])
+  }, [loadChildren, refreshKey])
 
   const renderNode = (node: TreeNode, depth: number) => {
     const isOpen = !!open[node.path]
@@ -295,6 +328,8 @@ export function TrackingWorkspacePage() {
   const [folderPathModal, setFolderPathModal] = useState<TrackedFolder | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TrackingItem | null>(null)
   const [filePathModal, setFilePathModal] = useState<TrackedFile | null>(null)
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0)
+  const [virtualPaneCollapsed, setVirtualPaneCollapsed] = useState(true)
 
   const virtualPrefix = params.virtual_prefix ?? ''
 
@@ -366,6 +401,7 @@ export function TrackingWorkspacePage() {
       await filesApi.track(data)
       toast.success('File tracked')
       await load(params)
+      setTreeRefreshKey((current) => current + 1)
     } catch {
       toast.error('Failed to track file')
     }
@@ -386,8 +422,20 @@ export function TrackingWorkspacePage() {
       const result = await foldersApi.scan(folder.id)
       toast.success(`Scan complete: ${result.new_files} new, ${result.changed_files} changed`)
       await load(params)
+      setTreeRefreshKey((current) => current + 1)
     } catch {
       toast.error('Scan failed')
+    }
+  }
+
+  const handleMirrorFolder = async (folder: TrackedFolder) => {
+    try {
+      const result = await foldersApi.mirror(folder.id)
+      toast.success(`Mirror complete: ${result.mirrored_files} file(s) mirrored`)
+      await load(params)
+      setTreeRefreshKey((current) => current + 1)
+    } catch {
+      toast.error('Folder mirror failed')
     }
   }
 
@@ -396,6 +444,7 @@ export function TrackingWorkspacePage() {
       await foldersApi.update(folderId, { virtual_path: virtualPath })
       toast.success('Folder virtual path updated')
       await load(params)
+      setTreeRefreshKey((current) => current + 1)
     } catch {
       toast.error('Failed to update folder virtual path')
     }
@@ -414,6 +463,7 @@ export function TrackingWorkspacePage() {
       }
       setDeleteTarget(null)
       await load(params)
+      setTreeRefreshKey((current) => current + 1)
     } catch {
       toast.error('Delete failed')
     }
@@ -423,7 +473,10 @@ export function TrackingWorkspacePage() {
     if (item.kind !== 'file') return
     try {
       const file = await filesApi.get(item.id)
-      setSelectedFile(file)
+      setSelectedFile({
+        ...file,
+        virtual_path: file.virtual_path ?? item.virtual_path,
+      })
     } catch {
       setSelectedFile(toTrackedFile(item))
     }
@@ -434,6 +487,7 @@ export function TrackingWorkspacePage() {
       await virtualPathsApi.set(fileId, { virtual_path: vpath })
       toast.success('Virtual path updated')
       await load(params)
+      setTreeRefreshKey((current) => current + 1)
     } catch {
       toast.error('Failed to update virtual path')
     }
@@ -441,14 +495,36 @@ export function TrackingWorkspacePage() {
 
   return (
     <div className="flex h-full gap-0" data-testid="file-browser-page">
-      <aside className="w-64 shrink-0 overflow-auto border-r border-gray-200 bg-white">
-        <div className="border-b p-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Virtual paths</h2>
+      <aside
+        className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-in-out`}
+      >
+        <div className={`${virtualPaneCollapsed ? 'flex items-center justify-center border-b px-1 py-2.5' : 'flex items-center justify-between border-b p-3'}`}>
+          {!virtualPaneCollapsed ? (
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Virtual paths</h2>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setVirtualPaneCollapsed((current) => !current)}
+            className={`${virtualPaneCollapsed ? 'h-8 w-8 rounded-md' : 'rounded border border-gray-200 p-1'} text-gray-500 hover:bg-gray-50`}
+            data-testid="toggle-virtual-pane"
+            title={virtualPaneCollapsed ? 'Expand virtual paths pane' : 'Collapse virtual paths pane'}
+          >
+            {virtualPaneCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+          </button>
         </div>
-        <VirtualPathTree
-          selected={virtualPrefix}
-          onSelect={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
-        />
+        {virtualPaneCollapsed ? (
+          <div className="flex h-[calc(100%-44px)] items-center justify-center">
+            <span className="select-none text-sm font-semibold uppercase tracking-[0.14em] text-gray-400 [writing-mode:vertical-lr]">
+              Virtual Paths
+            </span>
+          </div>
+        ) : (
+          <VirtualPathTree
+            selected={virtualPrefix}
+            onSelect={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
+            refreshKey={treeRefreshKey}
+          />
+        )}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -520,7 +596,6 @@ export function TrackingWorkspacePage() {
               <option value="all">All sources</option>
               <option value="direct">Direct</option>
               <option value="folder">Folder</option>
-              <option value="both">Both</option>
             </select>
             <select
               value={params.has_virtual_path == null ? 'all' : params.has_virtual_path ? 'yes' : 'no'}
@@ -597,14 +672,24 @@ export function TrackingWorkspacePage() {
                   {
                     key: 'status',
                     header: 'Status',
-                    cell: (item) =>
-                      item.kind === 'file' && item.is_mirrored ? (
-                        <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
-                          Mirrored
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      ),
+                    cell: (item) => {
+                      if (item.kind === 'file') {
+                        return item.is_mirrored ? (
+                          <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
+                            Mirrored
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
+                            Tracked
+                          </span>
+                        )
+                      }
+
+                      const status = item.folder_status ?? 'empty'
+                      const total = item.folder_total_files ?? 0
+                      const mirrored = item.folder_mirrored_files ?? 0
+                      return <FolderStatusBadge status={status} total={total} mirrored={mirrored} />
+                    },
                   },
                   {
                     key: 'created',
@@ -636,12 +721,20 @@ export function TrackingWorkspacePage() {
                           <button
                             onClick={() => {
                               const folder = folderItems.find((entry) => entry.id === item.id)
-                              if (folder) void handleScanFolder(folder)
+                              if (!folder) return
+                              const status = item.folder_status ?? 'empty'
+                              if (status === 'tracked' || status === 'partial') {
+                                void handleMirrorFolder(folder)
+                                return
+                              }
+                              void handleScanFolder(folder)
                             }}
                             className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
-                            data-testid={`scan-folder-${item.id}`}
+                            data-testid={`folder-action-${item.id}`}
                           >
-                            Scan
+                            {item.folder_status === 'tracked' || item.folder_status === 'partial'
+                              ? 'Mirror'
+                              : 'Scan'}
                           </button>
                           <button
                             onClick={() => setDeleteTarget(item)}
@@ -709,6 +802,7 @@ export function TrackingWorkspacePage() {
             toast.success('Folder added')
             setShowFolderModal(false)
             await load(params)
+            setTreeRefreshKey((current) => current + 1)
           }}
         />
       ) : null}

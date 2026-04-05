@@ -4,21 +4,49 @@ import type { TrackedFile } from '@/types/file'
 import type { TrackedFolder } from '@/types/folder'
 import type { TrackingItem, TrackingListParams, TrackingListResponse } from '@/types/tracking'
 
-function fileSource(file: TrackedFile): 'direct' | 'folder' | 'both' {
+function normalizeFolderPath(path: string): string {
+  return path.replace(/\/+$/, '')
+}
+
+function isPathInFolder(relativePath: string, folderPath: string): boolean {
+  const normalizedFolder = normalizeFolderPath(folderPath)
+  return relativePath === normalizedFolder || relativePath.startsWith(`${normalizedFolder}/`)
+}
+
+function deriveFileVirtualPath(file: TrackedFile, folders: TrackedFolder[]): string | null {
+  if (file.virtual_path) return file.virtual_path
+  const matchingFolders = folders
+    .filter(
+      (folder) =>
+        folder.drive_pair_id === file.drive_pair_id &&
+        !!folder.virtual_path &&
+        isPathInFolder(file.relative_path, folder.folder_path)
+    )
+    .sort((a, b) => normalizeFolderPath(b.folder_path).length - normalizeFolderPath(a.folder_path).length)
+
+  const folder = matchingFolders[0]
+  if (!folder?.virtual_path) return null
+  const normalizedFolderPath = normalizeFolderPath(folder.folder_path)
+  if (file.relative_path === normalizedFolderPath) return folder.virtual_path
+  const suffix = file.relative_path.slice(normalizedFolderPath.length + 1)
+  return `${folder.virtual_path.replace(/\/+$/, '')}/${suffix}`
+}
+
+function fileSource(file: TrackedFile): 'direct' | 'folder' {
   const direct = file.tracked_direct ?? true
   const viaFolder = file.tracked_via_folder ?? false
-  if (direct && viaFolder) return 'both'
+  if (direct) return 'direct'
   if (viaFolder) return 'folder'
   return 'direct'
 }
 
-function toFileItem(file: TrackedFile): TrackingItem {
+function toFileItem(file: TrackedFile, folders: TrackedFolder[]): TrackingItem {
   return {
     kind: 'file',
     id: file.id,
     drive_pair_id: file.drive_pair_id,
     path: file.relative_path,
-    virtual_path: file.virtual_path,
+    virtual_path: deriveFileVirtualPath(file, folders),
     is_mirrored: file.is_mirrored,
     tracked_direct: file.tracked_direct ?? true,
     tracked_via_folder: file.tracked_via_folder ?? false,
@@ -39,6 +67,9 @@ function toFolderItem(folder: TrackedFolder): TrackingItem {
     tracked_direct: null,
     tracked_via_folder: null,
     source: 'folder',
+    folder_status: 'empty',
+    folder_total_files: 0,
+    folder_mirrored_files: 0,
     created_at: folder.created_at,
     updated_at: folder.created_at,
   }
@@ -74,7 +105,6 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
     apiClient.get<{ files: TrackedFile[] }>('/files', {
       params: {
         drive_id: params?.drive_id,
-        virtual_prefix: params?.virtual_prefix,
         page,
         per_page: perPage,
       },
@@ -82,11 +112,46 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
     apiClient.get<TrackedFolder[]>('/folders'),
   ])
 
-  const files = filesResponse.data.files.map(toFileItem)
-  const folders = foldersResponse.data.map(toFolderItem)
+  const folderRows = foldersResponse.data
+  const files = filesResponse.data.files.map((file) => toFileItem(file, folderRows))
+  const folders = folderRows.map(toFolderItem)
+
+  const folderStats = new Map<number, { total: number; mirrored: number }>()
+  for (const folder of folderRows) {
+    folderStats.set(folder.id, { total: 0, mirrored: 0 })
+  }
+  for (const file of files) {
+    for (const folder of folderRows) {
+      if (folder.drive_pair_id !== file.drive_pair_id) continue
+      if (!isPathInFolder(file.path, folder.folder_path)) continue
+      const stats = folderStats.get(folder.id)
+      if (!stats) continue
+      stats.total += 1
+      if (file.is_mirrored) stats.mirrored += 1
+    }
+  }
+
+  const foldersWithStatus: TrackingItem[] = folders.map((folder) => {
+    const stats = folderStats.get(folder.id) ?? { total: 0, mirrored: 0 }
+    const folderStatus =
+      stats.total === 0
+        ? 'empty'
+        : stats.mirrored === stats.total
+          ? 'mirrored'
+          : stats.mirrored === 0
+            ? 'tracked'
+            : 'partial'
+
+    return {
+      ...folder,
+      folder_status: folderStatus,
+      folder_total_files: stats.total,
+      folder_mirrored_files: stats.mirrored,
+    }
+  })
 
   const itemKind = params?.item_kind ?? 'all'
-  let items = [...files, ...folders].filter((item) => {
+  let items = [...files, ...foldersWithStatus].filter((item) => {
     if (params?.drive_id != null && item.drive_pair_id !== params.drive_id) return false
     if (itemKind !== 'all' && item.kind !== itemKind) return false
     if (!includeBySource(item, params?.source)) return false

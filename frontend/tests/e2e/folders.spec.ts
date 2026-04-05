@@ -29,4 +29,10 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
     .filter({ hasText: `${fixture.folderRelativePath}/${fileName}` })
     .first()
   await expect(trackedFileRow).toBeVisible()
+
+  await row.getByRole('button', { name: 'Mirror' }).click()
+  await expectToast(page, /Mirror complete:/)
+  await expect(await qemu.pathExists(fixture.secondaryFilePath)).toBe(true)
+  await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(`report for ${fixture.runId}`)
+  await expect(row.getByRole('button', { name: 'Scan' })).toBeVisible()
 })

@@ -1,4 +1,4 @@
-use crate::core::{change_detection, drive, tracker};
+use crate::core::{change_detection, drive, mirror, tracker};
 use crate::db::repository::Repository;
 use clap::{Args, Subcommand};
 
@@ -14,6 +14,8 @@ pub enum FoldersCommand {
     Remove { id: i64 },
     /// Scan a tracked folder for new or changed files
     Scan(ScanArgs),
+    /// Mirror all unmirrored tracked files under a tracked folder
+    Mirror { id: i64 },
     /// Watch a tracked folder for filesystem changes (runs until Ctrl+C)
     Watch(WatchArgs),
 }
@@ -127,6 +129,27 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                     );
                 }
             }
+        }
+        FoldersCommand::Mirror { id } => {
+            let folder = repo.get_tracked_folder(id)?;
+            let pair = drive::load_operational_pair(repo, folder.drive_pair_id)?;
+            anyhow::ensure!(
+                pair.standby_accepts_sync(),
+                "Standby drive is not currently available for mirroring"
+            );
+
+            let files = repo.list_tracked_files_under_folder(pair.id, &folder.folder_path)?;
+            let mut mirrored = 0usize;
+            for file in files.into_iter().filter(|file| !file.is_mirrored) {
+                mirror::mirror_file(&pair, &file.relative_path)?;
+                repo.update_tracked_file_mirror_status(file.id, true)?;
+                let _ = repo.complete_pending_mirror_queue_for_file(file.id);
+                mirrored += 1;
+            }
+            println!(
+                "Mirrored {} file(s) under folder {}",
+                mirrored, folder.folder_path
+            );
         }
         FoldersCommand::Watch(args) => {
             let folder = repo.get_tracked_folder(args.id)?;

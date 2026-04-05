@@ -366,11 +366,16 @@ List tracking items across files and folders in one response.
 | `virtual_prefix` | string | Filter to virtual paths under this absolute prefix |
 | `has_virtual_path` | boolean | `true` = has virtual path, `false` = no virtual path |
 | `item_kind` | string | `file`, `folder`, or `all` (default) |
-| `source` | string | `direct`, `folder`, `both`, or `all` (default) |
+| `source` | string | `direct`, `folder`, or `all` (default) |
 | `page` | integer | Page number (default: 1) |
 | `per_page` | integer | Items per page (default: 50, max: 200) |
 
-`source` filtering applies to file rows by provenance flags. Folder rows are included when `item_kind=folder`, or when `item_kind=all` with `source=all|folder`.
+For file rows, `virtual_prefix` and `has_virtual_path` are evaluated against the effective file virtual path:
+
+- explicit file `virtual_path`, otherwise
+- a folder-derived virtual path from the closest matching tracked folder virtual path.
+
+`source` filtering applies to file rows by provenance flags. Folder rows are included when `item_kind=folder`, or when `item_kind=all` with `source=all|folder`. `source=both` is invalid and returns `400`.
 
 **Response `200`:**
 
@@ -383,10 +388,13 @@ List tracking items across files and folders in one response.
             "drive_pair_id": 1,
             "path": "docs/report.pdf",
             "virtual_path": "/virtual/docs/report.pdf",
-            "is_mirrored": true,
+            "is_mirrored": false,
             "tracked_direct": true,
-            "tracked_via_folder": true,
-            "source": "both",
+            "tracked_via_folder": false,
+            "source": "direct",
+            "folder_status": null,
+            "folder_total_files": null,
+            "folder_mirrored_files": null,
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z"
         },
@@ -400,6 +408,9 @@ List tracking items across files and folders in one response.
             "tracked_direct": null,
             "tracked_via_folder": null,
             "source": "folder",
+            "folder_status": "partial",
+            "folder_total_files": 3,
+            "folder_mirrored_files": 1,
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z"
         }
@@ -409,6 +420,14 @@ List tracking items across files and folders in one response.
     "per_page": 50
 }
 ```
+
+Folder rows include aggregate status fields:
+
+- `folder_status`: `empty` | `tracked` | `mirrored` | `partial`
+- `folder_total_files`: tracked files currently under that folder path
+- `folder_mirrored_files`: mirrored tracked files currently under that folder path
+
+**Errors:** `400 Bad Request` (invalid `source` or `item_kind`)
 
 ---
 
@@ -466,12 +485,15 @@ Track a file by path. BitProtector computes its BLAKE3 checksum and records prov
 {
     "drive_pair_id": 1,
     "relative_path": "documents/report.pdf",
-    "virtual_path": "/docs/report.pdf",
-    "mirror": false
+    "virtual_path": "/docs/report.pdf"
 }
 ```
 
-`virtual_path` and `mirror` are optional. When `mirror` is `true` and the standby slot can accept sync, the file is mirrored immediately after tracking.
+`virtual_path` is optional.
+
+Newly tracked files enqueue deduplicated `mirror` work in `sync_queue` when the standby slot can accept sync. Tracking does not mirror immediately by default.
+
+`mirror` is still accepted as an optional legacy compatibility field, but is ignored for immediate copy semantics. Use [`POST /files/{id}/mirror`](#post-filesidmirror) for immediate mirroring, or process queue work through [`POST /sync/process`](#post-syncprocess).
 
 `relative_path` remains the stored path relative to the selected drive pair's current active root. The web UI path picker may submit an absolute host path, but the server validates that it resolves under the active root and converts it back to a relative path before storing it.
 
@@ -514,6 +536,8 @@ Trigger an immediate mirror of the file to the secondary path. Requires the stan
 ```
 
 **Errors:** `404 Not Found`, `500 Internal Server Error` (mirror failed)
+
+After a successful immediate mirror, pending/in-progress `mirror` queue rows for that file are marked `completed`.
 
 > **Note:** To verify file integrity, use [`POST /integrity/check/{id}`](#post-integritycheckid).
 
@@ -583,7 +607,7 @@ Return one lazy tree level of virtual-path children under an absolute parent pre
 }
 ```
 
-`item_count` is the number of file/folder virtual-path entries under that immediate child segment.
+`item_count` is the number of file/folder virtual-path entries under that immediate child segment, including file virtual paths derived from tracked folder virtual paths.
 
 **Errors:** `400 Bad Request` (non-absolute `parent` or contains `..`)
 
@@ -664,6 +688,8 @@ To clear `virtual_path`, pass it explicitly as `null`. Omitting the field leaves
 
 Scan a tracked folder for new and changed files. Newly discovered files are tracked automatically. Changed files are detected by re-hashing.
 
+Scan tracks files and enqueues mirror work when possible; it does not mirror immediately.
+
 **Response `200`:**
 
 ```json
@@ -674,6 +700,26 @@ Scan a tracked folder for new and changed files. Newly discovered files are trac
 ```
 
 **Errors:** `404 Not Found`, `500 Internal Server Error`
+
+---
+
+### POST `/folders/{id}/mirror`
+
+Immediately mirror all unmirrored tracked files under a tracked folder.
+
+**Response `200`:**
+
+```json
+{
+    "mirrored_files": 2
+}
+```
+
+`mirrored_files` counts files mirrored during this request.
+
+After a successful mirror, pending/in-progress `mirror` queue rows for mirrored files are marked `completed`.
+
+**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `500 Internal Server Error`
 
 ---
 

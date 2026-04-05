@@ -78,6 +78,13 @@ cd frontend
 npm run test:e2e:qemu
 ```
 
+To run only the tracking-focused live specs:
+
+```bash
+cd frontend
+npm run test:e2e -- tests/e2e/file-browser.spec.ts tests/e2e/folders.spec.ts
+```
+
 ### Run all tests in one integration file
 
 ```bash
@@ -213,6 +220,16 @@ async fn test_auth_middleware_accepts_valid_token() {
 
 Note: these tests require `actix_rt` as a dev dependency. Annotate async test functions with `#[actix_rt::test]` instead of `#[tokio::test]`.
 
+The broader API route integration file (`tests/integration/api_routes.rs`) now also covers tracking-workspace-specific semantics:
+
+- track-file queue-first behavior (no immediate mirror copy)
+- folder scan queue-first behavior (tracks + enqueues, no immediate mirror)
+- immediate file/folder mirror actions and queue reconciliation
+- effective virtual path derivation for folder-origin files
+- virtual-prefix / has-virtual-path filtering correctness against effective virtual paths
+- `source=both` rejection (`400`)
+- folder aggregate status fields in mixed tracking responses
+
 ### Filesystem Browser Integration Tests
 
 File: `tests/integration/api_filesystem_browser.rs`
@@ -234,7 +251,7 @@ File: `tests/integration/scaling_100k.rs`
 This test seeds `100,000` tracked-file rows and validates the scaled tracking endpoint (`GET /api/v1/tracking/items`) for:
 
 - server pagination behavior (including per-page cap to 200)
-- virtual-path filtering and source filtering correctness
+- virtual-path filtering and source filtering correctness (`source=direct|folder|all`)
 - targeted search correctness
 - query-duration budget checks for representative list/filter requests
 
@@ -262,6 +279,14 @@ Frontend component/unit tests now also cover the path-picker workflow in `fronte
 - lazy-loading behavior in the shared path picker dialog
 - absolute-to-relative conversion for tracked file/folder submits
 - absolute path fill behavior in drive configuration forms
+
+Tracking Workspace UI tests (`frontend/src/pages/TrackingWorkspacePage.test.tsx`) also cover:
+
+- source dropdown semantics (`Both` removed)
+- folder status badge rendering (`empty` / `tracked` / `mirrored` / `partial`)
+- folder `Scan` to `Mirror` action switching after queue-first scans
+- virtual-path tree selection driving server-side table filtering
+- left-pane collapse/expand behavior
 
 **Basic structure:**
 

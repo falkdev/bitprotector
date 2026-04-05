@@ -1,4 +1,4 @@
-use crate::core::{checksum, drive, mirror, virtual_path};
+use crate::core::{checksum, drive, sync_queue, virtual_path};
 use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
 use anyhow::Context;
@@ -51,7 +51,7 @@ pub fn track_file(
     }
 
     if let Ok(existing) = repo.get_tracked_file_by_path(drive_pair.id, relative_path) {
-        repo.update_tracked_file_sources(existing.id, true, existing.tracked_via_folder)?;
+        repo.update_tracked_file_sources(existing.id, true, false)?;
         if let Some(virtual_path) = virtual_path {
             virtual_path::set_virtual_path(repo, existing.id, virtual_path)?;
         }
@@ -101,7 +101,8 @@ pub fn track_folder(
     repo.get_tracked_folder(tracked.id)
 }
 
-/// Scan a tracked folder on the primary drive and auto-track+mirror any untracked files.
+/// Scan a tracked folder and auto-track any untracked files.
+/// New files are queued for mirroring when the standby side can accept sync.
 /// Returns the list of newly tracked files.
 pub fn auto_track_folder_files(
     repo: &Repository,
@@ -138,8 +139,7 @@ pub fn auto_track_folder_files(
 
         let file = create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
         if drive_pair.standby_accepts_sync() {
-            mirror::mirror_file(drive_pair, &relative_path)?;
-            repo.update_tracked_file_mirror_status(file.id, true)?;
+            let _ = sync_queue::create_from_change(repo, file.id)?;
         } else {
             repo.update_tracked_file_mirror_status(file.id, false)?;
         }
@@ -254,7 +254,10 @@ mod tests {
         let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
         assert_eq!(tracked.len(), 2, "Both files should be auto-tracked");
         for f in &tracked {
-            assert!(f.is_mirrored, "Auto-tracked files should be mirrored");
+            assert!(!f.is_mirrored, "Auto-tracked files should be queued, not mirrored");
+            let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+            assert!(total >= 1, "Auto-tracked files should enqueue mirror work");
+            assert!(queue_items.iter().any(|item| item.tracked_file_id == f.id));
         }
     }
 

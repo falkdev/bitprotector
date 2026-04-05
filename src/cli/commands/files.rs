@@ -34,7 +34,7 @@ pub struct TrackArgs {
     /// Optional virtual path to assign
     #[arg(long)]
     pub virtual_path: Option<String>,
-    /// Mirror the file immediately after tracking
+    /// Deprecated compatibility flag; tracking now queues mirror work
     #[arg(long)]
     pub mirror: bool,
 }
@@ -62,6 +62,9 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         FilesCommand::Track(args) => {
             let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
+            let existed_before = repo
+                .get_tracked_file_by_path(args.drive_pair_id, &args.relative_path)
+                .is_ok();
             let tracked = tracker::track_file(
                 repo,
                 &pair,
@@ -71,16 +74,17 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("Tracked file #{}: {}", tracked.id, tracked.relative_path);
             println!("  Checksum:  {}", tracked.checksum);
             println!("  Size:      {} bytes", tracked.file_size);
-
+            if !existed_before && pair.standby_accepts_sync() {
+                repo.create_sync_queue_item_dedup(tracked.id, "mirror")?;
+                println!("  Mirror queued: yes");
+            } else {
+                println!("  Mirror queued: no");
+            }
             if args.mirror {
-                let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
-                if pair.standby_accepts_sync() {
-                    mirror::mirror_file(&pair, &tracked.relative_path)?;
-                    repo.update_tracked_file_mirror_status(tracked.id, true)?;
-                    println!("  Mirrored:  yes");
-                } else {
-                    println!("  Mirrored:  no (standby drive unavailable)");
-                }
+                println!(
+                    "  Note: --mirror is deprecated here; use `files mirror {}` for immediate copy",
+                    tracked.id
+                );
             }
         }
         FilesCommand::List(args) => {
@@ -139,6 +143,7 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
             mirror::mirror_file(&pair, &file.relative_path)?;
             repo.update_tracked_file_mirror_status(id, true)?;
+            let _ = repo.complete_pending_mirror_queue_for_file(id);
             println!("Mirrored file #{}: {}", id, file.relative_path);
         }
         FilesCommand::Untrack { id } => {
@@ -223,9 +228,15 @@ mod tests {
         )
         .unwrap();
 
-        assert!(secondary.path().join("b.txt").exists());
+        assert!(
+            !secondary.path().join("b.txt").exists(),
+            "Track should enqueue mirror work instead of copying immediately"
+        );
         let (files, _) = repo.list_tracked_files(None, None, None, 1, 50).unwrap();
-        assert!(files[0].is_mirrored);
+        assert!(!files[0].is_mirrored);
+        let (queue_items, total_queue) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert_eq!(total_queue, 1);
+        assert_eq!(queue_items[0].action, "mirror");
     }
 
     #[test]

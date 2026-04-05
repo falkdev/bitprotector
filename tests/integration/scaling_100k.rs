@@ -83,7 +83,7 @@ fn seed_repo_with_100k_files() -> (Repository, i64) {
                 let (tracked_direct, tracked_via_folder) = match i % 5 {
                     0 => (1_i64, 0_i64),
                     1 => (0_i64, 1_i64),
-                    2 => (1_i64, 1_i64),
+                    2 => (1_i64, 0_i64),
                     3 => (1_i64, 0_i64),
                     _ => (0_i64, 1_i64),
                 };
@@ -161,17 +161,17 @@ async fn test_tracking_items_scales_to_100k_with_pagination_filters_and_budgets(
     let started = Instant::now();
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&has_virtual_path=true&source=both&page=1&per_page=200"
+            "/api/v1/tracking/items?drive_id={pair_id}&item_kind=file&has_virtual_path=true&source=folder&page=1&per_page=200"
         ))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     let elapsed = started.elapsed();
     assert_eq!(resp.status(), 200);
-    assert_budget("has_virtual_path + source=both filter", elapsed);
+    assert_budget("has_virtual_path + source=folder filter", elapsed);
 
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["total"], 6_666);
+    assert_eq!(body["total"], 13_334);
     assert_eq!(body["items"].as_array().unwrap().len(), 200);
 
     let started = Instant::now();

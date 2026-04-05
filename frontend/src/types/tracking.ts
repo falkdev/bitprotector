@@ -1,5 +1,6 @@
 export type TrackingItemKind = 'file' | 'folder'
-export type TrackingSource = 'direct' | 'folder' | 'both'
+export type TrackingSource = 'direct' | 'folder'
+export type TrackingFolderStatus = 'empty' | 'tracked' | 'mirrored' | 'partial'
 
 export interface TrackingItem {
   kind: TrackingItemKind
@@ -11,6 +12,9 @@ export interface TrackingItem {
   tracked_direct: boolean | null
   tracked_via_folder: boolean | null
   source: TrackingSource
+  folder_status?: TrackingFolderStatus | null
+  folder_total_files?: number | null
+  folder_mirrored_files?: number | null
   created_at: string
   updated_at: string
 }
@@ -28,7 +32,7 @@ export interface TrackingListParams {
   virtual_prefix?: string
   has_virtual_path?: boolean
   item_kind?: 'file' | 'folder' | 'all'
-  source?: 'direct' | 'folder' | 'both' | 'all'
+  source?: 'direct' | 'folder' | 'all'
   page?: number
   per_page?: number
 }

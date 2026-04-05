@@ -193,6 +193,10 @@ fn test_primary_replacement_failover_retargets_virtual_path_and_rebuilds() {
         .args(["files", "track", "1", "report.txt", "--mirror"])
         .assert()
         .success();
+    cmd(db_path)
+        .args(["files", "mirror", "1"])
+        .assert()
+        .success();
 
     cmd(db_path)
         .args([
@@ -275,6 +279,10 @@ fn test_secondary_replacement_rebuilds_without_switching_active_role() {
 
     cmd(db_path)
         .args(["files", "track", "1", "data.bin", "--mirror"])
+        .assert()
+        .success();
+    cmd(db_path)
+        .args(["files", "mirror", "1"])
         .assert()
         .success();
 

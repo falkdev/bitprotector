@@ -206,7 +206,7 @@ async fn test_files_track() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
         .insert_header(("Authorization", bearer()))
@@ -219,6 +219,13 @@ async fn test_files_track() {
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["relative_path"], "doc.txt");
+    assert!(
+        !secondary.path().join("doc.txt").exists(),
+        "Tracking should queue mirror work instead of mirroring immediately"
+    );
+    let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(queue_items[0].action, "mirror");
 }
 
 #[actix_rt::test]
@@ -254,7 +261,7 @@ async fn test_files_track_existing_promotes_direct_source_and_returns_ok() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["tracked_direct"], true);
-    assert_eq!(body["tracked_via_folder"], true);
+    assert_eq!(body["tracked_via_folder"], false);
 
     let (files, total) = repo
         .list_tracked_files(Some(pair.id), None, None, 1, 10)
@@ -418,7 +425,7 @@ async fn test_tracking_items_filters() {
         "hash-b",
         12,
         Some("/virtual/docs/beta.txt"),
-        true,
+        false,
         true,
     )
     .unwrap();
@@ -427,15 +434,67 @@ async fn test_tracking_items_filters() {
 
     let app = make_app!(repo).await;
     let req = test::TestRequest::get()
-        .uri("/api/v1/tracking/items?item_kind=file&source=both&virtual_prefix=/virtual/docs")
+        .uri("/api/v1/tracking/items?item_kind=file&source=folder&virtual_prefix=/virtual/docs")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["source"], "both");
+    assert_eq!(body["items"][0]["source"], "folder");
     assert_eq!(body["items"][0]["kind"], "file");
+}
+
+#[actix_rt::test]
+async fn test_tracking_items_rejects_legacy_both_source_filter() {
+    let app = make_app!(make_repo()).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/tracking/items?item_kind=file&source=both")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_rt::test]
+async fn test_tracking_items_derives_file_virtual_path_from_tracked_folder_virtual_path() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("tracking-derived-vpath", "/p", "/s").unwrap();
+    repo.create_tracked_folder(pair.id, "docs", Some("/virtual/docs"))
+        .unwrap();
+    repo.create_tracked_file_with_source(pair.id, "docs/a.txt", "h1", 10, None, false, true)
+        .unwrap();
+    repo.create_tracked_file_with_source(pair.id, "misc/b.txt", "h2", 10, None, true, false)
+        .unwrap();
+
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&has_virtual_path=true",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["path"], "docs/a.txt");
+    assert_eq!(body["items"][0]["virtual_path"], "/virtual/docs/a.txt");
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&virtual_prefix=/virtual/docs",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["virtual_path"], "/virtual/docs/a.txt");
 }
 
 #[actix_rt::test]
@@ -452,7 +511,7 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
         "h2",
         11,
         Some("/virtual/docs/b.txt"),
-        true,
+        false,
         true,
     )
     .unwrap();
@@ -483,7 +542,7 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
 
     let req = test::TestRequest::get()
         .uri(&format!(
-            "/api/v1/tracking/items?drive_id={}&item_kind=file&has_virtual_path=true&source=both&page=1&per_page=1",
+            "/api/v1/tracking/items?drive_id={}&item_kind=file&has_virtual_path=true&source=folder&page=1&per_page=1",
             pair_a.id
         ))
         .insert_header(("Authorization", bearer()))
@@ -491,9 +550,9 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["total"], 1);
+    assert_eq!(body["total"], 2);
     assert_eq!(body["items"][0]["path"], "docs/b.txt");
-    assert_eq!(body["items"][0]["source"], "both");
+    assert_eq!(body["items"][0]["source"], "folder");
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -598,9 +657,9 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["items"][0]["source"], "both");
+    assert_eq!(body["items"][0]["source"], "direct");
     assert_eq!(body["items"][0]["tracked_direct"], true);
-    assert_eq!(body["items"][0]["tracked_via_folder"], true);
+    assert_eq!(body["items"][0]["tracked_via_folder"], false);
 
     let req = test::TestRequest::delete()
         .uri(&format!("/api/v1/folders/{folder_id}"))
@@ -687,7 +746,8 @@ async fn test_files_mirror_via_api() {
     let file = repo
         .create_tracked_file(pair.id, "m.txt", &hash, content.len() as i64, None)
         .unwrap();
-    let app = make_app!(repo).await;
+    let queue_item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri(&format!("/api/v1/files/{}/mirror", file.id))
         .insert_header(("Authorization", bearer()))
@@ -697,6 +757,8 @@ async fn test_files_mirror_via_api() {
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["mirrored"], true);
     assert!(secondary.path().join("m.txt").exists());
+    let updated = repo.get_sync_queue_item(queue_item.id).unwrap();
+    assert_eq!(updated.status, "completed");
 }
 
 // ── Folders ────────────────────────────────────────────────────────────────
@@ -933,7 +995,7 @@ async fn test_folders_scan() {
     let folder = repo
         .create_tracked_folder(pair.id, "scandir", None)
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri(&format!("/api/v1/folders/{}/scan", folder.id))
         .insert_header(("Authorization", bearer()))
@@ -942,6 +1004,57 @@ async fn test_folders_scan() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert!(body["new_files"].as_u64().unwrap() >= 1);
+    let (files, total_files) = repo.list_tracked_files(Some(pair.id), None, None, 1, 20).unwrap();
+    assert_eq!(total_files, 1);
+    assert!(!files[0].is_mirrored);
+    let (queue, total_queue) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total_queue, 1);
+    assert_eq!(queue[0].action, "mirror");
+}
+
+#[actix_rt::test]
+async fn test_folders_mirror_endpoint_processes_unmirrored_files_under_folder() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let sub = primary.path().join("docs");
+    fs::create_dir(&sub).unwrap();
+    fs::create_dir(secondary.path().join("docs")).unwrap();
+    fs::write(sub.join("a.txt"), b"a").unwrap();
+    fs::write(sub.join("b.txt"), b"b").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "mirror-folder",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    let checksum_a = checksum::checksum_bytes(b"a");
+    let checksum_b = checksum::checksum_bytes(b"b");
+    let file_a = repo
+        .create_tracked_file_with_source(pair.id, "docs/a.txt", &checksum_a, 1, None, false, true)
+        .unwrap();
+    let file_b = repo
+        .create_tracked_file_with_source(pair.id, "docs/b.txt", &checksum_b, 1, None, false, true)
+        .unwrap();
+    let q1 = repo.create_sync_queue_item(file_a.id, "mirror").unwrap();
+    let q2 = repo.create_sync_queue_item(file_b.id, "mirror").unwrap();
+
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/mirror", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["mirrored_files"], 2);
+    assert!(secondary.path().join("docs/a.txt").exists());
+    assert!(secondary.path().join("docs/b.txt").exists());
+    assert_eq!(repo.get_sync_queue_item(q1.id).unwrap().status, "completed");
+    assert_eq!(repo.get_sync_queue_item(q2.id).unwrap().status, "completed");
 }
 
 // ── Virtual paths ──────────────────────────────────────────────────────────
@@ -1107,6 +1220,36 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
     assert_eq!(archive["path"], "/virtual/docs/archive");
     assert_eq!(archive["item_count"], 1);
     assert_eq!(archive["has_children"], true);
+}
+
+#[actix_rt::test]
+async fn test_virtual_paths_tree_includes_folder_derived_file_virtual_paths() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("vp-tree-derived", "/p", "/s").unwrap();
+
+    repo.create_tracked_folder(pair.id, "docs", Some("/virtual/docs"))
+        .unwrap();
+    repo.create_tracked_file_with_source(pair.id, "docs/a.txt", "h1", 10, None, false, true)
+        .unwrap();
+
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/virtual-paths/tree?parent=/virtual")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let children = body["children"].as_array().unwrap();
+
+    let docs = children
+        .iter()
+        .find(|child| child["name"] == "docs")
+        .expect("docs child should exist");
+    assert_eq!(docs["path"], "/virtual/docs");
+    assert_eq!(docs["item_count"], 2);
+    assert_eq!(docs["has_children"], true);
 }
 
 // ── Integrity ──────────────────────────────────────────────────────────────

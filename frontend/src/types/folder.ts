@@ -20,3 +20,7 @@ export interface ScanFolderResult {
   new_files: number
   changed_files: number
 }
+
+export interface MirrorFolderResult {
+  mirrored_files: number
+}

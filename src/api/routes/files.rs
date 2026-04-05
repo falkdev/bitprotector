@@ -56,16 +56,10 @@ pub async fn track_file(
                     .json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
             }
         };
-    if body.mirror.unwrap_or(false) {
-        if pair.standby_accepts_sync() {
-            if let Err(e) = mirror::mirror_file(&pair, &tracked.relative_path) {
-                return HttpResponse::InternalServerError()
-                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
-            }
-            if let Err(e) = repo.update_tracked_file_mirror_status(tracked.id, true) {
-                return HttpResponse::InternalServerError()
-                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
-            }
+    if !existed_before && pair.standby_accepts_sync() {
+        if let Err(e) = repo.create_sync_queue_item_dedup(tracked.id, "mirror") {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
         }
     }
     if existed_before {
@@ -134,7 +128,10 @@ pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
             .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
     }
     match repo.update_tracked_file_mirror_status(id, true) {
-        Ok(()) => HttpResponse::Ok().json(serde_json::json!({ "mirrored": true })),
+        Ok(()) => {
+            let _ = repo.complete_pending_mirror_queue_for_file(id);
+            HttpResponse::Ok().json(serde_json::json!({ "mirrored": true }))
+        }
         Err(e) => HttpResponse::InternalServerError()
             .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
     }
