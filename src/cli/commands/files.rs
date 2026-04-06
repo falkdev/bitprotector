@@ -133,8 +133,8 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 if file.is_mirrored { "yes" } else { "no" }
             );
             println!(
-                "  Last Verified: {}",
-                file.last_verified.as_deref().unwrap_or("never")
+                "  Last Integrity Check: {}",
+                file.last_integrity_check_at.as_deref().unwrap_or("never")
             );
             println!("  Created:       {}", file.created_at);
         }

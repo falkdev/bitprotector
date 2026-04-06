@@ -132,9 +132,7 @@ async fn delete_schedule(
             reload_scheduler(&scheduler);
             HttpResponse::NoContent().finish()
         }
-        Err(_) => {
-            HttpResponse::NotFound().json(ApiError::new("not_found", "Schedule not found"))
-        }
+        Err(_) => HttpResponse::NotFound().json(ApiError::new("not_found", "Schedule not found")),
     }
 }
 

@@ -57,6 +57,10 @@ describe('TrackingWorkspacePage', () => {
 
     renderWithApp(<TrackingWorkspacePage />)
 
+    expect(await screen.findByTestId('page-title')).toHaveTextContent('Tracking Workspace')
+    expect(screen.getByTestId('page-subtitle')).toHaveTextContent(
+      'Track files and folders, manage virtual paths, and inspect item details.'
+    )
     const fileRow = await screen.findByTestId('file-row-11')
     const folderRow = screen.getByTestId('folder-row-21')
 
@@ -434,6 +438,7 @@ describe('TrackingWorkspacePage', () => {
     expect(await screen.findByText('Checksum (BLAKE3)')).toBeInTheDocument()
     expect(screen.getByText(checksum)).toBeInTheDocument()
     expect(within(screen.getByTestId('file-details')).getByText('Primary Mirror')).toBeInTheDocument()
+    expect(within(screen.getByTestId('file-details')).getByText('Last integrity check')).toBeInTheDocument()
   })
 
   it('keeps effective virtual path in file details when file endpoint returns null virtual_path', async () => {

@@ -87,9 +87,15 @@ async fn resolve_queue_item(
         Ok(item) => HttpResponse::Ok().json(item),
         Err(e) => {
             let msg = e.to_string();
-            if msg.contains("does not exist") || msg.contains("not a regular file") || msg.contains("not readable") {
+            if msg.contains("does not exist")
+                || msg.contains("not a regular file")
+                || msg.contains("not readable")
+            {
                 HttpResponse::BadRequest().json(ApiError::new("validation_error", &msg))
-            } else if msg.contains("only 'user_action_required'") || msg.contains("only 'pending'") || msg.contains("Unknown resolution") {
+            } else if msg.contains("only 'user_action_required'")
+                || msg.contains("only 'pending'")
+                || msg.contains("Unknown resolution")
+            {
                 HttpResponse::BadRequest().json(ApiError::new("bad_request", &msg))
             } else if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {
                 HttpResponse::NotFound().json(ApiError::new("not_found", "Queue item not found"))

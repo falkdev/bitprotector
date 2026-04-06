@@ -47,6 +47,11 @@ tests/
 
 Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing.
 
+Frontend tests live in:
+
+- `frontend/src/**/*.test.tsx` for unit/component tests
+- `frontend/tests/e2e/*.spec.ts` for Playwright end-to-end tests (including QEMU-targeted runs)
+
 ---
 
 ## Running Tests
@@ -76,6 +81,13 @@ To run the live frontend smoke suite against a manual QEMU guest that is already
 ```bash
 cd frontend
 npm run test:e2e:qemu
+```
+
+To run only auth/nav plus integrity live specs:
+
+```bash
+cd frontend
+npm run test:e2e:qemu -- tests/e2e/auth-and-nav.spec.ts tests/e2e/integrity.spec.ts
 ```
 
 To run only the tracking-focused live specs:
@@ -230,6 +242,14 @@ The broader API route integration file (`tests/integration/api_routes.rs`) now a
 - `source=both` rejection (`400`)
 - folder aggregate status fields in mixed tracking responses
 
+It also covers the async integrity-run lifecycle:
+
+- `POST /integrity/runs` start behavior
+- single active-run conflict (`409`)
+- `GET /integrity/runs/active` progress polling shape
+- `POST /integrity/runs/{id}/stop` cooperative stop behavior
+- latest/per-run paged result endpoints with `issues_only=true`
+
 ### Filesystem Browser Integration Tests
 
 File: `tests/integration/api_filesystem_browser.rs`
@@ -279,6 +299,17 @@ Frontend component/unit tests now also cover the path-picker workflow in `fronte
 - lazy-loading behavior in the shared path picker dialog
 - absolute-to-relative conversion for tracked file/folder submits
 - absolute path fill behavior in drive configuration forms
+
+Integrity and layout-focused frontend tests now cover:
+
+- Integrity page bootstrap loading indicator while latest run data is fetched
+- Integrity page intro rendering of `Last integrity check` timestamp
+- start-run modal flow (drive-pair/all selection + recovery toggle)
+- running banner/progress and stop transition behavior
+- issue-only table rendering and no-issues empty states
+- sidebar footer placement for username/logout controls
+- authenticated layout rendering without top header chrome
+- Tracking file detail rendering of `Last integrity check` from `last_integrity_check_at`
 
 Tracking Workspace UI tests (`frontend/src/pages/TrackingWorkspacePage.test.tsx`) also cover:
 

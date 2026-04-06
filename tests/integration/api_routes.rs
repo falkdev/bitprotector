@@ -459,7 +459,9 @@ async fn test_tracking_items_rejects_legacy_both_source_filter() {
 #[actix_rt::test]
 async fn test_tracking_items_derives_file_virtual_path_from_tracked_folder_virtual_path() {
     let repo = make_repo();
-    let pair = repo.create_drive_pair("tracking-derived-vpath", "/p", "/s").unwrap();
+    let pair = repo
+        .create_drive_pair("tracking-derived-vpath", "/p", "/s")
+        .unwrap();
     repo.create_tracked_folder(pair.id, "docs", Some("/virtual/docs"))
         .unwrap();
     repo.create_tracked_file_with_source(pair.id, "docs/a.txt", "h1", 10, None, false, true)
@@ -1004,7 +1006,9 @@ async fn test_folders_scan() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert!(body["new_files"].as_u64().unwrap() >= 1);
-    let (files, total_files) = repo.list_tracked_files(Some(pair.id), None, None, 1, 20).unwrap();
+    let (files, total_files) = repo
+        .list_tracked_files(Some(pair.id), None, None, 1, 20)
+        .unwrap();
     assert_eq!(total_files, 1);
     assert!(!files[0].is_mirrored);
     let (queue, total_queue) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
@@ -1225,7 +1229,9 @@ async fn test_virtual_paths_tree_returns_lazy_children_with_counts() {
 #[actix_rt::test]
 async fn test_virtual_paths_tree_includes_folder_derived_file_virtual_paths() {
     let repo = make_repo();
-    let pair = repo.create_drive_pair("vp-tree-derived", "/p", "/s").unwrap();
+    let pair = repo
+        .create_drive_pair("vp-tree-derived", "/p", "/s")
+        .unwrap();
 
     repo.create_tracked_folder(pair.id, "docs", Some("/virtual/docs"))
         .unwrap();
@@ -1298,26 +1304,12 @@ async fn test_integrity_check_file_not_found() {
 }
 
 #[actix_rt::test]
-async fn test_integrity_check_all_empty() {
-    let app = make_app!(make_repo()).await;
-    let req = test::TestRequest::get()
-        .uri("/api/v1/integrity/check-all")
-        .insert_header(("Authorization", bearer()))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["results"].as_array().unwrap().len(), 0);
-}
-
-#[actix_rt::test]
-async fn test_integrity_check_all_with_recover() {
+async fn test_integrity_run_start_and_latest_results() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
     let content = b"good content";
     fs::write(primary.path().join("r.txt"), content).unwrap();
-    // Mirror is corrupt
-    fs::write(secondary.path().join("r.txt"), b"corrupt").unwrap();
+    // Mirror is intentionally missing, so this run should report one issue row.
     let repo = make_repo();
     let pair = repo
         .create_drive_pair(
@@ -1329,20 +1321,151 @@ async fn test_integrity_check_all_with_recover() {
     let hash = checksum::checksum_bytes(content);
     repo.create_tracked_file(pair.id, "r.txt", &hash, content.len() as i64, None)
         .unwrap();
+
     let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/integrity/runs")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({ "recover": false }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let run_id = body["id"].as_i64().unwrap();
+
+    for _ in 0..60 {
+        let req = test::TestRequest::get()
+            .uri("/api/v1/integrity/runs/active")
+            .insert_header(("Authorization", bearer()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        if body["run"].is_null() {
+            break;
+        }
+        actix_rt::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
     let req = test::TestRequest::get()
-        .uri("/api/v1/integrity/check-all?recover=true")
+        .uri("/api/v1/integrity/runs/latest?issues_only=true&page=1&per_page=50")
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = test::read_body_json(resp).await;
-    let results = body["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["recovered"], true);
-    // Mirror should now match primary
-    let mirror = fs::read(secondary.path().join("r.txt")).unwrap();
-    assert_eq!(mirror, content);
+    let latest: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(latest["run"]["id"], run_id);
+    assert_eq!(latest["run"]["status"], "completed");
+    assert_eq!(latest["total"], 1);
+    assert_eq!(latest["results"][0]["file_id"], 1);
+    assert_eq!(latest["results"][0]["status"], "mirror_missing");
+    assert_eq!(latest["results"][0]["needs_attention"], true);
+}
+
+#[actix_rt::test]
+async fn test_integrity_run_stop_and_results_endpoint() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let payload = vec![b'x'; 256 * 1024];
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "run-stop",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+    for idx in 0..20 {
+        let relative = format!("docs/file-{idx:03}.txt");
+        let full = primary.path().join(&relative);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&full, &payload).unwrap();
+        let hash = checksum::checksum_bytes(&payload);
+        repo.create_tracked_file(pair.id, &relative, &hash, payload.len() as i64, None)
+            .unwrap();
+    }
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/integrity/runs")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+    let started: serde_json::Value = test::read_body_json(resp).await;
+    let run_id = started["id"].as_i64().unwrap();
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/integrity/runs/{run_id}/stop"))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let stopped: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(stopped["stop_requested"], true);
+
+    for _ in 0..80 {
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/v1/integrity/runs/{run_id}/results?issues_only=true&page=1&per_page=10"
+            ))
+            .insert_header(("Authorization", bearer()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        let status = body["run"]["status"].as_str().unwrap_or_default();
+        if !matches!(status, "running" | "stopping") {
+            assert!(matches!(status, "stopped" | "completed"));
+            break;
+        }
+        actix_rt::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[actix_rt::test]
+async fn test_integrity_run_start_conflicts_when_active_run_exists() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let payload = vec![b'y'; 1024 * 1024];
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "run-conflict",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+    for idx in 0..8 {
+        let relative = format!("big/file-{idx:03}.bin");
+        let full = primary.path().join(&relative);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&full, &payload).unwrap();
+        let hash = checksum::checksum_bytes(&payload);
+        repo.create_tracked_file(pair.id, &relative, &hash, payload.len() as i64, None)
+            .unwrap();
+    }
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/integrity/runs")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/integrity/runs")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let conflict = test::call_service(&app, req).await;
+    assert_eq!(conflict.status(), 409);
 }
 
 // ── Scheduler ─────────────────────────────────────────────────────────────

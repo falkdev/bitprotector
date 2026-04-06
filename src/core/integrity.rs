@@ -204,7 +204,7 @@ mod tests {
             is_mirrored: true,
             tracked_direct: true,
             tracked_via_folder: false,
-            last_verified: None,
+            last_integrity_check_at: None,
             created_at: "".to_string(),
             updated_at: "".to_string(),
         }

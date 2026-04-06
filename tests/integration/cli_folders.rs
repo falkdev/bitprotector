@@ -58,9 +58,7 @@ fn test_folders_show() {
     let secondary = TempDir::new().unwrap();
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("media")).unwrap();
-    let folder = repo
-        .create_tracked_folder(pair.id, "media", None)
-        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "media", None).unwrap();
 
     handle(FoldersCommand::Show { id: folder.id }, &repo).unwrap();
 }
@@ -72,9 +70,7 @@ fn test_folders_remove() {
     let secondary = TempDir::new().unwrap();
     let pair = setup_pair(&repo, &primary, &secondary);
     fs::create_dir(primary.path().join("temp")).unwrap();
-    let folder = repo
-        .create_tracked_folder(pair.id, "temp", None)
-        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "temp", None).unwrap();
 
     handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
     assert!(repo.list_tracked_folders().unwrap().is_empty());
@@ -148,9 +144,7 @@ fn test_folders_mirror_command_mirrors_scanned_unmirrored_files() {
     assert!(secondary.path().join("docs/a.txt").exists());
     assert!(secondary.path().join("docs/b.txt").exists());
     let (queue_items, _) = repo.list_sync_queue(None, 1, 20).unwrap();
-    assert!(queue_items
-        .iter()
-        .all(|item| item.status == "completed"));
+    assert!(queue_items.iter().all(|item| item.status == "completed"));
 }
 
 #[test]
@@ -197,7 +191,10 @@ fn test_folders_add_with_virtual_path() {
         folders[0].virtual_path,
         Some(virtual_path_on_disk.to_string_lossy().to_string())
     );
-    assert_eq!(fs::read_link(&virtual_path_on_disk).unwrap(), primary.path().join("photos"));
+    assert_eq!(
+        fs::read_link(&virtual_path_on_disk).unwrap(),
+        primary.path().join("photos")
+    );
 }
 
 #[test]

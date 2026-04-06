@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { formatDate } from '@/lib/format'
 import type {
   CreateBackupConfigRequest,
@@ -250,29 +251,33 @@ export function DatabaseBackupsPage() {
 
   if (loading && backups.length === 0) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <LoadingSpinner />
+      <div className="space-y-6">
+        <PageIntro
+          title="Database Backups"
+          subtitle="Manage backup destinations, retention, and manual backup runs."
+        />
+        <div className="flex items-center justify-center py-16">
+          <LoadingSpinner />
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Database Backups</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage backup destinations and trigger manual database backups.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          Add Destination
-        </button>
-      </div>
+      <PageIntro
+        title="Database Backups"
+        subtitle="Manage backup destinations, retention, and manual backup runs."
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Add Destination
+          </button>
+        }
+      />
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">

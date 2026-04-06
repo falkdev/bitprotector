@@ -64,7 +64,7 @@ pub struct TrackedFile {
     pub is_mirrored: bool,
     pub tracked_direct: bool,
     pub tracked_via_folder: bool,
-    pub last_verified: Option<String>,
+    pub last_integrity_check_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -175,6 +175,38 @@ pub struct DbBackupConfig {
     pub enabled: bool,
     pub last_backup: Option<String>,
     pub created_at: String,
+}
+
+/// Represents an integrity run summary.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IntegrityRun {
+    pub id: i64,
+    pub scope_drive_pair_id: Option<i64>,
+    pub recover: bool,
+    pub trigger: String,
+    pub status: String,
+    pub total_files: i64,
+    pub processed_files: i64,
+    pub attention_files: i64,
+    pub recovered_files: i64,
+    pub stop_requested: bool,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Represents a single integrity run file result.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IntegrityRunResult {
+    pub id: i64,
+    pub run_id: i64,
+    pub file_id: i64,
+    pub drive_pair_id: i64,
+    pub relative_path: String,
+    pub status: String,
+    pub recovered: bool,
+    pub needs_attention: bool,
+    pub checked_at: String,
 }
 
 /// Data access repository providing CRUD operations on all entities.
@@ -426,7 +458,7 @@ impl Repository {
         let file = conn.query_row(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
                     is_mirrored, tracked_direct, tracked_via_folder,
-                    last_verified, created_at, updated_at
+                    last_integrity_check_at, created_at, updated_at
              FROM tracked_files WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -440,7 +472,7 @@ impl Repository {
                     is_mirrored: row.get::<_, i64>(6)? != 0,
                     tracked_direct: row.get::<_, i64>(7)? != 0,
                     tracked_via_folder: row.get::<_, i64>(8)? != 0,
-                    last_verified: row.get(9)?,
+                    last_integrity_check_at: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -458,7 +490,7 @@ impl Repository {
         let file = conn.query_row(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
                     is_mirrored, tracked_direct, tracked_via_folder,
-                    last_verified, created_at, updated_at
+                    last_integrity_check_at, created_at, updated_at
              FROM tracked_files WHERE drive_pair_id=?1 AND relative_path=?2",
             rusqlite::params![drive_pair_id, relative_path],
             |row| {
@@ -472,7 +504,7 @@ impl Repository {
                     is_mirrored: row.get::<_, i64>(6)? != 0,
                     tracked_direct: row.get::<_, i64>(7)? != 0,
                     tracked_via_folder: row.get::<_, i64>(8)? != 0,
-                    last_verified: row.get(9)?,
+                    last_integrity_check_at: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -516,7 +548,7 @@ impl Repository {
         let query = format!(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
                     is_mirrored, tracked_direct, tracked_via_folder,
-                    last_verified, created_at, updated_at
+                    last_integrity_check_at, created_at, updated_at
              FROM tracked_files {where_clause} ORDER BY id LIMIT {per_page} OFFSET {offset}"
         );
         let count_query = format!("SELECT COUNT(*) FROM tracked_files {where_clause}");
@@ -534,7 +566,7 @@ impl Repository {
                     is_mirrored: row.get::<_, i64>(6)? != 0,
                     tracked_direct: row.get::<_, i64>(7)? != 0,
                     tracked_via_folder: row.get::<_, i64>(8)? != 0,
-                    last_verified: row.get(9)?,
+                    last_integrity_check_at: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -576,10 +608,10 @@ impl Repository {
         Ok(())
     }
 
-    pub fn update_tracked_file_last_verified(&self, id: i64) -> anyhow::Result<()> {
+    pub fn update_tracked_file_last_integrity_check_at(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "UPDATE tracked_files SET last_verified=datetime('now'), updated_at=datetime('now') WHERE id=?1",
+            "UPDATE tracked_files SET last_integrity_check_at=datetime('now'), updated_at=datetime('now') WHERE id=?1",
             rusqlite::params![id],
         )?;
         Ok(())
@@ -664,6 +696,284 @@ impl Repository {
         Ok(())
     }
 
+    pub fn count_tracked_files(&self, drive_pair_id: Option<i64>) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let count = if let Some(id) = drive_pair_id {
+            conn.query_row(
+                "SELECT COUNT(*) FROM tracked_files WHERE drive_pair_id=?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )?
+        } else {
+            conn.query_row("SELECT COUNT(*) FROM tracked_files", [], |row| row.get(0))?
+        };
+        Ok(count)
+    }
+
+    // ─── Integrity Runs ──────────────────────────────────────────────────────────
+
+    pub fn create_integrity_run(
+        &self,
+        scope_drive_pair_id: Option<i64>,
+        recover: bool,
+        trigger: &str,
+        total_files: i64,
+    ) -> anyhow::Result<IntegrityRun> {
+        let id = {
+            let conn = self.conn()?;
+            conn.execute(
+                "INSERT INTO integrity_runs (
+                    scope_drive_pair_id, recover, trigger, status, total_files
+                 ) VALUES (?1, ?2, ?3, 'running', ?4)",
+                rusqlite::params![scope_drive_pair_id, recover as i64, trigger, total_files],
+            )?;
+            conn.last_insert_rowid()
+        };
+        self.get_integrity_run(id)
+    }
+
+    pub fn get_integrity_run(&self, id: i64) -> anyhow::Result<IntegrityRun> {
+        let conn = self.conn()?;
+        let run = conn.query_row(
+            "SELECT id, scope_drive_pair_id, recover, trigger, status,
+                    total_files, processed_files, attention_files, recovered_files,
+                    stop_requested, started_at, ended_at, error_message
+             FROM integrity_runs
+             WHERE id=?1",
+            rusqlite::params![id],
+            |row| {
+                Ok(IntegrityRun {
+                    id: row.get(0)?,
+                    scope_drive_pair_id: row.get(1)?,
+                    recover: row.get::<_, i64>(2)? != 0,
+                    trigger: row.get(3)?,
+                    status: row.get(4)?,
+                    total_files: row.get(5)?,
+                    processed_files: row.get(6)?,
+                    attention_files: row.get(7)?,
+                    recovered_files: row.get(8)?,
+                    stop_requested: row.get::<_, i64>(9)? != 0,
+                    started_at: row.get(10)?,
+                    ended_at: row.get(11)?,
+                    error_message: row.get(12)?,
+                })
+            },
+        )?;
+        Ok(run)
+    }
+
+    pub fn get_active_integrity_run(&self) -> anyhow::Result<Option<IntegrityRun>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, scope_drive_pair_id, recover, trigger, status,
+                    total_files, processed_files, attention_files, recovered_files,
+                    stop_requested, started_at, ended_at, error_message
+             FROM integrity_runs
+             WHERE status IN ('running', 'stopping')
+             ORDER BY started_at DESC, id DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(IntegrityRun {
+                id: row.get(0)?,
+                scope_drive_pair_id: row.get(1)?,
+                recover: row.get::<_, i64>(2)? != 0,
+                trigger: row.get(3)?,
+                status: row.get(4)?,
+                total_files: row.get(5)?,
+                processed_files: row.get(6)?,
+                attention_files: row.get(7)?,
+                recovered_files: row.get(8)?,
+                stop_requested: row.get::<_, i64>(9)? != 0,
+                started_at: row.get(10)?,
+                ended_at: row.get(11)?,
+                error_message: row.get(12)?,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub fn get_latest_integrity_run(&self) -> anyhow::Result<Option<IntegrityRun>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, scope_drive_pair_id, recover, trigger, status,
+                    total_files, processed_files, attention_files, recovered_files,
+                    stop_requested, started_at, ended_at, error_message
+             FROM integrity_runs
+             ORDER BY started_at DESC, id DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(IntegrityRun {
+                id: row.get(0)?,
+                scope_drive_pair_id: row.get(1)?,
+                recover: row.get::<_, i64>(2)? != 0,
+                trigger: row.get(3)?,
+                status: row.get(4)?,
+                total_files: row.get(5)?,
+                processed_files: row.get(6)?,
+                attention_files: row.get(7)?,
+                recovered_files: row.get(8)?,
+                stop_requested: row.get::<_, i64>(9)? != 0,
+                started_at: row.get(10)?,
+                ended_at: row.get(11)?,
+                error_message: row.get(12)?,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub fn request_integrity_run_stop(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE integrity_runs
+             SET stop_requested=1,
+                 status=CASE WHEN status='running' THEN 'stopping' ELSE status END
+             WHERE id=?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_integrity_run(
+        &self,
+        id: i64,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE integrity_runs
+             SET status=?1, ended_at=datetime('now'), error_message=?2
+             WHERE id=?3",
+            rusqlite::params![status, error_message, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn append_integrity_run_result(
+        &self,
+        run_id: i64,
+        file_id: i64,
+        drive_pair_id: i64,
+        relative_path: &str,
+        status: &str,
+        recovered: bool,
+        needs_attention: bool,
+    ) -> anyhow::Result<IntegrityRunResult> {
+        let id = {
+            let conn = self.conn()?;
+            conn.execute(
+                "INSERT INTO integrity_run_results (
+                    run_id, file_id, drive_pair_id, relative_path, status,
+                    recovered, needs_attention
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    run_id,
+                    file_id,
+                    drive_pair_id,
+                    relative_path,
+                    status,
+                    recovered as i64,
+                    needs_attention as i64
+                ],
+            )?;
+            conn.last_insert_rowid()
+        };
+
+        let conn = self.conn()?;
+        let result = conn.query_row(
+            "SELECT id, run_id, file_id, drive_pair_id, relative_path, status,
+                    recovered, needs_attention, checked_at
+             FROM integrity_run_results
+             WHERE id=?1",
+            rusqlite::params![id],
+            |row| {
+                Ok(IntegrityRunResult {
+                    id: row.get(0)?,
+                    run_id: row.get(1)?,
+                    file_id: row.get(2)?,
+                    drive_pair_id: row.get(3)?,
+                    relative_path: row.get(4)?,
+                    status: row.get(5)?,
+                    recovered: row.get::<_, i64>(6)? != 0,
+                    needs_attention: row.get::<_, i64>(7)? != 0,
+                    checked_at: row.get(8)?,
+                })
+            },
+        )?;
+        Ok(result)
+    }
+
+    pub fn increment_integrity_run_progress(
+        &self,
+        run_id: i64,
+        attention_delta: i64,
+        recovered_delta: i64,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE integrity_runs
+             SET processed_files=processed_files + 1,
+                 attention_files=attention_files + ?1,
+                 recovered_files=recovered_files + ?2
+             WHERE id=?3",
+            rusqlite::params![attention_delta, recovered_delta, run_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_integrity_run_results(
+        &self,
+        run_id: i64,
+        issues_only: bool,
+        page: i64,
+        per_page: i64,
+    ) -> anyhow::Result<(Vec<IntegrityRunResult>, i64)> {
+        let conn = self.conn()?;
+        let page = page.max(1);
+        let per_page = per_page.clamp(1, 200);
+        let offset = (page - 1) * per_page;
+
+        let where_clause = if issues_only {
+            "WHERE run_id=?1 AND needs_attention=1"
+        } else {
+            "WHERE run_id=?1"
+        };
+
+        let query = format!(
+            "SELECT id, run_id, file_id, drive_pair_id, relative_path, status,
+                    recovered, needs_attention, checked_at
+             FROM integrity_run_results
+             {where_clause}
+             ORDER BY id
+             LIMIT ?2 OFFSET ?3"
+        );
+        let count_query = format!("SELECT COUNT(*) FROM integrity_run_results {where_clause}");
+
+        let results = conn
+            .prepare(&query)?
+            .query_map(rusqlite::params![run_id, per_page, offset], |row| {
+                Ok(IntegrityRunResult {
+                    id: row.get(0)?,
+                    run_id: row.get(1)?,
+                    file_id: row.get(2)?,
+                    drive_pair_id: row.get(3)?,
+                    relative_path: row.get(4)?,
+                    status: row.get(5)?,
+                    recovered: row.get::<_, i64>(6)? != 0,
+                    needs_attention: row.get::<_, i64>(7)? != 0,
+                    checked_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let total = conn.query_row(&count_query, rusqlite::params![run_id], |row| row.get(0))?;
+        Ok((results, total))
+    }
+
     // ─── Tracked Folders ─────────────────────────────────────────────────────────
 
     pub fn create_tracked_folder(
@@ -732,7 +1042,7 @@ impl Repository {
         let mut stmt = conn.prepare(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
                     is_mirrored, tracked_direct, tracked_via_folder,
-                    last_verified, created_at, updated_at
+                    last_integrity_check_at, created_at, updated_at
              FROM tracked_files
              WHERE drive_pair_id = ?1
                AND (
@@ -753,7 +1063,7 @@ impl Repository {
                     is_mirrored: row.get::<_, i64>(6)? != 0,
                     tracked_direct: row.get::<_, i64>(7)? != 0,
                     tracked_via_folder: row.get::<_, i64>(8)? != 0,
-                    last_verified: row.get(9)?,
+                    last_integrity_check_at: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -844,9 +1154,8 @@ impl Repository {
             }
             match source {
                 "direct" => conditions.push("tf.tracked_direct = 1".to_string()),
-                "folder" => conditions.push(
-                    "tf.tracked_direct = 0 AND tf.tracked_via_folder = 1".to_string(),
-                ),
+                "folder" => conditions
+                    .push("tf.tracked_direct = 0 AND tf.tracked_via_folder = 1".to_string()),
                 _ => {}
             }
 
@@ -979,14 +1288,14 @@ impl Repository {
                     "folder" => TrackingSource::Folder,
                     _ => TrackingSource::Direct,
                 };
-                let folder_status = row
-                    .get::<_, Option<String>>(9)?
-                    .map(|status| match status.as_str() {
-                        "empty" => TrackingFolderStatus::Empty,
-                        "mirrored" => TrackingFolderStatus::Mirrored,
-                        "partial" => TrackingFolderStatus::Partial,
-                        _ => TrackingFolderStatus::Tracked,
-                    });
+                let folder_status =
+                    row.get::<_, Option<String>>(9)?
+                        .map(|status| match status.as_str() {
+                            "empty" => TrackingFolderStatus::Empty,
+                            "mirrored" => TrackingFolderStatus::Mirrored,
+                            "partial" => TrackingFolderStatus::Partial,
+                            _ => TrackingFolderStatus::Tracked,
+                        });
 
                 Ok(TrackingItem {
                     kind,
@@ -1277,7 +1586,10 @@ impl Repository {
         Ok(())
     }
 
-    pub fn complete_pending_mirror_queue_for_file(&self, tracked_file_id: i64) -> anyhow::Result<u64> {
+    pub fn complete_pending_mirror_queue_for_file(
+        &self,
+        tracked_file_id: i64,
+    ) -> anyhow::Result<u64> {
         let conn = self.conn()?;
         let affected = conn.execute(
             "UPDATE sync_queue

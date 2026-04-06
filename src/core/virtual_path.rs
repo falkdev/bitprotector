@@ -465,7 +465,8 @@ mod tests {
         fs::create_dir_all(virtual_path_on_disk.parent().unwrap()).unwrap();
         fs::write(&virtual_path_on_disk, b"foreign").unwrap();
 
-        let error = set_virtual_path(&repo, file.id, virtual_path_on_disk.to_str().unwrap()).unwrap_err();
+        let error =
+            set_virtual_path(&repo, file.id, virtual_path_on_disk.to_str().unwrap()).unwrap_err();
         assert!(error
             .to_string()
             .contains("not a BitProtector-managed symlink"));
@@ -539,7 +540,8 @@ mod tests {
         let file_virtual_path = virtual_root.path().join("docs/doc.txt");
 
         set_folder_virtual_path(&repo, folder.id, folder_virtual_path.to_str().unwrap()).unwrap();
-        let error = set_virtual_path(&repo, file.id, file_virtual_path.to_str().unwrap()).unwrap_err();
+        let error =
+            set_virtual_path(&repo, file.id, file_virtual_path.to_str().unwrap()).unwrap_err();
 
         assert!(error.to_string().contains("overlaps"));
     }

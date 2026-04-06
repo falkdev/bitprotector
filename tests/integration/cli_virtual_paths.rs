@@ -88,7 +88,11 @@ fn test_remove_virtual_path_clears_symlink() {
     )
     .unwrap();
 
-    handle(VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }), &repo).unwrap();
+    handle(
+        VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }),
+        &repo,
+    )
+    .unwrap();
 
     let symlink = virtual_root.path().join("data/data.csv");
     assert!(
@@ -154,7 +158,10 @@ fn test_remove_on_file_without_virtual_path_returns_error() {
 
     let (_, file) = setup_tracked_file(&repo, &primary, &secondary, "orphan.txt");
 
-    let result = handle(VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }), &repo);
+    let result = handle(
+        VirtualPathsCommand::Remove(RemoveArgs { file_id: file.id }),
+        &repo,
+    );
 
     assert!(
         result.is_err(),

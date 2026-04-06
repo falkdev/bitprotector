@@ -239,9 +239,7 @@ mod tests {
         let secondary = TempDir::new().unwrap();
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("proj")).unwrap();
-        let folder = repo
-            .create_tracked_folder(pair.id, "proj", None)
-            .unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "proj", None).unwrap();
         handle(FoldersCommand::Show { id: folder.id }, &repo).unwrap();
     }
 
@@ -252,9 +250,7 @@ mod tests {
         let secondary = TempDir::new().unwrap();
         let pair = setup_pair(&repo, &primary, &secondary);
         fs::create_dir(primary.path().join("tmp")).unwrap();
-        let folder = repo
-            .create_tracked_folder(pair.id, "tmp", None)
-            .unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "tmp", None).unwrap();
         handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
         assert!(repo.list_tracked_folders().unwrap().is_empty());
     }
@@ -299,7 +295,13 @@ mod tests {
         .unwrap();
 
         let folders = repo.list_tracked_folders().unwrap();
-        assert_eq!(folders[0].virtual_path.as_deref(), Some(virtual_path_on_disk.to_str().unwrap()));
-        assert_eq!(fs::read_link(&virtual_path_on_disk).unwrap(), primary.path().join("photos"));
+        assert_eq!(
+            folders[0].virtual_path.as_deref(),
+            Some(virtual_path_on_disk.to_str().unwrap())
+        );
+        assert_eq!(
+            fs::read_link(&virtual_path_on_disk).unwrap(),
+            primary.path().join("photos")
+        );
     }
 }

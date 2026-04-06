@@ -15,7 +15,7 @@ test('loads dashboard status and runs the core quick actions against the live ba
   ])
 
   await page.goto('/dashboard')
-  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  await expect(page).toHaveURL(/\/dashboard$/)
   await expect(page.getByTestId('status-metric-files-tracked')).toBeVisible()
   await expect(page.getByTestId('quick-action-sync')).toBeVisible()
 
@@ -23,7 +23,7 @@ test('loads dashboard status and runs the core quick actions against the live ba
   await expectToast(page, /Sync queue processed/)
 
   await page.getByTestId('quick-action-integrity').click()
-  await expectToast(page, /All files passed integrity check|Integrity check complete/)
+  await expectToast(page, /Integrity run #\d+ started/)
 
   await page.getByTestId('quick-action-backup').click()
   await expectToast(page, /Database backup completed|Backup completed with/)

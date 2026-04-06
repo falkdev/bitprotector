@@ -25,7 +25,10 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 2. You **track files** (individually or by folder). BitProtector computes a BLAKE3 checksum and queues mirror work in `sync_queue` by default.
    - In the web UI, tracked file/folder forms now open a real server-side path picker backed by the host filesystem.
    - Those web selections may start as absolute host paths in the UI, but BitProtector still stores tracked file/folder paths relative to the selected drive pair's active root.
-3. Scheduled **integrity checks** re-hash both copies and compare them against the stored baseline:
+3. **Integrity runs** re-hash tracked files against the stored baseline using an async run model:
+   - Full runs are persisted (`integrity_runs` + `integrity_run_results`) and can be polled while processing.
+   - The Integrity page auto-loads the latest persisted run on open and only renders files that need attention.
+   - Large datasets stay responsive because the backend processes/persists results incrementally and the UI fetches paged issue rows.
    - Mirror corrupted → restore from primary.
    - Primary corrupted → restore from mirror.
    - Both corrupted → flag for user action.
@@ -131,7 +134,7 @@ bitprotector files mirror <file-id>
 # 6. Optional: mirror all unmirrored tracked files under one folder now
 bitprotector folders mirror <folder-id>
 
-# 7. Run an integrity check
+# 7. Run an integrity check (persisted run summary/results)
 bitprotector integrity check all
 
 # 8. Show overall status
@@ -199,6 +202,10 @@ In the web UI:
 - drive pair and replacement-drive forms can also fill directory paths from the same browser
 - tracked file/folder submissions are validated against the selected drive pair's active root before they are stored
 - tracking and folder scans queue mirror work by default; use explicit mirror actions or sync processing for immediate copies
+- Integrity page starts/stops async runs, shows a running progress banner, and only lists issue rows (`needs_attention=true`)
+- the latest run is loaded from DB automatically on page open; results are fetched in pages for responsiveness
+- the Integrity page intro shows `Last integrity check` as a date/time timestamp (instead of a run ID)
+- user/logout controls are pinned to the bottom of the left sidebar (top header chrome removed across authenticated pages)
 
 For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
 

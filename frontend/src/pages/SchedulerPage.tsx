@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { formatDate } from '@/lib/format'
 import type {
   CreateScheduleRequest,
@@ -245,29 +246,33 @@ export function SchedulerPage() {
 
   if (loading && schedules.length === 0) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <LoadingSpinner />
+      <div className="space-y-6">
+        <PageIntro
+          title="Scheduler"
+          subtitle="Configure recurring sync and integrity jobs for automated maintenance."
+        />
+        <div className="flex items-center justify-center py-16">
+          <LoadingSpinner />
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Scheduler</h1>
-          <p className="text-sm text-muted-foreground">
-            Configure recurring sync and integrity tasks.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          Add Schedule
-        </button>
-      </div>
+      <PageIntro
+        title="Scheduler"
+        subtitle="Configure recurring sync and integrity jobs for automated maintenance."
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Add Schedule
+          </button>
+        }
+      />
 
       <DataTable
         tableTestId="scheduler-table"

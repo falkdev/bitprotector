@@ -1,170 +1,85 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Clock3, Play, RotateCcw, Square } from 'lucide-react'
 import { toast } from 'sonner'
-import { ShieldCheck, RotateCcw } from 'lucide-react'
 import { integrityApi } from '@/api/integrity'
 import { drivesApi } from '@/api/drives'
 import { IntegrityStatusBadge } from '@/components/integrity/IntegrityStatus'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
+import { formatDate } from '@/lib/format'
 import type { DrivePair } from '@/types/drive'
-import type { BatchIntegrityResult } from '@/types/integrity'
+import type { IntegrityRun, IntegrityRunResult } from '@/types/integrity'
 
-const ISSUE_STATUSES = new Set([
-  'master_corrupted',
-  'mirror_corrupted',
-  'both_corrupted',
-  'master_missing',
-  'mirror_missing',
-  'primary_drive_unavailable',
-  'secondary_drive_unavailable',
-])
+const PAGE_SIZE = 50
 
-function SummaryCard({
-  label,
-  value,
-  tone = 'default',
-}: {
-  label: string
-  value: number
-  tone?: 'default' | 'warning' | 'danger' | 'info'
-}) {
+function getLastIntegrityCheckLabel(run: IntegrityRun | null): string {
+  if (!run) {
+    return 'No integrity checks yet'
+  }
+
+  if (run.ended_at) {
+    return formatDate(run.ended_at)
+  }
+
+  if (run.status === 'running' || run.status === 'stopping') {
+    return `In progress (started ${formatDate(run.started_at)})`
+  }
+
+  return formatDate(run.started_at)
+}
+
+function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
-    <div
-      className={[
-        'rounded-lg border p-4',
-        tone === 'default' && 'border-border bg-card',
-        tone === 'warning' && 'border-yellow-200 bg-yellow-50',
-        tone === 'danger' && 'border-red-200 bg-red-50',
-        tone === 'info' && 'border-blue-200 bg-blue-50',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
+    <div className="rounded-lg border border-border bg-card p-4">
       <p className="text-2xl font-semibold">{value}</p>
       <p className="mt-1 text-sm text-muted-foreground">{label}</p>
     </div>
   )
 }
 
-export function IntegrityPage() {
-  const [drives, setDrives] = useState<DrivePair[]>([])
+function StartRunDialog({
+  open,
+  drives,
+  loading,
+  onClose,
+  onStart,
+}: {
+  open: boolean
+  drives: DrivePair[]
+  loading: boolean
+  onClose: () => void
+  onStart: (driveId: number | undefined, recover: boolean) => Promise<void>
+}) {
   const [selectedDrive, setSelectedDrive] = useState('all')
   const [recover, setRecover] = useState(true)
-  const [results, setResults] = useState<BatchIntegrityResult[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [drivesLoading, setDrivesLoading] = useState(true)
-  const [checkingFileId, setCheckingFileId] = useState<number | null>(null)
 
   useEffect(() => {
-    let active = true
+    if (!open) return
+    setSelectedDrive('all')
+    setRecover(true)
+  }, [open])
 
-    const loadDrives = async () => {
-      setDrivesLoading(true)
-      try {
-        const nextDrives = await drivesApi.list()
-        if (active) {
-          setDrives(nextDrives)
-        }
-      } catch {
-        toast.error('Failed to load drive pairs')
-      } finally {
-        if (active) {
-          setDrivesLoading(false)
-        }
-      }
-    }
-
-    void loadDrives()
-    return () => {
-      active = false
-    }
-  }, [])
-
-  const runCheckAll = async () => {
-    setLoading(true)
-    try {
-      const response = await integrityApi.checkAll(
-        selectedDrive === 'all' ? undefined : Number(selectedDrive),
-        recover
-      )
-      setResults(response.results)
-      const issues = response.results.filter((result) => ISSUE_STATUSES.has(result.status)).length
-      if (issues === 0) {
-        toast.success('All tracked files passed integrity checks')
-      } else {
-        toast.warning(`Integrity check completed with ${issues} issue(s)`)
-      }
-    } catch {
-      toast.error('Integrity check failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const recheckFile = async (fileId: number) => {
-    setCheckingFileId(fileId)
-    try {
-      const result = await integrityApi.checkFile(fileId, recover)
-      setResults((current) => {
-        const nextResult: BatchIntegrityResult = {
-          file_id: result.file_id,
-          status: result.status,
-          recovered: result.recovered,
-        }
-
-        if (!current) {
-          return [nextResult]
-        }
-
-        const exists = current.some((entry) => entry.file_id === fileId)
-        if (!exists) {
-          return [nextResult, ...current]
-        }
-
-        return current.map((entry) => (entry.file_id === fileId ? nextResult : entry))
-      })
-      toast.success(`File #${fileId} rechecked`)
-    } catch {
-      toast.error(`Failed to recheck file #${fileId}`)
-    } finally {
-      setCheckingFileId(null)
-    }
-  }
-
-  const issueCount = results?.filter((result) => ISSUE_STATUSES.has(result.status)).length ?? 0
-  const recoveredCount = results?.filter((result) => result.recovered).length ?? 0
-  const cleanCount = results?.filter((result) => result.status === 'ok').length ?? 0
+  if (!open) return null
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Integrity Checks</h1>
-          <p className="text-sm text-muted-foreground">
-            Run batch integrity checks and inspect per-file outcomes.
-          </p>
-        </div>
-        <button
-          onClick={() => void runCheckAll()}
-          disabled={loading}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? 'Running…' : 'Run Check'}
-        </button>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+        <h2 className="text-lg font-semibold">Start Integrity Run</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Select which drive pair to check. Results will stream in as files are processed.
+        </p>
 
-      <div className="grid gap-4 rounded-lg border border-border bg-card p-4 lg:grid-cols-[1fr_auto] lg:items-end">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 space-y-4">
           <div>
-            <label htmlFor="drive-filter" className="mb-1 block text-sm font-medium">
+            <label htmlFor="integrity-run-drive" className="mb-1 block text-sm font-medium">
               Drive Pair
             </label>
             <select
-              id="drive-filter"
+              id="integrity-run-drive"
               value={selectedDrive}
               onChange={(event) => setSelectedDrive(event.target.value)}
-              disabled={drivesLoading}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
               <option value="all">All drive pairs</option>
@@ -175,106 +90,384 @@ export function IntegrityPage() {
               ))}
             </select>
           </div>
-          <label className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              checked={recover}
-              onChange={(event) => setRecover(event.target.checked)}
-            />
-            Attempt recovery automatically
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={recover} onChange={(event) => setRecover(event.target.checked)} />
+            Attempt automatic recovery
           </label>
         </div>
-        {drivesLoading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoadingSpinner size="sm" />
-            Loading drives…
-          </div>
-        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void onStart(selectedDrive === 'all' ? undefined : Number(selectedDrive), recover)}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Play className="h-4 w-4" />
+            {loading ? 'Starting…' : 'Start'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function IntegrityPage() {
+  const [drives, setDrives] = useState<DrivePair[]>([])
+  const [run, setRun] = useState<IntegrityRun | null>(null)
+  const [results, setResults] = useState<IntegrityRunResult[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [bootLoading, setBootLoading] = useState(true)
+  const [tableLoading, setTableLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [showStartDialog, setShowStartDialog] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [checkingFileId, setCheckingFileId] = useState<number | null>(null)
+
+  const hasMore = results.length < total
+  const isRunning = run?.status === 'running' || run?.status === 'stopping'
+  const lastIntegrityCheckLabel = getLastIntegrityCheckLabel(run)
+
+  const loadRunResults = useCallback(
+    async (runId: number, nextPage = 1, append = false) => {
+      if (append) {
+        setLoadingMore(true)
+      } else {
+        setTableLoading(true)
+      }
+      try {
+        const response = await integrityApi.runResults(runId, {
+          issues_only: true,
+          page: nextPage,
+          per_page: PAGE_SIZE,
+        })
+        setRun(response.run)
+        setTotal(response.total)
+        setPage(response.page)
+        setResults((current) => (append ? [...current, ...response.results] : response.results))
+      } catch {
+        toast.error('Failed to load integrity results')
+      } finally {
+        setTableLoading(false)
+        setLoadingMore(false)
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    let active = true
+    const bootstrap = async () => {
+      setBootLoading(true)
+      try {
+        const [nextDrives, activeRunResponse, latestResponse] = await Promise.all([
+          drivesApi.list(),
+          integrityApi.activeRun(),
+          integrityApi.latestResults({
+            issues_only: true,
+            page: 1,
+            per_page: PAGE_SIZE,
+          }),
+        ])
+        if (!active) return
+        setDrives(nextDrives)
+
+        if (activeRunResponse.run) {
+          setRun(activeRunResponse.run)
+          const runResponse = await integrityApi.runResults(activeRunResponse.run.id, {
+            issues_only: true,
+            page: 1,
+            per_page: PAGE_SIZE,
+          })
+          if (!active) return
+          setRun(runResponse.run)
+          setResults(runResponse.results)
+          setTotal(runResponse.total)
+          setPage(runResponse.page)
+          return
+        }
+
+        setRun(latestResponse.run)
+        setResults(latestResponse.results)
+        setTotal(latestResponse.total)
+        setPage(latestResponse.page)
+      } catch {
+        toast.error('Failed to load integrity page data')
+      } finally {
+        if (active) {
+          setBootLoading(false)
+        }
+      }
+    }
+
+    void bootstrap()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!run || !isRunning) return
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const activeResponse = await integrityApi.activeRun()
+          if (activeResponse.run?.id === run.id) {
+            setRun(activeResponse.run)
+          }
+          await loadRunResults(run.id, 1, false)
+        } catch {
+          // no-op; the table loader already reports failures
+        }
+      })()
+    }, 2000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [isRunning, loadRunResults, run])
+
+  const startRun = async (driveId: number | undefined, recover: boolean) => {
+    setStarting(true)
+    try {
+      const nextRun = await integrityApi.startRun(driveId, recover)
+      setRun(nextRun)
+      setResults([])
+      setTotal(0)
+      setPage(1)
+      setShowStartDialog(false)
+      toast.success(`Integrity run #${nextRun.id} started`)
+      await loadRunResults(nextRun.id, 1, false)
+    } catch {
+      toast.error('Failed to start integrity run')
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  const stopRun = async () => {
+    if (!run) return
+    setStopping(true)
+    try {
+      const nextRun = await integrityApi.stopRun(run.id)
+      setRun(nextRun)
+      toast.success(`Stop requested for run #${run.id}`)
+    } catch {
+      toast.error(`Failed to stop run #${run.id}`)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  const recheckFile = async (fileId: number) => {
+    setCheckingFileId(fileId)
+    try {
+      const result = await integrityApi.checkFile(fileId, true)
+      if (result.status === 'ok' || result.recovered) {
+        setResults((current) => current.filter((entry) => entry.file_id !== fileId))
+        setTotal((current) => Math.max(0, current - 1))
+      } else {
+        setResults((current) =>
+          current.map((entry) =>
+            entry.file_id === fileId
+              ? {
+                  ...entry,
+                  status: result.status,
+                  recovered: result.recovered,
+                  needs_attention: true,
+                }
+              : entry
+          )
+        )
+      }
+      toast.success(`File #${fileId} rechecked`)
+    } catch {
+      toast.error(`Failed to recheck file #${fileId}`)
+    } finally {
+      setCheckingFileId(null)
+    }
+  }
+
+  const attentionRows = useMemo(
+    () => results.filter((result) => result.needs_attention),
+    [results]
+  )
+
+  if (bootLoading) {
+    return (
+      <div className="space-y-4">
+        <PageIntro
+          title="Integrity"
+          subtitle="Run integrity checks, monitor progress, and review files that need attention."
+        />
+        <div className="flex items-center justify-center gap-3 py-20 text-sm text-muted-foreground">
+          <LoadingSpinner />
+          <span>Loading latest integrity results…</span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <PageIntro
+        title="Integrity"
+        subtitle="Run integrity checks, monitor progress, and review files that need attention."
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              if (isRunning) {
+                void stopRun()
+                return
+              }
+              setShowStartDialog(true)
+            }}
+            disabled={starting || stopping}
+            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+              isRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'
+            }`}
+          >
+            {isRunning ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {isRunning ? (stopping ? 'Stopping…' : 'Stop') : starting ? 'Starting…' : 'Run Check'}
+          </button>
+        }
+      />
+      <div
+        className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
+        data-testid="integrity-last-check"
+      >
+        <Clock3 className="h-4 w-4 text-muted-foreground" />
+        <p className="text-sm">
+          <span className="font-medium">Last integrity check:</span>{' '}
+          <span className="text-muted-foreground">{lastIntegrityCheckLabel}</span>
+        </p>
       </div>
 
-      {results && (
-        <div className="grid gap-4 md:grid-cols-3">
-          <SummaryCard label="Files Checked" value={results.length} />
-          <SummaryCard
-            label="Healthy Files"
-            value={cleanCount}
-            tone={cleanCount === results.length ? 'default' : 'info'}
-          />
-          <SummaryCard
-            label="Issues Found"
-            value={issueCount}
-            tone={issueCount > 0 ? 'danger' : 'default'}
-          />
-          <SummaryCard
-            label="Recovered"
-            value={recoveredCount}
-            tone={recoveredCount > 0 ? 'warning' : 'default'}
-          />
+      {run && (
+        <div className="grid gap-3 md:grid-cols-4">
+          <SummaryCard label="Files Processed" value={run.processed_files} />
+          <SummaryCard label="Total Files" value={run.total_files} />
+          <SummaryCard label="Need Attention" value={run.attention_files} />
+          <SummaryCard label="Recovered" value={run.recovered_files} />
         </div>
       )}
 
-      {results && issueCount > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          {issueCount} file(s) need attention. Re-run individual rows if you want to confirm the
-          latest state after recovery or follow-up work.
+      {run && isRunning && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          Integrity check running ({run.processed_files}/{run.total_files}). Results appear as files
+          are processed.
         </div>
       )}
 
-      {results === null && !loading ? (
-        <EmptyState
-          icon={<ShieldCheck className="h-10 w-10 text-muted-foreground" />}
-          title="No integrity results yet"
-          description="Run a batch check to populate the latest per-file status table."
-        />
-      ) : loading && results === null ? (
-        <div className="flex items-center justify-center py-16">
+      {run && run.error_message && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          Run failed: {run.error_message}
+        </div>
+      )}
+
+      {tableLoading && (
+        <div className="flex items-center justify-center gap-3 py-8 text-sm text-muted-foreground">
           <LoadingSpinner />
+          <span>Loading run results…</span>
         </div>
-      ) : (
-        <DataTable
-          tableTestId="integrity-results-table"
-          columns={[
-            {
-              key: 'file_id',
-              header: 'File ID',
-              cell: (result) => <span className="font-mono text-xs">{result.file_id}</span>,
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              cell: (result) => <IntegrityStatusBadge status={result.status} />,
-            },
-            {
-              key: 'recovered',
-              header: 'Recovered',
-              cell: (result) => (result.recovered ? 'Yes' : 'No'),
-            },
-            {
-              key: 'actions',
-              header: '',
-              cell: (result) => (
-                <button
-                  onClick={() => void recheckFile(result.file_id)}
-                  disabled={checkingFileId === result.file_id}
-                  className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  {checkingFileId === result.file_id ? 'Checking…' : 'Recheck'}
-                </button>
-              ),
-            },
-          ]}
-          data={results ?? []}
-          rowKey={(result) => result.file_id}
-          rowTestId={(result) => `integrity-row-${result.file_id}`}
-          emptyState={
-            <EmptyState
-              title="No tracked files matched this integrity run"
-              description="Adjust the drive filter or run the check again."
-            />
-          }
-        />
       )}
+
+      {!tableLoading && !run ? (
+        <EmptyState
+          title="No integrity runs yet"
+          description="Run an integrity check to populate results."
+        />
+      ) : null}
+
+      {!tableLoading && run && attentionRows.length === 0 && isRunning && (
+        <div className="flex items-center justify-center gap-3 py-8 text-sm text-muted-foreground">
+          <LoadingSpinner />
+          <span>Checking files… no issues found yet.</span>
+        </div>
+      )}
+
+      {!tableLoading && run && attentionRows.length === 0 && !isRunning ? (
+        <EmptyState title="No files need attention" description="The latest run did not find actionable integrity issues." />
+      ) : null}
+
+      {!tableLoading && attentionRows.length > 0 && (
+        <div className="space-y-3">
+          <DataTable
+            tableTestId="integrity-results-table"
+            columns={[
+              {
+                key: 'file_id',
+                header: 'File ID',
+                cell: (result) => <span className="font-mono text-xs">{result.file_id}</span>,
+              },
+              {
+                key: 'relative_path',
+                header: 'Path',
+                cell: (result) => <span className="font-mono text-xs">{result.relative_path}</span>,
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                cell: (result) => <IntegrityStatusBadge status={result.status} />,
+              },
+              {
+                key: 'actions',
+                header: '',
+                cell: (result) => (
+                  <button
+                    onClick={() => void recheckFile(result.file_id)}
+                    disabled={checkingFileId === result.file_id}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {checkingFileId === result.file_id ? 'Checking…' : 'Recheck'}
+                  </button>
+                ),
+              },
+            ]}
+            data={attentionRows}
+            rowKey={(result) => result.id}
+            rowTestId={(result) => `integrity-row-${result.file_id}`}
+            emptyState={<EmptyState title="No files need attention" description="No issue rows on this page." />}
+          />
+
+          {hasMore && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                disabled={loadingMore || !run}
+                onClick={() => {
+                  if (!run) return
+                  void loadRunResults(run.id, page + 1, true)
+                }}
+                className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? 'Loading…' : 'Load More'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <StartRunDialog
+        open={showStartDialog}
+        drives={drives}
+        loading={starting}
+        onClose={() => setShowStartDialog(false)}
+        onStart={startRun}
+      />
     </div>
   )
 }

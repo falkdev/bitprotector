@@ -138,4 +138,3 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
     }
     Ok(())
 }
-

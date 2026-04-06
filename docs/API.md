@@ -462,7 +462,7 @@ List tracked files with optional filtering and pagination.
             "is_mirrored": true,
             "tracked_direct": true,
             "tracked_via_folder": false,
-            "last_verified": "2026-03-14T12:00:00Z",
+            "last_integrity_check_at": "2026-03-14T12:00:00Z",
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-03-14T12:00:00Z"
         }
@@ -750,6 +750,8 @@ Run an integrity check for one tracked file. Add `?recover=true` to attempt auto
 }
 ```
 
+This endpoint updates `tracked_files.last_integrity_check_at` after each check attempt.
+
 `status` is one of:
 
 - `ok`
@@ -763,30 +765,178 @@ Run an integrity check for one tracked file. Add `?recover=true` to attempt auto
 
 ---
 
-### GET `/integrity/check-all`
+### POST `/integrity/runs`
 
-Run integrity checks across all tracked files, or limit them to one drive pair with `?drive_id=<id>`. Add `&recover=true` to enable auto-recovery where possible.
+Start an asynchronous integrity run. Request body is optional.
+
+**Request body (optional):**
+
+```json
+{
+    "drive_id": 1,
+    "recover": false
+}
+```
+
+- `drive_id`: optional scope to one drive pair (omit for all pairs)
+- `recover`: optional (default `false`)
+
+**Response `202`:** run summary object.
+
+```json
+{
+    "id": 101,
+    "scope_drive_pair_id": null,
+    "recover": false,
+    "trigger": "api",
+    "status": "running",
+    "total_files": 100000,
+    "processed_files": 0,
+    "attention_files": 0,
+    "recovered_files": 0,
+    "stop_requested": false,
+    "started_at": "2026-04-06 09:00:00",
+    "ended_at": null,
+    "error_message": null
+}
+```
+
+**Errors:** `409 Conflict` (another run is active)
+
+---
+
+### GET `/integrity/runs/active`
+
+Get the currently active run (status `running` or `stopping`).
 
 **Response `200`:**
 
 ```json
 {
-    "results": [
-        {
-            "file_id": 1,
-            "status": "ok",
-            "recovered": false
-        },
-        {
-            "file_id": 2,
-            "status": "secondary_drive_unavailable",
-            "recovered": false
-        }
-    ]
+    "run": {
+        "id": 101,
+        "scope_drive_pair_id": null,
+        "recover": false,
+        "trigger": "api",
+        "status": "running",
+        "total_files": 100000,
+        "processed_files": 2500,
+        "attention_files": 3,
+        "recovered_files": 1,
+        "stop_requested": false,
+        "started_at": "2026-04-06 09:00:00",
+        "ended_at": null,
+        "error_message": null
+    }
 }
 ```
 
-When a slot is deliberately failed or rebuilding, integrity checks validate the surviving active side and avoid generating a restore storm for the unavailable slot.
+When no run is active:
+
+```json
+{
+    "run": null
+}
+```
+
+---
+
+### POST `/integrity/runs/{id}/stop`
+
+Request cooperative stop for a run by setting `stop_requested=true`.  
+The run transitions to `stopping`, then finishes as `stopped` after the current file completes.
+
+**Response `200`:** updated run summary object.  
+**Errors:** `404 Not Found`
+
+---
+
+### GET `/integrity/runs/latest`
+
+Get the latest persisted run summary plus paged results.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `issues_only` | boolean | Defaults to `true` (return only rows with `needs_attention=true`) |
+| `page` | integer | Page number (default: `1`) |
+| `per_page` | integer | Page size (default: `50`, max: `200`) |
+
+**Response `200`:**
+
+```json
+{
+    "run": {
+        "id": 101,
+        "scope_drive_pair_id": null,
+        "recover": false,
+        "trigger": "api",
+        "status": "completed",
+        "total_files": 100000,
+        "processed_files": 100000,
+        "attention_files": 4,
+        "recovered_files": 2,
+        "stop_requested": false,
+        "started_at": "2026-04-06 09:00:00",
+        "ended_at": "2026-04-06 09:18:00",
+        "error_message": null
+    },
+    "results": [
+        {
+            "id": 555,
+            "run_id": 101,
+            "file_id": 18,
+            "drive_pair_id": 1,
+            "relative_path": "docs/broken.txt",
+            "status": "mirror_corrupted",
+            "recovered": false,
+            "needs_attention": true,
+            "checked_at": "2026-04-06 09:04:23"
+        }
+    ],
+    "total": 4,
+    "page": 1,
+    "per_page": 50
+}
+```
+
+When no run exists yet:
+
+```json
+{
+    "run": null,
+    "results": [],
+    "total": 0,
+    "page": 1,
+    "per_page": 50
+}
+```
+
+`needs_attention` is precomputed as `status != ok AND recovered == false` for fast issue-only retrieval.
+
+`status` in run results is one of:
+
+- `ok`
+- `master_corrupted`
+- `mirror_corrupted`
+- `both_corrupted`
+- `master_missing`
+- `mirror_missing`
+- `primary_drive_unavailable`
+- `secondary_drive_unavailable`
+- `internal_error`
+
+---
+
+### GET `/integrity/runs/{id}/results`
+
+Get paged results for a specific run.
+
+**Query parameters:** same as [`GET /integrity/runs/latest`](#get-integrityrunslatest)
+
+**Response `200`:** same shape as latest endpoint (`run`, `results`, `total`, `page`, `per_page`).  
+**Errors:** `404 Not Found`
 
 ---
 

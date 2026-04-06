@@ -2,7 +2,12 @@ import type { DbBackupConfig, RunBackupResult } from '@/types/database'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
 import type { TrackedFolder, ScanFolderResult } from '@/types/folder'
-import type { BatchIntegrityResult, SingleIntegrityResult } from '@/types/integrity'
+import type {
+  IntegrityRun,
+  IntegrityRunResult,
+  IntegrityRunResultsResponse,
+  SingleIntegrityResult,
+} from '@/types/integrity'
 import type { EventLogEntry } from '@/types/log'
 import type { ScheduleConfig } from '@/types/scheduler'
 import type { SystemStatus } from '@/types/status'
@@ -56,7 +61,7 @@ export function makeTrackedFile(overrides: Partial<TrackedFile> = {}): TrackedFi
     is_mirrored: false,
     tracked_direct: true,
     tracked_via_folder: false,
-    last_verified: DEFAULT_DATE,
+    last_integrity_check_at: DEFAULT_DATE,
     created_at: DEFAULT_DATE,
     updated_at: DEFAULT_DATE,
     ...overrides,
@@ -121,11 +126,53 @@ export function makeSystemStatus(overrides: Partial<SystemStatus> = {}): SystemS
   }
 }
 
-export function makeIntegrityResult(overrides: Partial<BatchIntegrityResult> = {}): BatchIntegrityResult {
+export function makeIntegrityRun(overrides: Partial<IntegrityRun> = {}): IntegrityRun {
   return {
+    id: 1,
+    scope_drive_pair_id: null,
+    recover: false,
+    trigger: 'api',
+    status: 'completed',
+    total_files: 5,
+    processed_files: 5,
+    attention_files: 1,
+    recovered_files: 0,
+    stop_requested: false,
+    started_at: DEFAULT_DATE,
+    ended_at: DEFAULT_DATE,
+    error_message: null,
+    ...overrides,
+  }
+}
+
+export function makeIntegrityRunResult(
+  overrides: Partial<IntegrityRunResult> = {}
+): IntegrityRunResult {
+  return {
+    id: 1,
+    run_id: 1,
     file_id: 1,
-    status: 'ok',
+    drive_pair_id: 1,
+    relative_path: 'documents/report.pdf',
+    status: 'mirror_corrupted',
     recovered: false,
+    needs_attention: true,
+    checked_at: DEFAULT_DATE,
+    ...overrides,
+  }
+}
+
+export function makeIntegrityRunResultsResponse(
+  overrides: Partial<IntegrityRunResultsResponse> = {}
+): IntegrityRunResultsResponse {
+  const run = makeIntegrityRun()
+  const results = [makeIntegrityRunResult()]
+  return {
+    run,
+    results,
+    total: results.length,
+    page: 1,
+    per_page: 50,
     ...overrides,
   }
 }

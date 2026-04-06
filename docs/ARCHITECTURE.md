@@ -64,10 +64,11 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `drive.rs` | Drive-role state machine and path resolution helpers. Owns planned quiesce/failover, emergency failover, replacement assignment, rebuild completion, and virtual-path retargeting. |
 | `mirror.rs` | Copy a file from the primary path to the secondary path, verifying the copy with a post-write checksum. Also responsible for restoring a corrupted copy from its healthy counterpart. |
 | `integrity.rs` | Orchestrate integrity checks: re-hash the current active and standby copies, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted / drive\_unavailable), and trigger automatic recovery only when a healthy counterpart exists. |
+| `integrity_runs.rs` | Shared full-run service used by API, CLI, and scheduler. Persists run metadata + per-file outcomes, enforces single active run, supports cooperative stop, and processes tracked files in paged batches. |
 | `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
 | `virtual_path.rs` | Map tracked files and folders to literal virtual paths. Creates and removes symlinks exactly at those absolute paths and refreshes them whenever `active_role` changes. |
 | `tracker.rs` | Track or untrack individual files and folders. On track/scan: compute initial checksum, store metadata, enqueue mirror work by default, and operate on the pair's current active side rather than assuming primary is always live. |
-| `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. |
+| `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. Integrity task execution persists run/result records via `integrity_runs.rs`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
 
 ### src/api/
@@ -141,10 +142,40 @@ CREATE TABLE tracked_files (
     is_mirrored   INTEGER NOT NULL DEFAULT 0,
     tracked_direct INTEGER NOT NULL DEFAULT 1,      -- direct vs folder provenance are runtime-mutually-exclusive
     tracked_via_folder INTEGER NOT NULL DEFAULT 0,  -- legacy dual-source rows are normalized to direct
-    last_verified TEXT,
+    last_integrity_check_at TEXT,
     created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(drive_pair_id, relative_path)
+);
+
+-- Persisted integrity run summary (full runs only)
+CREATE TABLE integrity_runs (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_drive_pair_id INTEGER REFERENCES drive_pairs(id),
+    recover            INTEGER NOT NULL DEFAULT 0,
+    trigger            TEXT    NOT NULL,
+    status             TEXT    NOT NULL CHECK(status IN ('running', 'stopping', 'stopped', 'completed', 'failed')),
+    total_files        INTEGER NOT NULL DEFAULT 0,
+    processed_files    INTEGER NOT NULL DEFAULT 0,
+    attention_files    INTEGER NOT NULL DEFAULT 0,
+    recovered_files    INTEGER NOT NULL DEFAULT 0,
+    stop_requested     INTEGER NOT NULL DEFAULT 0,
+    started_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    ended_at           TEXT,
+    error_message      TEXT
+);
+
+-- Persisted per-file results for each run
+CREATE TABLE integrity_run_results (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           INTEGER NOT NULL REFERENCES integrity_runs(id) ON DELETE CASCADE,
+    file_id          INTEGER NOT NULL REFERENCES tracked_files(id) ON DELETE CASCADE,
+    drive_pair_id    INTEGER NOT NULL REFERENCES drive_pairs(id),
+    relative_path    TEXT    NOT NULL,
+    status           TEXT    NOT NULL,
+    recovered        INTEGER NOT NULL DEFAULT 0,
+    needs_attention  INTEGER NOT NULL DEFAULT 0,
+    checked_at       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Tracked folders (auto-discover new files)
@@ -162,6 +193,12 @@ CREATE INDEX idx_tracked_files_virtual_path
 
 CREATE INDEX idx_tracked_files_drive_relative
     ON tracked_files(drive_pair_id, relative_path);
+
+CREATE INDEX idx_integrity_runs_active
+    ON integrity_runs(status, started_at);
+
+CREATE INDEX idx_integrity_run_results_issue
+    ON integrity_run_results(run_id, needs_attention, id);
 
 CREATE INDEX idx_tracked_folders_drive_folder_path
     ON tracked_folders(drive_pair_id, folder_path);
@@ -246,6 +283,10 @@ BLAKE3 is faster than SHA-256/SHA-512 on modern hardware and provides sufficient
 
 Tracking files and folder scans enqueue deduplicated `mirror` work when the standby slot can accept sync. Immediate mirroring is an explicit action (`files mirror`, `POST /files/{id}/mirror`, `folders mirror`, `POST /folders/{id}/mirror`) and reconciles pending mirror-queue rows after success.
 
+### Full integrity checks are asynchronous and persisted
+
+Batch integrity checking is modeled as persisted runs (`integrity_runs`) with incremental per-file results (`integrity_run_results`). The worker processes tracked files in pages so frontends can poll progress and issue rows without waiting for the full dataset. Only one active run is allowed at a time, and stop behavior is cooperative via `stop_requested`.
+
 ### Direct and folder provenance are mutually exclusive
 
 `tracked_direct` and `tracked_via_folder` are kept mutually exclusive in runtime behavior. If both are present in legacy rows, migration and recomputation normalize to direct tracking (`tracked_direct=1`, `tracked_via_folder=0`).
@@ -277,4 +318,4 @@ Even though SQLite serialises writes, using a pool with `r2d2_sqlite` allows rea
 
 ### Background task scheduling via OS threads
 
-Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement.
+Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement. Scheduled integrity executions are persisted through the same run-service path as API/CLI starts.

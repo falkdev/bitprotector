@@ -53,10 +53,10 @@ export function FileDetails({ file, drivePairName, onClose }: FileDetailsProps) 
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Mirrored</p>
           <p className="text-sm text-gray-900">{file.is_mirrored ? 'Yes' : 'No'}</p>
         </div>
-        {file.last_verified && (
+        {file.last_integrity_check_at && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Last verified</p>
-            <p className="text-sm text-gray-900">{formatDate(file.last_verified)}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Last integrity check</p>
+            <p className="text-sm text-gray-900">{formatDate(file.last_integrity_check_at)}</p>
           </div>
         )}
         <div>

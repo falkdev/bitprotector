@@ -1,4 +1,4 @@
-use crate::core::{drive, integrity, sync_queue};
+use crate::core::{integrity_runs, sync_queue};
 use crate::db::repository::{Repository, ScheduleConfig};
 use std::collections::HashMap;
 use std::sync::{
@@ -27,38 +27,8 @@ impl TaskType {
 pub fn run_task(task: &TaskType, repo: &Repository) -> anyhow::Result<u32> {
     match task {
         TaskType::Sync => sync_queue::process_all_pending(repo),
-        TaskType::IntegrityCheck => {
-            let pairs = repo.list_drive_pairs()?;
-            let mut count = 0u32;
-            for pair in pairs {
-                let pair = match drive::load_operational_pair(repo, pair.id) {
-                    Ok(pair) => pair,
-                    Err(e) => {
-                        tracing::error!(
-                            "Failed to load drive pair {} for integrity task: {}",
-                            pair.id,
-                            e
-                        );
-                        continue;
-                    }
-                };
-                if pair.is_quiescing() {
-                    continue;
-                }
-                let (files, _) = repo.list_tracked_files(Some(pair.id), None, None, 1, i64::MAX)?;
-                for file in files {
-                    let result = integrity::check_file_integrity(&pair, &file)?;
-                    if result.status != integrity::IntegrityStatus::Ok {
-                        if let Some(_item) =
-                            sync_queue::create_from_integrity_failure(repo, &file, &result)?
-                        {
-                            count += 1;
-                        }
-                    }
-                }
-            }
-            Ok(count)
-        }
+        TaskType::IntegrityCheck => integrity_runs::run_sync(repo, None, false, "scheduler")
+            .map(|run| run.attention_files as u32),
     }
 }
 
@@ -113,11 +83,7 @@ impl Scheduler {
         let ids_to_stop: Vec<i64> = self
             .threads
             .keys()
-            .filter(|&&id| {
-                !configs
-                    .iter()
-                    .any(|c| c.id == id && c.enabled)
-            })
+            .filter(|&&id| !configs.iter().any(|c| c.id == id && c.enabled))
             .copied()
             .collect();
 
@@ -182,11 +148,7 @@ impl Scheduler {
             }
 
             if let Err(e) = run_task(&task_type, &*repo) {
-                tracing::error!(
-                    "Scheduled task '{}' failed: {}",
-                    task_type.as_str(),
-                    e
-                );
+                tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
             }
         });
 
@@ -241,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_integrity_task_queues_failed_files() {
+    fn test_run_integrity_task_persists_attention_rows() {
         let (primary, secondary, repo) = setup();
         let content = b"integrity content";
         let hash = checksum::checksum_bytes(content);
@@ -258,11 +220,17 @@ mod tests {
         repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None)
             .unwrap();
 
-        let queued = run_task(&TaskType::IntegrityCheck, &repo).unwrap();
-        assert_eq!(queued, 1, "Should enqueue one integrity failure");
+        let attention = run_task(&TaskType::IntegrityCheck, &repo).unwrap();
+        assert_eq!(attention, 1, "Should persist one integrity attention row");
 
-        let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
-        assert!(!items.is_empty(), "Queue should have a pending item");
+        let latest = repo
+            .get_latest_integrity_run()
+            .unwrap()
+            .expect("Expected a scheduler-triggered integrity run");
+        let (items, _) = repo
+            .list_integrity_run_results(latest.id, true, 1, 10)
+            .unwrap();
+        assert!(!items.is_empty(), "Integrity run should contain issue rows");
         let _ = secondary; // keep alive
     }
 

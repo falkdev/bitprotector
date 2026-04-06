@@ -5,6 +5,7 @@ import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { useSyncStore } from '@/stores/sync-store'
 import { formatDate } from '@/lib/format'
 import type {
@@ -196,40 +197,38 @@ export function SyncQueuePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Sync Queue</h1>
-          <p className="text-sm text-muted-foreground">
-            Review pending work, process the queue, and resolve manual interventions.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => void processQueue()}
-            disabled={actionLoading !== null}
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Play className="h-4 w-4" />
-            {actionLoading === 'process' ? 'Processing…' : 'Process Queue'}
-          </button>
-          <button
-            onClick={() => void runTask('sync')}
-            disabled={actionLoading !== null}
-            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className="h-4 w-4" />
-            {actionLoading === 'sync' ? 'Running…' : 'Run Sync Task'}
-          </button>
-          <button
-            onClick={() => void runTask('integrity-check')}
-            disabled={actionLoading !== null}
-            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Wrench className="h-4 w-4" />
-            {actionLoading === 'integrity-check' ? 'Running…' : 'Run Integrity Task'}
-          </button>
-        </div>
-      </div>
+      <PageIntro
+        title="Sync Queue"
+        subtitle="Review pending sync actions, process the queue, and resolve conflicts."
+        actions={
+          <>
+            <button
+              onClick={() => void processQueue()}
+              disabled={actionLoading !== null}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {actionLoading === 'process' ? 'Processing…' : 'Process Queue'}
+            </button>
+            <button
+              onClick={() => void runTask('sync')}
+              disabled={actionLoading !== null}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {actionLoading === 'sync' ? 'Running…' : 'Run Sync Task'}
+            </button>
+            <button
+              onClick={() => void runTask('integrity-check')}
+              disabled={actionLoading !== null}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Wrench className="h-4 w-4" />
+              {actionLoading === 'integrity-check' ? 'Running…' : 'Run Integrity Task'}
+            </button>
+          </>
+        }
+      />
 
       <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
         <label htmlFor="queue-filter" className="text-sm font-medium">

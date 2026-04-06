@@ -8,7 +8,7 @@ export interface TrackedFile {
   is_mirrored: boolean
   tracked_direct: boolean
   tracked_via_folder: boolean
-  last_verified: string | null
+  last_integrity_check_at: string | null
   created_at: string
   updated_at: string
 }

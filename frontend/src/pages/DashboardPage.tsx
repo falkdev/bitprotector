@@ -6,6 +6,7 @@ import { integrityApi } from '@/api/integrity'
 import { syncApi } from '@/api/sync'
 import { databaseApi } from '@/api/database'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { StatusOverview } from '@/components/dashboard/StatusOverview'
 import { QuickActions } from '@/components/dashboard/QuickActions'
 import { RecentActivity } from '@/components/dashboard/RecentActivity'
@@ -21,16 +22,11 @@ export function DashboardPage() {
 
   const handleIntegrityCheck = async () => {
     try {
-      const result = await integrityApi.checkAll()
-      const issues = result.results.filter((r) => r.status !== 'ok').length
-      if (issues === 0) {
-        toast.success('All files passed integrity check')
-      } else {
-        toast.warning(`Integrity check complete - ${issues} issue(s) found`)
-      }
+      const run = await integrityApi.startRun(undefined, false)
+      toast.success(`Integrity run #${run.id} started`)
       void fetchStatus()
     } catch {
-      toast.error('Integrity check failed')
+      toast.error('Failed to start integrity run')
     }
   }
 
@@ -61,19 +57,24 @@ export function DashboardPage() {
 
   if (statusLoading && !status) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <LoadingSpinner />
+      <div className="space-y-6">
+        <PageIntro
+          title="Dashboard"
+          subtitle="Live overview of system health, sync activity, and integrity status."
+        />
+        <div className="flex items-center justify-center py-16">
+          <LoadingSpinner />
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">System status overview</p>
-      </div>
-
+      <PageIntro
+        title="Dashboard"
+        subtitle="Live overview of system health, sync activity, and integrity status."
+      />
       {status && <StatusOverview status={status} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

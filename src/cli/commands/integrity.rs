@@ -1,5 +1,6 @@
 use crate::core::drive;
 use crate::core::integrity::{self, IntegrityStatus};
+use crate::core::integrity_runs;
 use crate::db::repository::Repository;
 use clap::{Args, Subcommand};
 
@@ -63,14 +64,14 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
     );
 
     if result.status == IntegrityStatus::Ok {
-        repo.update_tracked_file_last_verified(file_id)?;
+        repo.update_tracked_file_last_integrity_check_at(file_id)?;
         return Ok(());
     }
 
     if recover {
         let recovered = integrity::attempt_recovery(&pair, &file, &result)?;
         if recovered {
-            repo.update_tracked_file_last_verified(file_id)?;
+            repo.update_tracked_file_last_integrity_check_at(file_id)?;
             println!("  Recovery: successful");
             return Ok(());
         } else {
@@ -84,67 +85,37 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
 }
 
 fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow::Result<()> {
-    let mut page = 1i64;
-    let per_page = 100i64;
-    let mut ok = 0usize;
-    let mut recovered_count = 0usize;
-    let mut failed = 0usize;
-    let mut manual = 0usize;
-
-    loop {
-        let (files, total) = repo.list_tracked_files(drive_id, None, None, page, per_page)?;
-        if files.is_empty() {
-            break;
-        }
-
-        for file in &files {
-            let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
-            if pair.is_quiescing() {
-                continue;
-            }
-            let result = integrity::check_file_integrity(&pair, file)?;
-
-            match result.status {
-                IntegrityStatus::Ok => {
-                    ok += 1;
-                    repo.update_tracked_file_last_verified(file.id)?;
-                }
-                ref status => {
-                    println!(
-                        "  ISSUE #{}: {} — {}",
-                        file.id,
-                        file.relative_path,
-                        status_label(status)
-                    );
-                    if recover {
-                        match integrity::attempt_recovery(&pair, file, &result)? {
-                            true => {
-                                repo.update_tracked_file_last_verified(file.id)?;
-                                recovered_count += 1;
-                            }
-                            false => {
-                                manual += 1;
-                            }
-                        }
-                    } else {
-                        failed += 1;
-                    }
-                }
-            }
-        }
-
-        if (page * per_page) >= total {
-            break;
-        }
-        page += 1;
-    }
+    let run = integrity_runs::run_sync(repo, drive_id, recover, "cli")?;
+    let clean = run.processed_files - run.attention_files;
 
     println!(
-        "Integrity check complete: {} OK, {} recovered, {} failed, {} require manual action",
-        ok, recovered_count, failed, manual
+        "Integrity run complete (#{}): {} checked, {} clean, {} recovered, {} need attention",
+        run.id, run.processed_files, clean, run.recovered_files, run.attention_files
     );
-    if failed > 0 || manual > 0 {
-        anyhow::bail!("{} files failed integrity check", failed + manual);
+    if run.attention_files > 0 {
+        let mut page = 1i64;
+        let per_page = 200i64;
+        loop {
+            let (results, total) = repo.list_integrity_run_results(run.id, true, page, per_page)?;
+            if results.is_empty() {
+                break;
+            }
+            for result in &results {
+                println!(
+                    "  ISSUE #{}: {} — {}",
+                    result.file_id, result.relative_path, result.status
+                );
+            }
+            if (page * per_page) >= total {
+                break;
+            }
+            page += 1;
+        }
+        anyhow::bail!(
+            "{} files need attention in run #{}",
+            run.attention_files,
+            run.id
+        );
     }
     Ok(())
 }

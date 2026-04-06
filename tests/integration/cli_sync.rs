@@ -99,12 +99,12 @@ fn test_sync_process_mirrors_pending_file() {
 }
 
 #[test]
-fn test_sync_run_integrity_check_queues_failures() {
+fn test_sync_run_integrity_check_persists_run_results() {
     let repo = make_repo();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
     let (_, _file) = setup_file(&repo, &primary, &secondary, "no_mirror.txt");
-    // File is tracked but not mirrored — integrity check should detect MirrorMissing
+    // File is tracked but not mirrored — integrity check should detect MirrorMissing.
 
     handle(
         SyncCommand::Run(RunArgs {
@@ -114,11 +114,17 @@ fn test_sync_run_integrity_check_queues_failures() {
     )
     .unwrap();
 
-    let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
-    assert!(
-        !items.is_empty(),
-        "Integrity check should create a queue item for the missing mirror"
-    );
+    let latest_run = repo
+        .get_latest_integrity_run()
+        .unwrap()
+        .expect("Expected an integrity run to be persisted");
+    assert_eq!(latest_run.attention_files, 1);
+
+    let (items, _) = repo
+        .list_integrity_run_results(latest_run.id, true, 1, 20)
+        .unwrap();
+    assert!(!items.is_empty(), "Integrity run should persist issue rows");
+    assert_eq!(items[0].status, "mirror_missing");
 }
 
 #[test]
@@ -251,7 +257,10 @@ fn test_resolve_provide_new_missing_path_returns_error() {
         "provide_new",
         Some("/nonexistent/path/to/file.txt"),
     );
-    assert!(result.is_err(), "Should fail when provided path does not exist");
+    assert!(
+        result.is_err(),
+        "Should fail when provided path does not exist"
+    );
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("does not exist"),
@@ -325,6 +334,10 @@ fn test_process_all_pending_skips_user_action_required_items() {
 
     // The item should remain pending
     let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
-    assert_eq!(items.len(), 1, "user_action_required item should remain pending");
+    assert_eq!(
+        items.len(),
+        1,
+        "user_action_required item should remain pending"
+    );
     assert_eq!(items[0].action, "user_action_required");
 }

@@ -131,9 +131,8 @@ pub fn resolve_queue_item(
             if !src_path.is_file() {
                 anyhow::bail!("provided path is not a regular file: {}", src);
             }
-            std::fs::metadata(src_path).map_err(|e| {
-                anyhow::anyhow!("provided path is not readable ({}): {}", src, e)
-            })?;
+            std::fs::metadata(src_path)
+                .map_err(|e| anyhow::anyhow!("provided path is not readable ({}): {}", src, e))?;
 
             // Ensure parent directories exist on both sides
             if let Some(parent) = master_path.parent() {
@@ -145,7 +144,10 @@ pub fn resolve_queue_item(
             std::fs::copy(src_path, &master_path)?;
             std::fs::copy(src_path, &mirror_path)?;
         }
-        other => anyhow::bail!("Unknown resolution '{}'; expected keep_master, keep_mirror, or provide_new", other),
+        other => anyhow::bail!(
+            "Unknown resolution '{}'; expected keep_master, keep_mirror, or provide_new",
+            other
+        ),
     }
 
     repo.update_sync_queue_status(item_id, "completed", None)?;

@@ -209,9 +209,7 @@ async fn main() -> anyhow::Result<()> {
             let resolved_host = host
                 .or_else(|| file_cfg.server.host.clone())
                 .unwrap_or_else(|| "0.0.0.0".to_string());
-            let resolved_port = port
-                .or(file_cfg.server.port)
-                .unwrap_or(8443);
+            let resolved_port = port.or(file_cfg.server.port).unwrap_or(8443);
             let resolved_secret = jwt_secret
                 .or_else(|| file_cfg.server.jwt_secret.clone())
                 .unwrap_or_else(|| "change-me-in-production".to_string());
@@ -221,7 +219,11 @@ async fn main() -> anyhow::Result<()> {
                 .or(file_cfg.server.rate_limit_rps)
                 .unwrap_or(100);
 
-            tracing::info!("Starting BitProtector server on {}:{}", resolved_host, resolved_port);
+            tracing::info!(
+                "Starting BitProtector server on {}:{}",
+                resolved_host,
+                resolved_port
+            );
             bitprotector_lib::api::server::run_server(
                 &resolved_host,
                 resolved_port,

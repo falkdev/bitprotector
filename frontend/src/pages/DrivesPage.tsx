@@ -6,6 +6,7 @@ import { drivesApi } from '@/api/drives'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { DriveCard } from '@/components/drives/DriveCard'
 import { DriveForm } from '@/components/drives/DriveForm'
 import { ReplacementWorkflow } from '@/components/drives/ReplacementWorkflow'
@@ -49,27 +50,33 @@ export function DrivesPage() {
 
   if (loading && drives.length === 0) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <LoadingSpinner />
+      <div className="space-y-6">
+        <PageIntro
+          title="Drives"
+          subtitle="Configure drive pairs, monitor role/state, and handle replacement workflows."
+        />
+        <div className="flex items-center justify-center py-16">
+          <LoadingSpinner />
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Drive Pairs</h1>
-          <p className="text-sm text-muted-foreground">Manage mirrored drive configurations</p>
-        </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          data-testid="add-drive-button"
-        >
-          <Plus className="h-4 w-4" /> Add Drive Pair
-        </button>
-      </div>
+      <PageIntro
+        title="Drives"
+        subtitle="Configure drive pairs, monitor role/state, and handle replacement workflows."
+        actions={
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            data-testid="add-drive-button"
+          >
+            <Plus className="h-4 w-4" /> Add Drive Pair
+          </button>
+        }
+      />
 
       {drives.length === 0 ? (
         <EmptyState

@@ -229,7 +229,7 @@ mod tests {
         repo.create_tracked_file(pair.id, "i.txt", &hash, content.len() as i64, None)
             .unwrap();
 
-        // No mirror exists → integrity check queues a restore_mirror action
+        // No mirror exists -> integrity check should persist one attention row in the latest run
         handle(
             SyncCommand::Run(RunArgs {
                 task: "integrity-check".to_string(),
@@ -238,8 +238,14 @@ mod tests {
         )
         .unwrap();
 
-        let (items, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        let latest = repo
+            .get_latest_integrity_run()
+            .unwrap()
+            .expect("Expected a persisted integrity run");
+        let (items, _) = repo
+            .list_integrity_run_results(latest.id, true, 1, 10)
+            .unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].action, "restore_mirror");
+        assert!(items[0].needs_attention);
     }
 }

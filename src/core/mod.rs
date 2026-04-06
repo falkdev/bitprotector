@@ -2,6 +2,7 @@ pub mod change_detection;
 pub mod checksum;
 pub mod drive;
 pub mod integrity;
+pub mod integrity_runs;
 pub mod mirror;
 pub mod scheduler;
 pub mod sync_queue;

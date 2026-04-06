@@ -11,7 +11,7 @@ setup('authenticate against the manual QEMU backend', async ({ page }) => {
   fs.mkdirSync(path.dirname(authFile), { recursive: true })
 
   await loginThroughUi(page)
-  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  await expect(page.getByTestId('nav-dashboard')).toBeVisible()
 
   await page.context().storageState({ path: authFile })
 })

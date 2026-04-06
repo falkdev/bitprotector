@@ -641,11 +641,7 @@ mod tests {
         virtual_path::set_virtual_path(
             &repo,
             tracked.id,
-            virtual_root
-                .path()
-                .join("docs/doc.txt")
-                .to_str()
-                .unwrap(),
+            virtual_root.path().join("docs/doc.txt").to_str().unwrap(),
         )
         .unwrap();
 

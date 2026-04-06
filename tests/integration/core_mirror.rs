@@ -80,7 +80,10 @@ fn test_restore_mirror_from_master_checksum_mismatch() {
     fs::write(primary.path().join("corrupt.txt"), b"tampered content").unwrap();
 
     let result = mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum);
-    assert!(result.is_err(), "Should fail when primary checksum mismatches stored");
+    assert!(
+        result.is_err(),
+        "Should fail when primary checksum mismatches stored"
+    );
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("checksum mismatch"),
@@ -184,7 +187,10 @@ fn test_restore_from_mirror_checksum_mismatch() {
     fs::write(secondary.path().join("chk.txt"), b"corrupted mirror").unwrap();
 
     let result = mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum);
-    assert!(result.is_err(), "Should fail when mirror checksum mismatches stored");
+    assert!(
+        result.is_err(),
+        "Should fail when mirror checksum mismatches stored"
+    );
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("checksum mismatch"),

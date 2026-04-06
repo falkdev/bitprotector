@@ -19,5 +19,6 @@ describe('LoginPage', () => {
     expect(screen.getByTestId('username-input')).toBeInTheDocument()
     expect(screen.getByTestId('password-input')).toBeInTheDocument()
     expect(screen.getByTestId('login-button')).toBeInTheDocument()
+    expect(screen.queryByTestId('page-title')).not.toBeInTheDocument()
   })
 })

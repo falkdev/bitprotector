@@ -14,6 +14,7 @@ import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { Pagination } from '@/components/shared/Pagination'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { TrackFileModal } from '@/components/tracking/TrackFileModal'
 import { FolderFormModal } from '@/components/tracking/FolderFormModal'
@@ -72,7 +73,7 @@ function toTrackedFile(item: TrackingItem): TrackedFile {
     is_mirrored: item.is_mirrored ?? false,
     tracked_direct: item.tracked_direct ?? false,
     tracked_via_folder: item.tracked_via_folder ?? false,
-    last_verified: null,
+    last_integrity_check_at: null,
     created_at: item.created_at,
     updated_at: item.updated_at,
   }
@@ -494,7 +495,13 @@ export function TrackingWorkspacePage() {
   }
 
   return (
-    <div className="flex h-full gap-0" data-testid="file-browser-page">
+    <div className="flex h-full min-h-0 flex-col gap-4" data-testid="file-browser-page">
+      <PageIntro
+        title="Tracking Workspace"
+        subtitle="Track files and folders, manage virtual paths, and inspect item details."
+      />
+
+      <div className="flex min-h-0 flex-1 gap-0">
       <aside
         className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-in-out`}
       >
@@ -786,6 +793,7 @@ export function TrackingWorkspacePage() {
           />
         </aside>
       ) : null}
+      </div>
 
       <TrackFileModal
         open={showTrackModal}

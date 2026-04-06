@@ -254,7 +254,10 @@ mod tests {
         let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
         assert_eq!(tracked.len(), 2, "Both files should be auto-tracked");
         for f in &tracked {
-            assert!(!f.is_mirrored, "Auto-tracked files should be queued, not mirrored");
+            assert!(
+                !f.is_mirrored,
+                "Auto-tracked files should be queued, not mirrored"
+            );
             let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
             assert!(total >= 1, "Auto-tracked files should enqueue mirror work");
             assert!(queue_items.iter().any(|item| item.tracked_file_id == f.id));

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { SingleIntegrityResult, CheckAllResponse } from '@/types/integrity'
+import type { IntegrityRun, IntegrityRunResultsResponse, SingleIntegrityResult } from '@/types/integrity'
 
 export const integrityApi = {
   checkFile(id: number, recover = true): Promise<SingleIntegrityResult> {
@@ -8,9 +8,40 @@ export const integrityApi = {
       .then((r) => r.data)
   },
 
-  checkAll(driveId?: number, recover = true): Promise<CheckAllResponse> {
+  startRun(driveId?: number, recover = true): Promise<IntegrityRun> {
     return apiClient
-      .get<CheckAllResponse>('/integrity/check-all', { params: { drive_id: driveId, recover } })
+      .post<IntegrityRun>('/integrity/runs', { drive_id: driveId, recover })
+      .then((r) => r.data)
+  },
+
+  activeRun(): Promise<{ run: IntegrityRun | null }> {
+    return apiClient
+      .get<{ run: IntegrityRun | null }>('/integrity/runs/active')
+      .then((r) => r.data)
+  },
+
+  stopRun(id: number): Promise<IntegrityRun> {
+    return apiClient
+      .post<IntegrityRun>(`/integrity/runs/${id}/stop`)
+      .then((r) => r.data)
+  },
+
+  latestResults(options?: {
+    issues_only?: boolean
+    page?: number
+    per_page?: number
+  }): Promise<IntegrityRunResultsResponse> {
+    return apiClient
+      .get<IntegrityRunResultsResponse>('/integrity/runs/latest', { params: options })
+      .then((r) => r.data)
+  },
+
+  runResults(
+    id: number,
+    options?: { issues_only?: boolean; page?: number; per_page?: number }
+  ): Promise<IntegrityRunResultsResponse> {
+    return apiClient
+      .get<IntegrityRunResultsResponse>(`/integrity/runs/${id}/results`, { params: options })
       .then((r) => r.data)
   },
 }

@@ -65,7 +65,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             is_mirrored     INTEGER NOT NULL DEFAULT 0,
             tracked_direct  INTEGER NOT NULL DEFAULT 1,
             tracked_via_folder INTEGER NOT NULL DEFAULT 0,
-            last_verified   TEXT,
+            last_integrity_check_at TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, relative_path)
@@ -112,6 +112,41 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
          ON tracked_files(drive_pair_id, relative_path);
          CREATE INDEX IF NOT EXISTS idx_tracked_folders_drive_folder_path
          ON tracked_folders(drive_pair_id, folder_path);",
+    )?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS integrity_runs (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_drive_pair_id INTEGER REFERENCES drive_pairs(id) ON DELETE SET NULL,
+            recover            INTEGER NOT NULL DEFAULT 0,
+            trigger            TEXT NOT NULL,
+            status             TEXT NOT NULL CHECK(status IN (
+                                  'running', 'stopping', 'stopped', 'completed', 'failed'
+                               )),
+            total_files        INTEGER NOT NULL DEFAULT 0,
+            processed_files    INTEGER NOT NULL DEFAULT 0,
+            attention_files    INTEGER NOT NULL DEFAULT 0,
+            recovered_files    INTEGER NOT NULL DEFAULT 0,
+            stop_requested     INTEGER NOT NULL DEFAULT 0,
+            started_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            ended_at           TEXT,
+            error_message      TEXT
+        );
+         CREATE TABLE IF NOT EXISTS integrity_run_results (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id           INTEGER NOT NULL REFERENCES integrity_runs(id) ON DELETE CASCADE,
+            file_id          INTEGER NOT NULL REFERENCES tracked_files(id) ON DELETE CASCADE,
+            drive_pair_id    INTEGER NOT NULL REFERENCES drive_pairs(id),
+            relative_path    TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            recovered        INTEGER NOT NULL DEFAULT 0,
+            needs_attention  INTEGER NOT NULL DEFAULT 0,
+            checked_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+         CREATE INDEX IF NOT EXISTS idx_integrity_runs_active
+            ON integrity_runs(status, started_at);
+         CREATE INDEX IF NOT EXISTS idx_integrity_run_results_issue
+            ON integrity_run_results(run_id, needs_attention, id);",
     )?;
 
     // Backfill folder-derived provenance for pre-migration rows.
@@ -245,6 +280,8 @@ mod tests {
             "drive_pairs",
             "tracked_files",
             "tracked_folders",
+            "integrity_runs",
+            "integrity_run_results",
             "sync_queue",
             "event_log",
             "schedule_config",
@@ -377,7 +414,7 @@ mod tests {
                 file_size       INTEGER NOT NULL,
                 virtual_path    TEXT,
                 is_mirrored     INTEGER NOT NULL DEFAULT 0,
-                last_verified   TEXT,
+                last_integrity_check_at TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(drive_pair_id, relative_path)

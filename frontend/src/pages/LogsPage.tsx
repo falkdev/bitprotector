@@ -5,6 +5,7 @@ import { logsApi } from '@/api/logs'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { PageIntro } from '@/components/shared/PageIntro'
 import { formatDate } from '@/lib/format'
 import type { EventLogEntry, EventType, LogsQueryParams } from '@/types/log'
 
@@ -139,12 +140,10 @@ export function LogsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Event Logs</h1>
-        <p className="text-sm text-muted-foreground">
-          Search recent system activity with backend-aligned filters.
-        </p>
-      </div>
+      <PageIntro
+        title="Logs"
+        subtitle="Browse system events, filter by type/date, and investigate recent activity."
+      />
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">

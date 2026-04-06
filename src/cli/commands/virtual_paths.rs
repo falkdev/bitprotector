@@ -145,7 +145,12 @@ mod tests {
         handle(
             VirtualPathsCommand::Set(SetArgs {
                 file_id: file.id,
-                virtual_path: virtual_root.path().join("docs/a.txt").to_str().unwrap().to_string(),
+                virtual_path: virtual_root
+                    .path()
+                    .join("docs/a.txt")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
             }),
             &repo,
         )
@@ -172,7 +177,12 @@ mod tests {
         handle(
             VirtualPathsCommand::Set(SetArgs {
                 file_id: file.id,
-                virtual_path: virtual_root.path().join("vpath/b.txt").to_str().unwrap().to_string(),
+                virtual_path: virtual_root
+                    .path()
+                    .join("vpath/b.txt")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
             }),
             &repo,
         )
@@ -206,8 +216,11 @@ mod tests {
         let virtual_path_on_disk = virtual_root.path().join("refresh/c.txt");
 
         // Assign virtual path in DB without creating symlink
-        repo.update_tracked_file_virtual_path(file.id, Some(virtual_path_on_disk.to_str().unwrap()))
-            .unwrap();
+        repo.update_tracked_file_virtual_path(
+            file.id,
+            Some(virtual_path_on_disk.to_str().unwrap()),
+        )
+        .unwrap();
 
         handle(VirtualPathsCommand::Refresh(RefreshArgs {}), &repo).unwrap();
 

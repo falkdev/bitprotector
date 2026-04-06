@@ -143,5 +143,5 @@ fn test_integrity_check_all_clean() {
         .args(["integrity", "check-all"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("2 OK"));
+        .stdout(predicate::str::contains("2 checked"));
 }
