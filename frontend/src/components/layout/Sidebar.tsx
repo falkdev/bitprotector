@@ -81,7 +81,7 @@ export function Sidebar() {
       <div
         className={cn(
           'flex items-center border-b border-border',
-          collapsed ? 'h-20 flex-col justify-center gap-2 py-2' : 'h-14 justify-between gap-2 px-4'
+          collapsed ? 'h-16 justify-center px-2' : 'h-14 gap-2 px-4'
         )}
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -90,16 +90,6 @@ export function Sidebar() {
             <span className="truncate text-sm font-semibold tracking-wide">BitProtector</span>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => setCollapsed((current) => !current)}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          data-testid="sidebar-toggle"
-        >
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-        </button>
       </div>
 
       {/* Navigation */}
@@ -130,6 +120,19 @@ export function Sidebar() {
           ))}
         </ul>
       </nav>
+
+      <div className={cn('flex px-2 pb-1', collapsed ? 'justify-center' : 'justify-end')}>
+        <button
+          type="button"
+          onClick={() => setCollapsed((current) => !current)}
+          className="flex p-1.5 text-muted-foreground transition-colors hover:text-accent-foreground"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          data-testid="sidebar-toggle"
+        >
+          {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+        </button>
+      </div>
 
       <div className="border-t border-border p-2">
         <div className="relative" ref={userMenuRef}>

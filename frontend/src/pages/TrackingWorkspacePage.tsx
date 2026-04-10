@@ -512,11 +512,11 @@ export function TrackingWorkspacePage() {
           <button
             type="button"
             onClick={() => setVirtualPaneCollapsed((current) => !current)}
-            className={`${virtualPaneCollapsed ? 'h-8 w-8 rounded-md' : 'rounded border border-gray-200 p-1'} text-gray-500 hover:bg-gray-50`}
+            className="flex p-1 text-muted-foreground transition-colors hover:text-accent-foreground"
             data-testid="toggle-virtual-pane"
             title={virtualPaneCollapsed ? 'Expand virtual paths pane' : 'Collapse virtual paths pane'}
           >
-            {virtualPaneCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+            {virtualPaneCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
         </div>
         {virtualPaneCollapsed ? (
