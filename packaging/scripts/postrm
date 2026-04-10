@@ -1,0 +1,16 @@
+#!/bin/sh
+# postrm: post-removal script for bitprotector
+set -e
+
+case "$1" in
+    purge)
+        # Purge package-owned runtime state.
+        rm -rf /etc/bitprotector
+        rm -rf /var/lib/bitprotector
+        rm -rf /var/log/bitprotector
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

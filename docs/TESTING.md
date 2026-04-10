@@ -1,6 +1,6 @@
 # Testing Guide
 
-This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the QEMU-based installation and failover suites.
+This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the QEMU-based installation, failover, and uninstall suites.
 
 ---
 
@@ -42,7 +42,8 @@ tests/
 │   └── packaging.rs          # Verifies packaging artifacts exist
 └── installation/
     ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
-    └── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
+    ├── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
+    └── qemu_uninstall_test.sh # Full package purge/uninstall verification via QEMU
 ```
 
 Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing.
@@ -281,7 +282,7 @@ The current budget enforced in the test is `3000 ms` per measured query path.
 
 File: `tests/integration/packaging.rs`
 
-These Rust tests use only `std::fs` — no binary invocations. They verify that all packaging artifacts (systemd service file, default config, `profile.d` hook, QEMU test script) exist and contain the required sections. Run them with:
+These Rust tests use only `std::fs` — no binary invocations. They verify that all packaging artifacts (systemd service file, default config, `profile.d` hook, QEMU install/failover/uninstall scripts, and maintainer scripts) exist and contain the required sections. Run them with:
 
 ```bash
 cargo test --test packaging
@@ -391,10 +392,11 @@ mod tests {
 
 ## QEMU Installation Tests
 
-There are two QEMU suites:
+There are three QEMU suites:
 
 - `tests/installation/qemu_test.sh` is the fast package/install smoke test.
 - `tests/installation/qemu_failover_test.sh` is the heavier end-to-end failover suite with extra virtio disks and QMP hot-remove.
+- `tests/installation/qemu_uninstall_test.sh` validates full package purge, including removal of package-owned config/DB/backup/log paths.
 
 ### Prerequisites
 
@@ -447,12 +449,16 @@ The package is written to `target/debian/bitprotector_*.deb`.
 # Full failover / replacement suite
 ./tests/installation/qemu_failover_test.sh
 
+# Full uninstall / purge suite
+./tests/installation/qemu_uninstall_test.sh
+
 # Optional port/timeout overrides (useful when another VM is running)
 SSH_PORT=2224 API_PORT=18445 TIMEOUT=240 ./tests/installation/qemu_test.sh
 SSH_PORT=2225 API_PORT=18446 TIMEOUT=360 ./tests/installation/qemu_failover_test.sh
+SSH_PORT=2226 API_PORT=18447 TIMEOUT=360 ./tests/installation/qemu_uninstall_test.sh
 ```
 
-Both scripts stream serial console lines to your terminal as the VM boots. They also fail fast if the QEMU process exits early instead of waiting out the full timeout.
+All scripts stream serial console lines to your terminal as the VM boots. They also fail fast if the QEMU process exits early instead of waiting out the full timeout.
 
 ### What gets tested
 
@@ -475,7 +481,15 @@ Both scripts stream serial console lines to your terminal as the VM boots. They 
 | Replacement rebuild | Assigns `/mnt/replacement-primary`, runs `sync process`, and verifies files are rebuilt and virtual paths switch back |
 | Emergency failover | Uses a QMP control socket plus `device_del` to hot-remove the active disk, then verifies a follow-up BitProtector operation fails over future opens to the surviving mirror |
 
-### Exit codes
+### Uninstall suite coverage
+
+| Test | Description |
+| --- | --- |
+| Package-owned data setup | Creates DB data at `/var/lib/bitprotector/bitprotector.db`, adds a backup destination under `/var/lib/bitprotector/backups/uninstall-test`, and runs a backup |
+| Full purge | Runs `apt-get purge -y bitprotector` |
+| Removal verification | Confirms package metadata, `/usr/bin/bitprotector`, `/etc/bitprotector`, `/var/lib/bitprotector`, and `/var/log/bitprotector` are removed |
+
+### Smoke test exit codes (`qemu_test.sh`)
 
 | Code | Meaning |
 | --- | --- |
@@ -485,7 +499,7 @@ Both scripts stream serial console lines to your terminal as the VM boots. They 
 | `3` | CLI smoke tests failed |
 | `4` | API not accessible |
 
-The failover suite currently exits non-zero on the first failed assertion and prints the failing scenario step directly from the script output.
+The failover and uninstall suites currently exit non-zero on the first failed assertion and print the failing scenario step directly from script output.
 
 ### TLS for full service startup
 

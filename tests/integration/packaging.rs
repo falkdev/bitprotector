@@ -2,8 +2,9 @@
 ///
 /// These tests verify that all packaging artifacts are in place and
 /// the cargo-deb configuration is valid. The actual QEMU-based installation
-/// and failover tests run via tests/installation/qemu_test.sh and
-/// tests/installation/qemu_failover_test.sh.
+/// plus failover/uninstall tests run via tests/installation/qemu_test.sh,
+/// tests/installation/qemu_failover_test.sh, and
+/// tests/installation/qemu_uninstall_test.sh.
 use std::path::Path;
 
 fn project_root() -> std::path::PathBuf {
@@ -117,6 +118,28 @@ fn test_qemu_failover_script_exists() {
 }
 
 #[test]
+fn test_qemu_uninstall_script_exists() {
+    let script = project_root().join("tests/installation/qemu_uninstall_test.sh");
+    assert!(
+        script.exists(),
+        "QEMU uninstall test script must exist at tests/installation/qemu_uninstall_test.sh"
+    );
+    let content = std::fs::read_to_string(&script).unwrap();
+    assert!(
+        content.contains("apt-get purge -y bitprotector"),
+        "Uninstall script must purge the package"
+    );
+    assert!(
+        content.contains("/var/lib/bitprotector"),
+        "Uninstall script must assert package-owned data removal"
+    );
+    assert!(
+        content.contains("database run"),
+        "Uninstall script must create a real backup artifact before purge"
+    );
+}
+
+#[test]
 fn test_cargo_deb_metadata_present() {
     let cargo_toml = project_root().join("Cargo.toml");
     let content = std::fs::read_to_string(&cargo_toml).unwrap();
@@ -162,5 +185,28 @@ fn test_postinst_script_exists() {
     assert!(
         content.contains("/var/lib/bitprotector/frontend"),
         "postinst must create the frontend asset directory"
+    );
+}
+
+#[test]
+fn test_postrm_script_exists() {
+    let postrm = project_root().join("packaging/scripts/postrm");
+    assert!(postrm.exists(), "postrm script must exist");
+    let content = std::fs::read_to_string(&postrm).unwrap();
+    assert!(
+        content.contains("purge"),
+        "postrm must handle purge actions"
+    );
+    assert!(
+        content.contains("/var/lib/bitprotector"),
+        "postrm must remove package-owned data directory on purge"
+    );
+    assert!(
+        content.contains("/var/log/bitprotector"),
+        "postrm must remove package-owned log directory on purge"
+    );
+    assert!(
+        content.contains("/etc/bitprotector"),
+        "postrm must remove package-owned config directory on purge"
     );
 }

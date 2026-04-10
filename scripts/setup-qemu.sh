@@ -1,7 +1,8 @@
 #!/bin/bash
 # scripts/setup-qemu.sh
 # Install prerequisites for qemu_manual.sh, tests/installation/qemu_test.sh,
-# and tests/installation/qemu_failover_test.sh.
+# tests/installation/qemu_failover_test.sh, and
+# tests/installation/qemu_uninstall_test.sh.
 #
 # Usage:
 #   ./scripts/setup-qemu.sh
@@ -94,4 +95,7 @@ echo "    ./tests/installation/qemu_test.sh"
 echo ""
 echo "  Failover / replacement QEMU test:"
 echo "    ./tests/installation/qemu_failover_test.sh"
+echo ""
+echo "  Full uninstall (purge) QEMU test:"
+echo "    ./tests/installation/qemu_uninstall_test.sh"
 echo "========================================="
