@@ -3,9 +3,8 @@ import type {
   SyncQueueItem,
   AddQueueItemRequest,
   ResolveQueueItemRequest,
-  SyncTask,
   ProcessQueueResult,
-  RunTaskResult,
+  ClearCompletedQueueResult,
 } from '@/types/sync'
 
 interface SyncQueueListResponse {
@@ -38,7 +37,7 @@ export const syncApi = {
     return apiClient.post<ProcessQueueResult>('/sync/process').then((r) => r.data)
   },
 
-  runTask(task: SyncTask): Promise<RunTaskResult> {
-    return apiClient.post<RunTaskResult>(`/sync/run/${task}`).then((r) => r.data)
+  clearCompletedQueue(): Promise<ClearCompletedQueueResult> {
+    return apiClient.delete<ClearCompletedQueueResult>('/sync/queue/completed').then((r) => r.data)
   },
 }

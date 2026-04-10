@@ -1804,6 +1804,70 @@ async fn test_sync_process_empty_queue() {
 }
 
 #[actix_rt::test]
+async fn test_sync_clear_completed_queue_deletes_only_completed() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("sc1", "/p", "/s").unwrap();
+    let file1 = repo
+        .create_tracked_file(pair.id, "a.txt", "h1", 1, None)
+        .unwrap();
+    let file2 = repo
+        .create_tracked_file(pair.id, "b.txt", "h2", 1, None)
+        .unwrap();
+    let file3 = repo
+        .create_tracked_file(pair.id, "c.txt", "h3", 1, None)
+        .unwrap();
+
+    let completed = repo.create_sync_queue_item(file1.id, "mirror").unwrap();
+    repo.update_sync_queue_status(completed.id, "completed", None)
+        .unwrap();
+    let _pending = repo.create_sync_queue_item(file2.id, "verify").unwrap();
+    let failed = repo.create_sync_queue_item(file3.id, "restore_master").unwrap();
+    repo.update_sync_queue_status(failed.id, "failed", Some("forced failure"))
+        .unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::delete()
+        .uri("/api/v1/sync/queue/completed")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["deleted"], 1);
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let queue = body["queue"].as_array().unwrap();
+    assert_eq!(queue.len(), 2);
+    assert!(queue.iter().all(|item| item["status"] != "completed"));
+}
+
+#[actix_rt::test]
+async fn test_sync_clear_completed_queue_when_none_exists_returns_zero() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("sc2", "/p", "/s").unwrap();
+    let file = repo
+        .create_tracked_file(pair.id, "a.txt", "h1", 1, None)
+        .unwrap();
+    let _pending = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::delete()
+        .uri("/api/v1/sync/queue/completed")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["deleted"], 0);
+}
+
+#[actix_rt::test]
 async fn test_sync_run_sync_task() {
     let app = make_app!(make_repo()).await;
     let req = test::TestRequest::post()

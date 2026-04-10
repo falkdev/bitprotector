@@ -93,4 +93,123 @@ describe('SyncQueuePage', () => {
 
     expect(await screen.findByText('No queue items')).toBeInTheDocument()
   })
+
+  it('shows process queue action and does not render sync/integrity task buttons', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [makeSyncQueueItem({ id: 11 })],
+          total: 1,
+          page: 1,
+          per_page: 50,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByRole('button', { name: 'Process Queue' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Run Sync Task' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Run Integrity Task' })).not.toBeInTheDocument()
+  })
+
+  it('disables clear completed button when there are no completed items', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [makeSyncQueueItem({ id: 12, status: 'pending' })],
+          total: 1,
+          page: 1,
+          per_page: 50,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const clearButton = await screen.findByRole('button', { name: 'Clear Completed' })
+    expect(clearButton).toBeDisabled()
+  })
+
+  it('enables clear completed button when completed items exist', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [makeSyncQueueItem({ id: 13, status: 'completed' })],
+          total: 1,
+          page: 1,
+          per_page: 50,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const clearButton = await screen.findByRole('button', { name: 'Clear Completed' })
+    expect(clearButton).toBeEnabled()
+  })
+
+  it('clears completed items and refreshes queue data', async () => {
+    const user = userEvent.setup()
+    let queue = [
+      makeSyncQueueItem({ id: 21, status: 'completed' }),
+      makeSyncQueueItem({ id: 22, status: 'pending' }),
+    ]
+    let clearCalls = 0
+
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue,
+          total: queue.length,
+          page: 1,
+          per_page: 50,
+        })
+      ),
+      api.delete('/sync/queue/completed', () => {
+        clearCalls += 1
+        queue = queue.filter((item) => item.status !== 'completed')
+        return HttpResponse.json({ deleted: 1 })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('sync-queue-row-21')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear Completed' }))
+
+    expect(await screen.findByText('Cleared 1 completed queue item(s)')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(clearCalls).toBe(1)
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('sync-queue-row-21')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('sync-queue-row-22')).toBeInTheDocument()
+  })
+
+  it('shows an error toast when clear completed fails', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [makeSyncQueueItem({ id: 31, status: 'completed' })],
+          total: 1,
+          page: 1,
+          per_page: 50,
+        })
+      ),
+      api.delete('/sync/queue/completed', () => HttpResponse.json({ error: 'failed' }, { status: 500 }))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('sync-queue-row-31')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear Completed' }))
+
+    expect(await screen.findByText('Failed to clear completed queue items')).toBeInTheDocument()
+    expect(screen.getByTestId('sync-queue-row-31')).toBeInTheDocument()
+  })
 })

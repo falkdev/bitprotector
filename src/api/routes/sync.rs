@@ -29,6 +29,11 @@ struct ProcessResult {
 }
 
 #[derive(Serialize)]
+struct ClearCompletedResult {
+    deleted: u64,
+}
+
+#[derive(Serialize)]
 struct TaskResult {
     task: String,
     count: u32,
@@ -114,6 +119,14 @@ async fn process_queue(repo: web::Data<Repository>) -> HttpResponse {
     }
 }
 
+/// DELETE /sync/queue/completed
+async fn clear_completed_queue(repo: web::Data<Repository>) -> HttpResponse {
+    match repo.clear_completed_sync_queue() {
+        Ok(deleted) => HttpResponse::Ok().json(ClearCompletedResult { deleted }),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
 /// POST /sync/run/{task}
 async fn run_task(repo: web::Data<Repository>, path: web::Path<String>) -> HttpResponse {
     let task_name = path.into_inner();
@@ -136,6 +149,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/sync")
             .route("/queue", web::get().to(list_queue))
             .route("/queue", web::post().to(add_queue_item))
+            .route("/queue/completed", web::delete().to(clear_completed_queue))
             .route("/queue/{id}", web::get().to(get_queue_item))
             .route("/queue/{id}/resolve", web::post().to(resolve_queue_item))
             .route("/process", web::post().to(process_queue))

@@ -1564,6 +1564,12 @@ impl Repository {
         Ok((items, total))
     }
 
+    pub fn clear_completed_sync_queue(&self) -> anyhow::Result<u64> {
+        let conn = self.conn()?;
+        let deleted = conn.execute("DELETE FROM sync_queue WHERE status='completed'", [])?;
+        Ok(deleted as u64)
+    }
+
     pub fn update_sync_queue_status(
         &self,
         id: i64,
@@ -2144,6 +2150,40 @@ mod tests {
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
         assert!(updated.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_clear_completed_sync_queue_only_removes_completed() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let file1 = repo
+            .create_tracked_file(pair.id, "f1.txt", "h1", 1, None)
+            .unwrap();
+        let file2 = repo
+            .create_tracked_file(pair.id, "f2.txt", "h2", 1, None)
+            .unwrap();
+        let file3 = repo
+            .create_tracked_file(pair.id, "f3.txt", "h3", 1, None)
+            .unwrap();
+
+        let completed = repo.create_sync_queue_item(file1.id, "mirror").unwrap();
+        repo.update_sync_queue_status(completed.id, "completed", None)
+            .unwrap();
+
+        let pending = repo.create_sync_queue_item(file2.id, "verify").unwrap();
+
+        let failed = repo.create_sync_queue_item(file3.id, "restore_master").unwrap();
+        repo.update_sync_queue_status(failed.id, "failed", Some("forced failure"))
+            .unwrap();
+
+        let deleted = repo.clear_completed_sync_queue().unwrap();
+        assert_eq!(deleted, 1);
+
+        let (items, total) = repo.list_sync_queue(None, 1, 50).unwrap();
+        assert_eq!(total, 2);
+        assert!(items.iter().all(|item| item.status != "completed"));
+        assert!(items.iter().any(|item| item.id == pending.id));
+        assert!(items.iter().any(|item| item.id == failed.id));
     }
 
     // ─── Event Log ────────────────────────────────────────────────────────────────

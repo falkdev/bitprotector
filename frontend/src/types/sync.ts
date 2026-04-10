@@ -28,13 +28,10 @@ export interface ResolveQueueItemRequest {
   new_file_path?: string
 }
 
-export type SyncTask = 'sync' | 'integrity-check'
-
 export interface ProcessQueueResult {
   processed: number
 }
 
-export interface RunTaskResult {
-  task: string
-  count: number
+export interface ClearCompletedQueueResult {
+  deleted: number
 }

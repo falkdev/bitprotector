@@ -1038,6 +1038,20 @@ When `resolution` is `provide_new`, also include:
 
 ---
 
+### DELETE `/sync/queue/completed`
+
+Delete all sync queue rows with status `completed`.
+
+**Response `200`:**
+
+```json
+{ "deleted": 12 }
+```
+
+`deleted` is the number of completed queue rows removed (may be `0`).
+
+---
+
 ### POST `/sync/process`
 
 Process all pending sync queue items immediately (synchronous).

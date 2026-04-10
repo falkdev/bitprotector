@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Play, Wrench } from 'lucide-react'
+import { Play } from 'lucide-react'
 import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -8,13 +8,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { PageIntro } from '@/components/shared/PageIntro'
 import { useSyncStore } from '@/stores/sync-store'
 import { formatDate } from '@/lib/format'
-import type {
-  ResolveQueueItemRequest,
-  SyncQueueItem,
-  SyncResolution,
-  SyncStatus,
-  SyncTask,
-} from '@/types/sync'
+import type { ResolveQueueItemRequest, SyncQueueItem, SyncResolution, SyncStatus } from '@/types/sync'
 
 type QueueFilter = SyncStatus | 'all'
 
@@ -142,7 +136,8 @@ export function SyncQueuePage() {
   const setFilter = useSyncStore((state) => state.setFilter)
   const refreshItem = useSyncStore((state) => state.refreshItem)
   const [resolveTarget, setResolveTarget] = useState<SyncQueueItem | null>(null)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [processingQueue, setProcessingQueue] = useState(false)
+  const [clearingCompleted, setClearingCompleted] = useState(false)
 
   useEffect(() => {
     void fetch()
@@ -157,30 +152,17 @@ export function SyncQueuePage() {
 
   const visibleItems =
     filter === 'all' ? items : items.filter((item) => item.status === filter)
-
-  const runQueueAction = async (key: string, run: () => Promise<void>) => {
-    setActionLoading(key)
-    try {
-      await run()
-    } finally {
-      setActionLoading(null)
-    }
-  }
+  const completedCount = items.filter((item) => item.status === 'completed').length
 
   const processQueue = async () => {
-    await runQueueAction('process', async () => {
+    setProcessingQueue(true)
+    try {
       const result = await syncApi.processQueue()
       toast.success(`Processed ${result.processed} queue item(s)`)
       await fetch()
-    })
-  }
-
-  const runTask = async (task: SyncTask) => {
-    await runQueueAction(task, async () => {
-      const result = await syncApi.runTask(task)
-      toast.success(`${result.task} processed ${result.count} item(s)`)
-      await fetch()
-    })
+    } finally {
+      setProcessingQueue(false)
+    }
   }
 
   const resolveItem = async (id: number, data: ResolveQueueItemRequest) => {
@@ -195,38 +177,33 @@ export function SyncQueuePage() {
     }
   }
 
+  const clearCompleted = async () => {
+    setClearingCompleted(true)
+    try {
+      const result = await syncApi.clearCompletedQueue()
+      toast.success(`Cleared ${result.deleted} completed queue item(s)`)
+      await fetch()
+    } catch {
+      toast.error('Failed to clear completed queue items')
+    } finally {
+      setClearingCompleted(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageIntro
         title="Sync Queue"
         subtitle="Review pending sync actions, process the queue, and resolve conflicts."
         actions={
-          <>
-            <button
-              onClick={() => void processQueue()}
-              disabled={actionLoading !== null}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Play className="h-4 w-4" />
-              {actionLoading === 'process' ? 'Processing…' : 'Process Queue'}
-            </button>
-            <button
-              onClick={() => void runTask('sync')}
-              disabled={actionLoading !== null}
-              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className="h-4 w-4" />
-              {actionLoading === 'sync' ? 'Running…' : 'Run Sync Task'}
-            </button>
-            <button
-              onClick={() => void runTask('integrity-check')}
-              disabled={actionLoading !== null}
-              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Wrench className="h-4 w-4" />
-              {actionLoading === 'integrity-check' ? 'Running…' : 'Run Integrity Task'}
-            </button>
-          </>
+          <button
+            onClick={() => void processQueue()}
+            disabled={processingQueue}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Play className="h-4 w-4" />
+            {processingQueue ? 'Processing…' : 'Process Queue'}
+          </button>
         }
       />
 
@@ -247,6 +224,13 @@ export function SyncQueuePage() {
           ))}
         </select>
         <span className="text-sm text-muted-foreground">{visibleItems.length} item(s)</span>
+        <button
+          onClick={() => void clearCompleted()}
+          disabled={clearingCompleted || completedCount === 0}
+          className="ml-auto rounded-md border border-border px-3 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {clearingCompleted ? 'Clearing…' : 'Clear Completed'}
+        </button>
       </div>
 
       {loading && items.length === 0 ? (
