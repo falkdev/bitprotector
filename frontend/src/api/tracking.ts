@@ -67,7 +67,7 @@ function toFolderItem(folder: TrackedFolder): TrackingItem {
     tracked_direct: null,
     tracked_via_folder: null,
     source: 'folder',
-    folder_status: 'empty',
+    folder_status: 'not_scanned',
     folder_total_files: 0,
     folder_mirrored_files: 0,
     created_at: folder.created_at,
@@ -114,7 +114,6 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
 
   const folderRows = foldersResponse.data
   const files = filesResponse.data.files.map((file) => toFileItem(file, folderRows))
-  const folders = folderRows.map(toFolderItem)
 
   const folderStats = new Map<number, { total: number; mirrored: number }>()
   for (const folder of folderRows) {
@@ -131,11 +130,14 @@ async function listFallback(params?: TrackingListParams): Promise<TrackingListRe
     }
   }
 
-  const foldersWithStatus: TrackingItem[] = folders.map((folder) => {
+  const foldersWithStatus: TrackingItem[] = folderRows.map((folderRow) => {
+    const folder = toFolderItem(folderRow)
     const stats = folderStats.get(folder.id) ?? { total: 0, mirrored: 0 }
     const folderStatus =
       stats.total === 0
-        ? 'empty'
+        ? folderRow.last_scanned_at
+          ? 'empty'
+          : 'not_scanned'
         : stats.mirrored === stats.total
           ? 'mirrored'
           : stats.mirrored === 0

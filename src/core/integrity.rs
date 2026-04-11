@@ -1,6 +1,7 @@
 use crate::core::checksum;
 use crate::core::drive::{self, DriveRole, DriveState};
-use crate::db::repository::{DrivePair, TrackedFile};
+use crate::db::repository::{DrivePair, Repository, TrackedFile};
+use crate::logging::event_logger;
 use std::path::PathBuf;
 
 /// The result of verifying a tracked file's integrity.
@@ -164,6 +165,61 @@ pub fn attempt_recovery(
         | IntegrityStatus::MasterMissing
         | IntegrityStatus::PrimaryDriveUnavailable
         | IntegrityStatus::SecondaryDriveUnavailable => Ok(false),
+    }
+}
+
+fn recovery_action_for_status(status: &IntegrityStatus) -> &'static str {
+    match status {
+        IntegrityStatus::MasterCorrupted | IntegrityStatus::MasterMissing => "restore_master",
+        IntegrityStatus::MirrorCorrupted | IntegrityStatus::MirrorMissing => "restore_mirror",
+        IntegrityStatus::BothCorrupted => "user_action_required",
+        IntegrityStatus::PrimaryDriveUnavailable | IntegrityStatus::SecondaryDriveUnavailable => {
+            "drive_unavailable"
+        }
+        IntegrityStatus::Ok => "none",
+    }
+}
+
+fn recovery_action_with_context(result: &IntegrityCheckResult) -> String {
+    format!(
+        "{} ({:?})",
+        recovery_action_for_status(&result.status),
+        result.status
+    )
+}
+
+/// Attempt automatic recovery and reconcile sync-queue + mirror metadata when successful.
+/// Emits explicit recovery log events for both success and failure outcomes.
+pub fn attempt_recovery_with_reconciliation(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+    file: &TrackedFile,
+    result: &IntegrityCheckResult,
+) -> anyhow::Result<bool> {
+    let action = recovery_action_with_context(result);
+    match attempt_recovery(drive_pair, file, result) {
+        Ok(true) => {
+            repo.update_tracked_file_mirror_status(file.id, true)?;
+            let reconciled = repo.complete_pending_mirror_queue_for_file(file.id)?;
+            let _ = event_logger::log_recovery(
+                repo,
+                file.id,
+                recovery_action_for_status(&result.status),
+                true,
+            );
+            if reconciled > 0 {
+                let _ = event_logger::log_sync_completed(repo, file.id, "mirror");
+            }
+            Ok(true)
+        }
+        Ok(false) => {
+            let _ = event_logger::log_recovery(repo, file.id, &action, false);
+            Ok(false)
+        }
+        Err(error) => {
+            let _ = event_logger::log_recovery(repo, file.id, &action, false);
+            Err(error)
+        }
     }
 }
 

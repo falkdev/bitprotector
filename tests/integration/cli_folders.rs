@@ -98,6 +98,11 @@ fn test_folders_scan_auto_tracks_new_files() {
 
     let folders = repo.list_tracked_folders().unwrap();
     handle(FoldersCommand::Scan(ScanArgs { id: folders[0].id }), &repo).unwrap();
+    let scanned_folder = repo.get_tracked_folder(folders[0].id).unwrap();
+    assert!(
+        scanned_folder.last_scanned_at.is_some(),
+        "Folder scan should stamp last_scanned_at for status derivation"
+    );
 
     let (files, _) = repo
         .list_tracked_files(Some(pair.id), None, None, 1, 100)

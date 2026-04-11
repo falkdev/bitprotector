@@ -147,6 +147,7 @@ pub fn auto_track_folder_files(
     }
 
     repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
+    repo.mark_tracked_folder_scanned(folder.id)?;
     Ok(newly_tracked)
 }
 
@@ -253,6 +254,11 @@ mod tests {
 
         let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
         assert_eq!(tracked.len(), 2, "Both files should be auto-tracked");
+        let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+        assert!(
+            updated_folder.last_scanned_at.is_some(),
+            "Successful scan should stamp folder scan history"
+        );
         for f in &tracked {
             assert!(
                 !f.is_mirrored,

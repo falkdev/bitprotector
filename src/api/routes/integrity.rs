@@ -54,7 +54,7 @@ pub async fn check_file(
 
     let mut recovered = false;
     if recover && result.status != IntegrityStatus::Ok {
-        match integrity::attempt_recovery(&pair, &file, &result) {
+        match integrity::attempt_recovery_with_reconciliation(&repo, &pair, &file, &result) {
             Ok(r) => {
                 recovered = r;
             }

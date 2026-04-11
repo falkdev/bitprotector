@@ -1,7 +1,7 @@
 use actix_web::{test, web, App};
 use bitprotector_lib::api::auth::{issue_token, JwtSecret};
 use bitprotector_lib::api::server::configure_routes;
-use bitprotector_lib::core::{checksum, scheduler::Scheduler, virtual_path};
+use bitprotector_lib::core::{checksum, drive, integrity, scheduler::Scheduler, virtual_path};
 use bitprotector_lib::db::repository::{create_memory_pool, Repository};
 use bitprotector_lib::db::schema::initialize_schema;
 use std::fs;
@@ -586,6 +586,199 @@ async fn test_tracking_items_filter_and_pagination_combinations() {
 }
 
 #[actix_rt::test]
+async fn test_tracking_items_folder_status_counts_match_underlying_file_states() {
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair("tracking-folder-statuses", "/p", "/s")
+        .unwrap();
+
+    let not_scanned_folder = repo
+        .create_tracked_folder(
+            pair.id,
+            "status/not-scanned",
+            Some("/virtual/status/not-scanned"),
+        )
+        .unwrap();
+    let empty_folder = repo
+        .create_tracked_folder(pair.id, "status/empty", Some("/virtual/status/empty"))
+        .unwrap();
+    repo.create_tracked_folder(pair.id, "status/tracked", Some("/virtual/status/tracked"))
+        .unwrap();
+    repo.create_tracked_folder(pair.id, "status/partial", Some("/virtual/status/partial"))
+        .unwrap();
+    repo.create_tracked_folder(pair.id, "status/mirrored", Some("/virtual/status/mirrored"))
+        .unwrap();
+    repo.mark_tracked_folder_scanned(empty_folder.id).unwrap();
+
+    for i in 0..10 {
+        repo.create_tracked_file_with_source(
+            pair.id,
+            &format!("status/tracked/file-{i}.txt"),
+            "tracked-hash",
+            10,
+            None,
+            false,
+            true,
+        )
+        .unwrap();
+    }
+
+    for i in 0..10 {
+        let file = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                &format!("status/partial/file-{i}.txt"),
+                "partial-hash",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        if i < 4 {
+            repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+        }
+    }
+
+    for i in 0..10 {
+        let file = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                &format!("status/mirrored/file-{i}.txt"),
+                "mirrored-hash",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+    }
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=folder&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["total"], 5);
+
+    let items = body["items"].as_array().unwrap();
+    let not_scanned_item = items
+        .iter()
+        .find(|item| item["path"] == not_scanned_folder.folder_path)
+        .unwrap();
+    assert_eq!(not_scanned_item["folder_status"], "not_scanned");
+    assert_eq!(not_scanned_item["folder_total_files"], 0);
+    assert_eq!(not_scanned_item["folder_mirrored_files"], 0);
+
+    let empty_item = items
+        .iter()
+        .find(|item| item["path"] == "status/empty")
+        .unwrap();
+    assert_eq!(empty_item["folder_status"], "empty");
+    assert_eq!(empty_item["folder_total_files"], 0);
+    assert_eq!(empty_item["folder_mirrored_files"], 0);
+
+    let tracked_item = items
+        .iter()
+        .find(|item| item["path"] == "status/tracked")
+        .unwrap();
+    assert_eq!(tracked_item["folder_status"], "tracked");
+    assert_eq!(tracked_item["folder_total_files"], 10);
+    assert_eq!(tracked_item["folder_mirrored_files"], 0);
+
+    let partial_item = items
+        .iter()
+        .find(|item| item["path"] == "status/partial")
+        .unwrap();
+    assert_eq!(partial_item["folder_status"], "partial");
+    assert_eq!(partial_item["folder_total_files"], 10);
+    assert_eq!(partial_item["folder_mirrored_files"], 4);
+
+    let mirrored_item = items
+        .iter()
+        .find(|item| item["path"] == "status/mirrored")
+        .unwrap();
+    assert_eq!(mirrored_item["folder_status"], "mirrored");
+    assert_eq!(mirrored_item["folder_total_files"], 10);
+    assert_eq!(mirrored_item["folder_mirrored_files"], 10);
+}
+
+#[actix_rt::test]
+async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty_after_scan() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let empty_folder_path = primary.path().join("empty-scan");
+    fs::create_dir(&empty_folder_path).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "tracking-empty-transition",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo
+        .create_tracked_folder(pair.id, "empty-scan", Some("/virtual/empty-scan"))
+        .unwrap();
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=folder&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let before_scan = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == folder.folder_path)
+        .unwrap();
+    assert_eq!(before_scan["folder_status"], "not_scanned");
+    assert_eq!(before_scan["folder_total_files"], 0);
+    assert_eq!(before_scan["folder_mirrored_files"], 0);
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/scan", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/v1/tracking/items?drive_id={}&item_kind=folder&per_page=50",
+            pair.id
+        ))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let after_scan = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == folder.folder_path)
+        .unwrap();
+    assert_eq!(after_scan["folder_status"], "empty");
+    assert_eq!(after_scan["folder_total_files"], 0);
+    assert_eq!(after_scan["folder_mirrored_files"], 0);
+}
+
+#[actix_rt::test]
 async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_removal() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
@@ -1006,6 +1199,11 @@ async fn test_folders_scan() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert!(body["new_files"].as_u64().unwrap() >= 1);
+    let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+    assert!(
+        updated_folder.last_scanned_at.is_some(),
+        "Successful scan should stamp folder scan history"
+    );
     let (files, total_files) = repo
         .list_tracked_files(Some(pair.id), None, None, 1, 20)
         .unwrap();
@@ -1301,6 +1499,234 @@ async fn test_integrity_check_file_not_found() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 404);
+}
+
+#[actix_rt::test]
+async fn test_integrity_check_with_recovery_reconciles_mirror_queue_and_logs_fix() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let content = b"integrity auto-recover";
+    fs::write(primary.path().join("recover.txt"), content).unwrap();
+    fs::write(secondary.path().join("recover.txt"), b"corrupt mirror").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "ip-recover",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
+    drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
+    let hash = checksum::checksum_bytes(content);
+    let file = repo
+        .create_tracked_file(pair.id, "recover.txt", &hash, content.len() as i64, None)
+        .unwrap();
+    let _pending = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/integrity/check/{}?recover=true", file.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["status"], "mirror_corrupted");
+    assert_eq!(body["recovered"], true);
+
+    let recovered_file = repo.get_tracked_file(file.id).unwrap();
+    assert!(recovered_file.is_mirrored);
+    assert_eq!(fs::read(secondary.path().join("recover.txt")).unwrap(), content);
+
+    let (pending, pending_total) = repo.list_sync_queue(Some("pending"), 1, 50).unwrap();
+    assert_eq!(pending_total, 0);
+    assert!(pending.is_empty());
+    let (all, total) = repo.list_sync_queue(None, 1, 50).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(all[0].status, "completed");
+    assert_eq!(all[0].action, "mirror");
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/sync/process")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let processed: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(processed["processed"], 0);
+
+    let (logs, _) = repo
+        .list_event_logs(None, Some(file.id), None, None, 1, 50)
+        .unwrap();
+    assert!(logs.iter().any(|entry| entry.event_type == "recovery_success"));
+    assert!(logs.iter().any(|entry| entry.event_type == "sync_completed"));
+}
+
+#[actix_rt::test]
+async fn test_integrity_check_with_recovery_unrecoverable_keeps_queue_pending_and_logs_failure() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let original = b"expected bytes";
+    let hash = checksum::checksum_bytes(original);
+    fs::write(primary.path().join("unrecoverable.txt"), b"bad master").unwrap();
+    fs::write(secondary.path().join("unrecoverable.txt"), b"bad mirror").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "ip-unrecoverable",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
+    drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
+    let file = repo
+        .create_tracked_file(pair.id, "unrecoverable.txt", &hash, original.len() as i64, None)
+        .unwrap();
+    let _pending = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/integrity/check/{}?recover=true", file.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["status"], "both_corrupted");
+    assert_eq!(body["recovered"], false);
+
+    let unrecovered = repo.get_tracked_file(file.id).unwrap();
+    assert!(!unrecovered.is_mirrored);
+    let (_, pending_total) = repo.list_sync_queue(Some("pending"), 1, 50).unwrap();
+    assert_eq!(pending_total, 1);
+
+    let (logs, _) = repo
+        .list_event_logs(None, Some(file.id), None, None, 1, 50)
+        .unwrap();
+    assert!(logs.iter().any(|entry| entry.event_type == "recovery_fail"));
+    assert!(!logs
+        .iter()
+        .any(|entry| entry.event_type == "recovery_success"));
+    assert!(!logs.iter().any(|entry| entry.event_type == "sync_completed"));
+}
+
+#[actix_rt::test]
+async fn test_integrity_run_with_recovery_reconciles_queue_and_logs_per_file() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "ip-run-recover",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
+    drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
+
+    for idx in 0..2 {
+        let relative = format!("recover/file-{idx}.txt");
+        let content = format!("good-content-{idx}");
+        let primary_path = primary.path().join(&relative);
+        let secondary_path = secondary.path().join(&relative);
+        if let Some(parent) = primary_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        if let Some(parent) = secondary_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&primary_path, content.as_bytes()).unwrap();
+        fs::write(&secondary_path, b"corrupt").unwrap();
+
+        let hash = checksum::checksum_file(&primary_path).unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, &relative, &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        let before_run = integrity::check_file_integrity(&pair, &file).unwrap();
+        assert_eq!(before_run.status, integrity::IntegrityStatus::MirrorCorrupted);
+    }
+
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/integrity/runs")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({ "recover": true }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    for _ in 0..60 {
+        let req = test::TestRequest::get()
+            .uri("/api/v1/integrity/runs/active")
+            .insert_header(("Authorization", bearer()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        if body["run"].is_null() {
+            break;
+        }
+        actix_rt::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let req = test::TestRequest::get()
+        .uri("/api/v1/integrity/runs/latest?issues_only=false&page=1&per_page=50")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let latest: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(latest["run"]["status"], "completed");
+    let recovered_file_ids: Vec<i64> = latest["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["recovered"].as_bool().unwrap_or(false))
+        .filter_map(|row| row["file_id"].as_i64())
+        .collect();
+    assert!(
+        !recovered_file_ids.is_empty(),
+        "expected at least one file to be auto-recovered"
+    );
+
+    let (pending, _) = repo.list_sync_queue(Some("pending"), 1, 50).unwrap();
+    assert!(
+        pending
+            .iter()
+            .all(|item| !recovered_file_ids.contains(&item.tracked_file_id)),
+        "Recovered files should not keep pending mirror queue rows"
+    );
+    let (queue, queue_total) = repo.list_sync_queue(None, 1, 50).unwrap();
+    assert_eq!(queue_total, 2);
+
+    for file_id in recovered_file_ids {
+        let file = repo.get_tracked_file(file_id).unwrap();
+        assert!(file.is_mirrored);
+        let file_queue_rows: Vec<_> = queue
+            .iter()
+            .filter(|item| item.tracked_file_id == file_id)
+            .collect();
+        assert!(
+            !file_queue_rows.is_empty(),
+            "Recovered file should have queue history rows"
+        );
+        assert!(
+            file_queue_rows.iter().all(|item| item.status == "completed"),
+            "Recovered file queue rows should be completed"
+        );
+
+        let (logs, _) = repo
+            .list_event_logs(None, Some(file_id), None, None, 1, 50)
+            .unwrap();
+        assert!(logs.iter().any(|entry| entry.event_type == "recovery_success"));
+        assert!(logs.iter().any(|entry| entry.event_type == "sync_completed"));
+    }
 }
 
 #[actix_rt::test]

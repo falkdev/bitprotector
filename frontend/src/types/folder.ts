@@ -3,6 +3,7 @@ export interface TrackedFolder {
   drive_pair_id: number
   folder_path: string
   virtual_path: string | null
+  last_scanned_at: string | null
   created_at: string
 }
 

@@ -96,15 +96,25 @@ function FolderStatusBadge({
   total: number
 }) {
   const label =
-    status === 'mirrored'
+    status === 'not_scanned'
+      ? 'Not scanned'
+      : status === 'mirrored'
       ? 'Mirrored'
       : status === 'tracked'
         ? 'Tracked'
         : status === 'partial'
           ? 'Partial'
           : 'Empty'
+  const ratio =
+    status === 'empty' || status === 'not_scanned'
+      ? ''
+      : status === 'partial'
+        ? ` (${mirrored}/${total})`
+        : ` (${total}/${total})`
   const className =
-    status === 'mirrored'
+    status === 'not_scanned'
+      ? 'bg-gray-100 text-gray-600'
+      : status === 'mirrored'
       ? 'bg-green-100 text-green-700'
       : status === 'tracked'
         ? 'bg-slate-100 text-slate-700'
@@ -115,7 +125,7 @@ function FolderStatusBadge({
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
       {label}
-      {status !== 'empty' ? ` (${mirrored}/${total})` : ''}
+      {ratio}
     </span>
   )
 }
@@ -391,6 +401,7 @@ export function TrackingWorkspacePage() {
               drive_pair_id: item.drive_pair_id,
               folder_path: item.path,
               virtual_path: item.virtual_path,
+              last_scanned_at: null,
               created_at: item.created_at,
             }) satisfies TrackedFolder
         ),
@@ -692,7 +703,7 @@ export function TrackingWorkspacePage() {
                         )
                       }
 
-                      const status = item.folder_status ?? 'empty'
+                      const status = item.folder_status ?? 'not_scanned'
                       const total = item.folder_total_files ?? 0
                       const mirrored = item.folder_mirrored_files ?? 0
                       return <FolderStatusBadge status={status} total={total} mirrored={mirrored} />
@@ -729,7 +740,7 @@ export function TrackingWorkspacePage() {
                             onClick={() => {
                               const folder = folderItems.find((entry) => entry.id === item.id)
                               if (!folder) return
-                              const status = item.folder_status ?? 'empty'
+                              const status = item.folder_status ?? 'not_scanned'
                               if (status === 'tracked' || status === 'partial') {
                                 void handleMirrorFolder(folder)
                                 return

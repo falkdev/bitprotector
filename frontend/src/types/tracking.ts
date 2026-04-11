@@ -1,6 +1,6 @@
 export type TrackingItemKind = 'file' | 'folder'
 export type TrackingSource = 'direct' | 'folder'
-export type TrackingFolderStatus = 'empty' | 'tracked' | 'mirrored' | 'partial'
+export type TrackingFolderStatus = 'not_scanned' | 'empty' | 'tracked' | 'mirrored' | 'partial'
 
 export interface TrackingItem {
   kind: TrackingItemKind

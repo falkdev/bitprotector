@@ -109,6 +109,46 @@ fn test_integrity_check_with_recovery() {
     // Mirror should now match primary
     let restored = fs::read(secondary.path().join("rec.txt")).unwrap();
     assert_eq!(restored, content);
+
+    // Pending mirror queue item should be reconciled by recovery.
+    cmd(db.path().to_str().unwrap())
+        .args(["sync", "list", "--status", "pending"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total: 0"));
+
+    cmd(db.path().to_str().unwrap())
+        .args(["sync", "list", "--status", "completed"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total: 1"));
+
+    // Recovery and queue reconciliation must be visible in logs.
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "logs",
+            "list",
+            "--event-type",
+            "recovery_success",
+            "--file-id",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total: 1"));
+
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "logs",
+            "list",
+            "--event-type",
+            "sync_completed",
+            "--file-id",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total: 1"));
 }
 
 #[test]

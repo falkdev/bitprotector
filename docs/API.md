@@ -423,9 +423,11 @@ For file rows, `virtual_prefix` and `has_virtual_path` are evaluated against the
 
 Folder rows include aggregate status fields:
 
-- `folder_status`: `empty` | `tracked` | `mirrored` | `partial`
+- `folder_status`: `not_scanned` | `empty` | `tracked` | `mirrored` | `partial`
 - `folder_total_files`: tracked files currently under that folder path
 - `folder_mirrored_files`: mirrored tracked files currently under that folder path
+
+`not_scanned` means the folder has zero tracked files and has not completed a scan yet. `empty` means the folder has zero tracked files after at least one successful scan.
 
 **Errors:** `400 Bad Request` (invalid `source` or `item_kind`)
 
@@ -628,6 +630,7 @@ Tracked folders let BitProtector automatically discover and track new files adde
         "drive_pair_id": 1,
         "folder_path": "documents/",
         "virtual_path": "/docs",
+        "last_scanned_at": null,
         "created_at": "2026-01-01T00:00:00Z"
     }
 ]
@@ -689,6 +692,7 @@ To clear `virtual_path`, pass it explicitly as `null`. Omitting the field leaves
 Scan a tracked folder for new and changed files. Newly discovered files are tracked automatically. Changed files are detected by re-hashing.
 
 Scan tracks files and enqueues mirror work when possible; it does not mirror immediately.
+On success, the folder's `last_scanned_at` is updated.
 
 **Response `200`:**
 
@@ -752,6 +756,10 @@ Run an integrity check for one tracked file. Add `?recover=true` to attempt auto
 
 This endpoint updates `tracked_files.last_integrity_check_at` after each check attempt.
 
+When `recover=true` and auto-recovery succeeds, the file is marked mirrored, pending/in-progress
+`mirror` queue rows for that file are marked `completed`, and recovery activity is recorded in
+event logs (`recovery_success`; plus `sync_completed` when queue rows were reconciled).
+
 `status` is one of:
 
 - `ok`
@@ -780,6 +788,10 @@ Start an asynchronous integrity run. Request body is optional.
 
 - `drive_id`: optional scope to one drive pair (omit for all pairs)
 - `recover`: optional (default `false`)
+
+When `recover=true`, each successfully recovered file is marked mirrored, pending/in-progress
+`mirror` queue rows for that file are marked `completed`, and recovery actions are logged
+(`recovery_success`; plus `sync_completed` when queue rows were reconciled).
 
 **Response `202`:** run summary object.
 

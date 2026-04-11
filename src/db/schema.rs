@@ -80,6 +80,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             virtual_path         TEXT,
             auto_virtual_path    INTEGER NOT NULL DEFAULT 0,
             default_virtual_base TEXT,
+            last_scanned_at      TEXT,
             created_at           TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
         );",
@@ -89,6 +90,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "ALTER TABLE tracked_folders
              ADD COLUMN virtual_path TEXT;",
+        )?;
+    }
+    if !column_exists(conn, "tracked_folders", "last_scanned_at")? {
+        conn.execute_batch(
+            "ALTER TABLE tracked_folders
+             ADD COLUMN last_scanned_at TEXT;",
         )?;
     }
 
@@ -468,6 +475,10 @@ mod tests {
                 column
             );
         }
+        assert!(
+            column_exists(&conn, "tracked_folders", "last_scanned_at").unwrap(),
+            "Column 'last_scanned_at' should be added during migration"
+        );
 
         assert!(
             index_exists(&conn, "idx_tracked_files_virtual_path"),

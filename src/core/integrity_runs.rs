@@ -120,7 +120,9 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
 
             let mut recovered = false;
             if recover && result.status != IntegrityStatus::Ok {
-                recovered = integrity::attempt_recovery(&pair, file, &result).unwrap_or(false);
+                recovered =
+                    integrity::attempt_recovery_with_reconciliation(repo, &pair, file, &result)
+                        .unwrap_or(false);
             }
 
             let needs_attention = result.status != IntegrityStatus::Ok && !recovered;

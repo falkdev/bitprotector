@@ -76,6 +76,7 @@ pub struct TrackedFolder {
     pub drive_pair_id: i64,
     pub folder_path: String,
     pub virtual_path: Option<String>,
+    pub last_scanned_at: Option<String>,
     pub created_at: String,
 }
 
@@ -96,6 +97,7 @@ pub enum TrackingSource {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackingFolderStatus {
+    NotScanned,
     Empty,
     Tracked,
     Mirrored,
@@ -997,7 +999,7 @@ impl Repository {
     pub fn get_tracked_folder(&self, id: i64) -> anyhow::Result<TrackedFolder> {
         let conn = self.conn()?;
         let folder = conn.query_row(
-            "SELECT id, drive_pair_id, folder_path, virtual_path, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path, last_scanned_at, created_at
              FROM tracked_folders WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -1006,7 +1008,8 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    created_at: row.get(4)?,
+                    last_scanned_at: row.get(4)?,
+                    created_at: row.get(5)?,
                 })
             },
         )?;
@@ -1016,7 +1019,7 @@ impl Repository {
     pub fn list_tracked_folders(&self) -> anyhow::Result<Vec<TrackedFolder>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, drive_pair_id, folder_path, virtual_path, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path, last_scanned_at, created_at
              FROM tracked_folders ORDER BY id",
         )?;
         let folders = stmt
@@ -1026,11 +1029,21 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    created_at: row.get(4)?,
+                    last_scanned_at: row.get(4)?,
+                    created_at: row.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(folders)
+    }
+
+    pub fn mark_tracked_folder_scanned(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_folders SET last_scanned_at=datetime('now') WHERE id=?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
     }
 
     pub fn list_tracked_files_under_folder(
@@ -1234,6 +1247,7 @@ impl Repository {
                     NULL AS tracked_via_folder,
                     'folder' AS source,
                     CASE
+                        WHEN COALESCE(stats.total_files, 0) = 0 AND tfolder.last_scanned_at IS NULL THEN 'not_scanned'
                         WHEN COALESCE(stats.total_files, 0) = 0 THEN 'empty'
                         WHEN COALESCE(stats.mirrored_files, 0) = COALESCE(stats.total_files, 0) THEN 'mirrored'
                         WHEN COALESCE(stats.mirrored_files, 0) = 0 THEN 'tracked'
@@ -1291,6 +1305,7 @@ impl Repository {
                 let folder_status =
                     row.get::<_, Option<String>>(9)?
                         .map(|status| match status.as_str() {
+                            "not_scanned" => TrackingFolderStatus::NotScanned,
                             "empty" => TrackingFolderStatus::Empty,
                             "mirrored" => TrackingFolderStatus::Mirrored,
                             "partial" => TrackingFolderStatus::Partial,
@@ -2123,6 +2138,11 @@ mod tests {
             .unwrap();
         assert_eq!(folder.folder_path, "documents/");
         assert_eq!(folder.virtual_path.as_deref(), Some("/docs"));
+        assert!(folder.last_scanned_at.is_none());
+
+        repo.mark_tracked_folder_scanned(folder.id).unwrap();
+        let scanned = repo.get_tracked_folder(folder.id).unwrap();
+        assert!(scanned.last_scanned_at.is_some());
 
         let updated = repo.update_tracked_folder(folder.id, Some(None)).unwrap();
         assert!(updated.virtual_path.is_none());

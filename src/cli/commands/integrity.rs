@@ -69,7 +69,8 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
     }
 
     if recover {
-        let recovered = integrity::attempt_recovery(&pair, &file, &result)?;
+        let recovered =
+            integrity::attempt_recovery_with_reconciliation(repo, &pair, &file, &result)?;
         if recovered {
             repo.update_tracked_file_last_integrity_check_at(file_id)?;
             println!("  Recovery: successful");

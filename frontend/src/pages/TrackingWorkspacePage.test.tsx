@@ -69,6 +69,87 @@ describe('TrackingWorkspacePage', () => {
     expect(within(folderRow).getByText('Partial (2/4)')).toBeInTheDocument()
   })
 
+  it('renders folder status badges with counts for all status variants', async () => {
+    mockBaseTrackingPage([
+      makeTrackingItem({
+        id: 100,
+        kind: 'folder',
+        path: 'not-scanned-folder',
+        source: 'folder',
+        is_mirrored: null,
+        tracked_direct: null,
+        tracked_via_folder: null,
+        folder_status: 'not_scanned',
+        folder_total_files: 0,
+        folder_mirrored_files: 0,
+      }),
+      makeTrackingItem({
+        id: 101,
+        kind: 'folder',
+        path: 'empty-folder',
+        source: 'folder',
+        is_mirrored: null,
+        tracked_direct: null,
+        tracked_via_folder: null,
+        folder_status: 'empty',
+        folder_total_files: 0,
+        folder_mirrored_files: 0,
+      }),
+      makeTrackingItem({
+        id: 102,
+        kind: 'folder',
+        path: 'tracked-folder',
+        source: 'folder',
+        is_mirrored: null,
+        tracked_direct: null,
+        tracked_via_folder: null,
+        folder_status: 'tracked',
+        folder_total_files: 10,
+        folder_mirrored_files: 0,
+      }),
+      makeTrackingItem({
+        id: 103,
+        kind: 'folder',
+        path: 'partial-folder',
+        source: 'folder',
+        is_mirrored: null,
+        tracked_direct: null,
+        tracked_via_folder: null,
+        folder_status: 'partial',
+        folder_total_files: 10,
+        folder_mirrored_files: 4,
+      }),
+      makeTrackingItem({
+        id: 104,
+        kind: 'folder',
+        path: 'mirrored-folder',
+        source: 'folder',
+        is_mirrored: null,
+        tracked_direct: null,
+        tracked_via_folder: null,
+        folder_status: 'mirrored',
+        folder_total_files: 10,
+        folder_mirrored_files: 10,
+      }),
+    ])
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const notScannedRow = await screen.findByTestId('folder-row-100')
+    const emptyRow = await screen.findByTestId('folder-row-101')
+    const trackedRow = screen.getByTestId('folder-row-102')
+    const partialRow = screen.getByTestId('folder-row-103')
+    const mirroredRow = screen.getByTestId('folder-row-104')
+
+    expect(within(notScannedRow).getByText('Not scanned')).toBeInTheDocument()
+    expect(within(notScannedRow).queryByText('(0/0)')).not.toBeInTheDocument()
+    expect(within(emptyRow).getByText('Empty')).toBeInTheDocument()
+    expect(within(emptyRow).queryByText('(0/0)')).not.toBeInTheDocument()
+    expect(within(trackedRow).getByText('Tracked (10/10)')).toBeInTheDocument()
+    expect(within(partialRow).getByText('Partial (4/10)')).toBeInTheDocument()
+    expect(within(mirroredRow).getByText('Mirrored (10/10)')).toBeInTheDocument()
+  })
+
   it('removes the legacy Both source option from filters', async () => {
     mockBaseTrackingPage()
     renderWithApp(<TrackingWorkspacePage />)
@@ -233,7 +314,7 @@ describe('TrackingWorkspacePage', () => {
                 is_mirrored: null,
                 tracked_direct: null,
                 tracked_via_folder: null,
-                folder_status: 'empty',
+                folder_status: 'not_scanned',
                 folder_total_files: 0,
                 folder_mirrored_files: 0,
               }),
@@ -328,7 +409,7 @@ describe('TrackingWorkspacePage', () => {
                 is_mirrored: null,
                 tracked_direct: null,
                 tracked_via_folder: null,
-                folder_status: 'empty',
+                folder_status: 'not_scanned',
                 folder_total_files: 0,
                 folder_mirrored_files: 0,
               }),
