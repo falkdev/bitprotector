@@ -82,14 +82,6 @@ export function DrivesPage() {
         <EmptyState
           title="No drive pairs configured"
           description="Add a drive pair to start mirroring files"
-          action={
-            <button
-              onClick={() => setShowForm(true)}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Add Drive Pair
-            </button>
-          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
