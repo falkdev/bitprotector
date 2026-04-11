@@ -23,7 +23,7 @@ test('loads dashboard status and runs the core quick actions against the live ba
   await expectToast(page, /Sync queue processed/)
 
   await page.getByTestId('quick-action-integrity').click()
-  await expectToast(page, /Integrity run #\d+ started/)
+  await expectToast(page, 'Integrity run started')
 
   await page.getByTestId('quick-action-backup').click()
   await expectToast(page, /Database backup completed|Backup completed with/)

@@ -14,6 +14,7 @@ import { RecentActivity } from '@/components/dashboard/RecentActivity'
 export function DashboardPage() {
   const { status, loading: statusLoading, fetch: fetchStatus } = useStatusStore()
   const { entries, loading: logsLoading, fetch: fetchLogs } = useLogsStore()
+  const integrityDisabled = status ? status.drive_pairs === 0 : false
 
   useEffect(() => {
     void fetchStatus()
@@ -22,8 +23,8 @@ export function DashboardPage() {
 
   const handleIntegrityCheck = async () => {
     try {
-      const run = await integrityApi.startRun(undefined, false)
-      toast.success(`Integrity run #${run.id} started`)
+      await integrityApi.startRun(undefined, false)
+      toast.success('Integrity run started')
       void fetchStatus()
     } catch {
       toast.error('Failed to start integrity run')
@@ -83,6 +84,10 @@ export function DashboardPage() {
             onIntegrityCheck={handleIntegrityCheck}
             onProcessSync={handleProcessSync}
             onRunBackup={handleRunBackup}
+            integrityDisabled={integrityDisabled}
+            integrityDisabledMessage={
+              integrityDisabled ? 'Add a drive pair first to run integrity checks.' : undefined
+            }
           />
         </div>
         <div className="lg:col-span-2">

@@ -5,9 +5,17 @@ interface QuickActionsProps {
   onIntegrityCheck: () => Promise<void>
   onProcessSync: () => Promise<void>
   onRunBackup: () => Promise<void>
+  integrityDisabled?: boolean
+  integrityDisabledMessage?: string
 }
 
-export function QuickActions({ onIntegrityCheck, onProcessSync, onRunBackup }: QuickActionsProps) {
+export function QuickActions({
+  onIntegrityCheck,
+  onProcessSync,
+  onRunBackup,
+  integrityDisabled = false,
+  integrityDisabledMessage,
+}: QuickActionsProps) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
 
   const handle = (key: string, fn: () => Promise<void>) => async () => {
@@ -26,6 +34,7 @@ export function QuickActions({ onIntegrityCheck, onProcessSync, onRunBackup }: Q
       description: 'Run integrity check on every tracked file',
       icon: ShieldCheck,
       onClick: handle('integrity', onIntegrityCheck),
+      disabled: integrityDisabled,
     },
     {
       key: 'sync',
@@ -33,6 +42,7 @@ export function QuickActions({ onIntegrityCheck, onProcessSync, onRunBackup }: Q
       description: 'Process all pending sync queue items',
       icon: RefreshCw,
       onClick: handle('sync', onProcessSync),
+      disabled: false,
     },
     {
       key: 'backup',
@@ -40,6 +50,7 @@ export function QuickActions({ onIntegrityCheck, onProcessSync, onRunBackup }: Q
       description: 'Trigger a manual database backup now',
       icon: Database,
       onClick: handle('backup', onRunBackup),
+      disabled: false,
     },
   ]
 
@@ -47,24 +58,32 @@ export function QuickActions({ onIntegrityCheck, onProcessSync, onRunBackup }: Q
     <div className="rounded-lg border border-border bg-card p-4">
       <h2 className="mb-3 text-sm font-semibold">Quick Actions</h2>
       <div className="space-y-2">
-        {actions.map(({ key, label, description, icon: Icon, onClick }) => (
-          <button
-            key={key}
-            onClick={onClick}
-            disabled={loadingAction !== null}
-            data-testid={`quick-action-${key}`}
-            className="flex w-full items-start gap-3 rounded-md border border-border p-3 text-left hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
-            <div>
-              <p className="text-sm font-medium">
-                {loadingAction === key ? 'Running…' : label}
-              </p>
-              <p className="text-xs text-muted-foreground">{description}</p>
-            </div>
-          </button>
-        ))}
+        {actions.map(({ key, label, description, icon: Icon, onClick, disabled }) => {
+          const actionDisabled = loadingAction !== null || disabled
+          return (
+            <button
+              key={key}
+              onClick={onClick}
+              disabled={actionDisabled}
+              data-testid={`quick-action-${key}`}
+              className="flex w-full items-start gap-3 rounded-md border border-border p-3 text-left hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+              <div>
+                <p className="text-sm font-medium">
+                  {loadingAction === key ? 'Running…' : label}
+                </p>
+                <p className="text-xs text-muted-foreground">{description}</p>
+              </div>
+            </button>
+          )
+        })}
       </div>
+      {integrityDisabled && integrityDisabledMessage ? (
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="quick-action-integrity-hint">
+          {integrityDisabledMessage}
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -57,6 +57,35 @@ describe('IntegrityPage', () => {
     expect(await screen.findByTestId('integrity-row-11')).toHaveTextContent('docs/broken.txt')
   })
 
+  it('disables starting a run and shows helper text when no drive pairs exist', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([])),
+      api.get('/integrity/runs/active', () => HttpResponse.json({ run: null })),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: null,
+            results: [],
+            total: 0,
+          })
+        )
+      )
+    )
+
+    renderWithApp(<IntegrityPage />)
+
+    const runCheckButton = await screen.findByRole('button', { name: 'Run Check' })
+    expect(runCheckButton).toBeDisabled()
+    expect(await screen.findByTestId('integrity-no-drives-hint')).toHaveTextContent(
+      'Add a drive pair first to run integrity checks.'
+    )
+
+    await user.click(runCheckButton)
+    expect(screen.queryByText('Start Integrity Run')).not.toBeInTheDocument()
+  })
+
   it('starts and stops a run through the dialog and action button', async () => {
     const user = userEvent.setup()
     const startedRun = makeIntegrityRun({
@@ -106,7 +135,7 @@ describe('IntegrityPage', () => {
     await screen.findByText('Start Integrity Run')
     await user.click(screen.getByRole('button', { name: 'Start' }))
 
-    expect(await screen.findByText('Integrity run #301 started')).toBeInTheDocument()
+    expect(await screen.findByText('Integrity run started')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(await screen.findByText(/Integrity check running/)).toBeInTheDocument()
 

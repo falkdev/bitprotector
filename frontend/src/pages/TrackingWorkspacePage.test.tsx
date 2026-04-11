@@ -13,9 +13,9 @@ import {
 } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
-function mockBaseTrackingPage(items = [makeTrackingItem()]) {
+function mockBaseTrackingPage(items = [makeTrackingItem()], drivePairs = [makeDrivePair()]) {
   server.use(
-    api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+    api.get('/drives', () => HttpResponse.json(drivePairs)),
     api.get('/tracking/items', () => HttpResponse.json(makeTrackingListResponse(items))),
     api.get('/virtual-paths/tree', ({ request }) => {
       const parent = new URL(request.url).searchParams.get('parent') ?? '/'
@@ -155,6 +155,28 @@ describe('TrackingWorkspacePage', () => {
     renderWithApp(<TrackingWorkspacePage />)
     await screen.findByTestId('tracking-table')
     expect(screen.queryByRole('option', { name: 'Both' })).not.toBeInTheDocument()
+  })
+
+  it('disables top-level tracking actions and shows helper text when no drive pairs exist', async () => {
+    const user = userEvent.setup()
+
+    mockBaseTrackingPage([makeTrackingItem()], [])
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const trackFileButton = await screen.findByTestId('track-file-btn')
+    const addFolderButton = screen.getByTestId('add-folder-button')
+
+    expect(trackFileButton).toBeDisabled()
+    expect(addFolderButton).toBeDisabled()
+    expect(await screen.findByTestId('tracking-no-drives-hint')).toHaveTextContent(
+      'Add a drive pair first to track files or folders.'
+    )
+
+    await user.click(trackFileButton)
+    await user.click(addFolderButton)
+
+    expect(screen.queryByText('Track new file')).not.toBeInTheDocument()
+    expect(screen.queryByText('Add Tracked Folder')).not.toBeInTheDocument()
   })
 
   it('applies all filter dropdown selections to tracking queries', async () => {

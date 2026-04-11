@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Play } from 'lucide-react'
+import { drivesApi } from '@/api/drives'
 import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -138,6 +139,7 @@ export function SyncQueuePage() {
   const [resolveTarget, setResolveTarget] = useState<SyncQueueItem | null>(null)
   const [processingQueue, setProcessingQueue] = useState(false)
   const [clearingCompleted, setClearingCompleted] = useState(false)
+  const [hasDrivePairs, setHasDrivePairs] = useState<boolean | null>(null)
 
   useEffect(() => {
     void fetch()
@@ -150,11 +152,38 @@ export function SyncQueuePage() {
     }
   }, [fetch])
 
+  useEffect(() => {
+    let active = true
+
+    const loadDrives = async () => {
+      try {
+        const drives = await drivesApi.list()
+        if (active) {
+          setHasDrivePairs(drives.length > 0)
+        }
+      } catch {
+        if (active) {
+          setHasDrivePairs(null)
+        }
+      }
+    }
+
+    void loadDrives()
+    return () => {
+      active = false
+    }
+  }, [])
+
   const visibleItems =
     filter === 'all' ? items : items.filter((item) => item.status === filter)
   const completedCount = items.filter((item) => item.status === 'completed').length
+  const disableProcessQueue = hasDrivePairs === false
 
   const processQueue = async () => {
+    if (disableProcessQueue) {
+      return
+    }
+
     setProcessingQueue(true)
     try {
       const result = await syncApi.processQueue()
@@ -198,7 +227,7 @@ export function SyncQueuePage() {
         actions={
           <button
             onClick={() => void processQueue()}
-            disabled={processingQueue}
+            disabled={processingQueue || disableProcessQueue}
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Play className="h-4 w-4" />
@@ -206,6 +235,11 @@ export function SyncQueuePage() {
           </button>
         }
       />
+      {disableProcessQueue ? (
+        <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
+          Add a drive pair first to process the sync queue.
+        </p>
+      ) : null}
 
       <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
         <label htmlFor="queue-filter" className="text-sm font-medium">

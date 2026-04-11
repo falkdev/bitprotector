@@ -135,7 +135,9 @@ export function IntegrityPage() {
   const [checkingFileId, setCheckingFileId] = useState<number | null>(null)
 
   const hasMore = results.length < total
+  const hasDrivePairs = drives.length > 0
   const isRunning = run?.status === 'running' || run?.status === 'stopping'
+  const disableStartRun = !isRunning && !hasDrivePairs
   const lastIntegrityCheckLabel = getLastIntegrityCheckLabel(run)
 
   const loadRunResults = useCallback(
@@ -247,7 +249,7 @@ export function IntegrityPage() {
       setTotal(0)
       setPage(1)
       setShowStartDialog(false)
-      toast.success(`Integrity run #${nextRun.id} started`)
+      toast.success('Integrity run started')
       await loadRunResults(nextRun.id, 1, false)
     } catch {
       toast.error('Failed to start integrity run')
@@ -332,9 +334,12 @@ export function IntegrityPage() {
                 void stopRun()
                 return
               }
+              if (disableStartRun) {
+                return
+              }
               setShowStartDialog(true)
             }}
-            disabled={starting || stopping}
+            disabled={starting || stopping || disableStartRun}
             className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 ${
               isRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'
             }`}
@@ -344,6 +349,11 @@ export function IntegrityPage() {
           </button>
         }
       />
+      {disableStartRun ? (
+        <p className="text-xs text-muted-foreground" data-testid="integrity-no-drives-hint">
+          Add a drive pair first to run integrity checks.
+        </p>
+      ) : null}
       <div
         className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
         data-testid="integrity-last-check"

@@ -27,7 +27,7 @@ test('starts an integrity run and shows issue-only results without hanging the U
   await page.getByLabel('Attempt automatic recovery').uncheck()
 
   await page.getByRole('button', { name: 'Start' }).click()
-  await expectToast(page, /Integrity run #\d+ started/)
+  await expectToast(page, 'Integrity run started')
   await expect(page.getByText(/Integrity check running/)).toBeVisible()
 
   const expectedIssueRow = page

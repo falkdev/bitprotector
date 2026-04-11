@@ -343,6 +343,7 @@ export function TrackingWorkspacePage() {
   const [virtualPaneCollapsed, setVirtualPaneCollapsed] = useState(true)
 
   const virtualPrefix = params.virtual_prefix ?? ''
+  const hasDrivePairs = drives.length > 0
 
   const load = useCallback(async (nextParams: TrackingListParams) => {
     setLoading(true)
@@ -554,21 +555,38 @@ export function TrackingWorkspacePage() {
             />
             <div className="flex items-center gap-2">
               <button
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-                onClick={() => setShowFolderModal(true)}
+                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  if (!hasDrivePairs) {
+                    return
+                  }
+                  setShowFolderModal(true)
+                }}
+                disabled={!hasDrivePairs}
                 data-testid="add-folder-button"
               >
                 <FolderPlus className="h-4 w-4" /> Add Folder
               </button>
               <button
-                className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-                onClick={() => setShowTrackModal(true)}
+                className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  if (!hasDrivePairs) {
+                    return
+                  }
+                  setShowTrackModal(true)
+                }}
+                disabled={!hasDrivePairs}
                 data-testid="track-file-btn"
               >
                 <Plus className="h-4 w-4" /> Track File
               </button>
             </div>
           </div>
+          {!hasDrivePairs ? (
+            <p className="mb-3 text-xs text-muted-foreground" data-testid="tracking-no-drives-hint">
+              Add a drive pair first to track files or folders.
+            </p>
+          ) : null}
 
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
             <input

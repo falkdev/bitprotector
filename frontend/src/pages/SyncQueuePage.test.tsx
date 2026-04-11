@@ -1,14 +1,18 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SyncQueuePage } from './SyncQueuePage'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
-import { makeSyncQueueItem } from '@/test/factories'
+import { makeDrivePair, makeSyncQueueItem } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
 describe('SyncQueuePage', () => {
+  beforeEach(() => {
+    server.use(api.get('/drives', () => HttpResponse.json([makeDrivePair()])))
+  })
+
   it('resolves a pending manual action through the dialog', async () => {
     const user = userEvent.setup()
     let item = makeSyncQueueItem({
@@ -112,6 +116,28 @@ describe('SyncQueuePage', () => {
     expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Sync Task' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Integrity Task' })).not.toBeInTheDocument()
+  })
+
+  it('disables process queue and shows helper text when no drive pairs exist', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json([])),
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [makeSyncQueueItem({ id: 15, status: 'completed' })],
+          total: 1,
+          page: 1,
+          per_page: 50,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByRole('button', { name: 'Process Queue' })).toBeDisabled()
+    expect(await screen.findByTestId('sync-queue-no-drives-hint')).toHaveTextContent(
+      'Add a drive pair first to process the sync queue.'
+    )
+    expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeEnabled()
   })
 
   it('disables clear completed button when there are no completed items', async () => {
