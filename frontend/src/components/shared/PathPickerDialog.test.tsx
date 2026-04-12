@@ -171,6 +171,36 @@ describe('PathPickerDialog', () => {
     expect(await screen.findByText('home')).toBeInTheDocument()
   })
 
+  it('loads a constrained root when rootPath is provided', async () => {
+    childrenMock.mockResolvedValue({
+      path: '/mnt/primary',
+      canonical_path: '/mnt/primary',
+      parent_path: '/mnt',
+      entries: [makeEntry('/mnt/primary/docs', 'directory')],
+    })
+
+    render(
+      <PathPickerDialog
+        open
+        title="Pick a path"
+        mode="directory"
+        value=""
+        rootPath="/mnt/primary"
+        onClose={() => {}}
+        onPick={() => {}}
+      />
+    )
+
+    await waitFor(() =>
+      expect(childrenMock).toHaveBeenCalledWith({
+        path: '/mnt/primary',
+        include_hidden: false,
+        directories_only: true,
+      })
+    )
+    expect(await screen.findByText('docs')).toBeInTheDocument()
+  })
+
   it('loads children lazily when a directory is expanded', async () => {
     childrenMock
       .mockResolvedValueOnce({

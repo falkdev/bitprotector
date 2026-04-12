@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 export interface Column<T> {
   key: string
-  header: string
+  header: ReactNode
   cell: (row: T) => ReactNode
   className?: string
 }
@@ -15,6 +15,7 @@ interface DataTableProps<T> {
   rowTestId?: (row: T) => string
   onRowClick?: (row: T) => void
   selectedRowKey?: string | number | null
+  selectedRowKeys?: ReadonlySet<string | number> | null
   className?: string
   emptyState?: ReactNode
   tableTestId?: string
@@ -27,6 +28,7 @@ export function DataTable<T>({
   rowTestId,
   onRowClick,
   selectedRowKey,
+  selectedRowKeys,
   className,
   emptyState,
   tableTestId,
@@ -62,7 +64,7 @@ export function DataTable<T>({
                 className={cn(
                   'border-t border-border transition-colors',
                   onRowClick && 'cursor-pointer hover:bg-accent/50',
-                  selectedRowKey === key && 'bg-primary/5'
+                  (selectedRowKey === key || selectedRowKeys?.has(key)) && 'bg-primary/5'
                 )}
               >
                 {columns.map((col) => (

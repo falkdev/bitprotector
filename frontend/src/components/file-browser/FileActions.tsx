@@ -14,7 +14,10 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
       <button
         className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
         title="Set virtual path"
-        onClick={() => onSetVirtualPath(file)}
+        onClick={(event) => {
+          event.stopPropagation()
+          onSetVirtualPath(file)
+        }}
         data-testid="action-set-virtual-path"
       >
         <Link className="h-4 w-4" />
@@ -22,7 +25,10 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
       <button
         className="rounded p-1 text-gray-500 hover:bg-green-50 hover:text-green-600"
         title="Mirror file"
-        onClick={() => onMirror(file)}
+        onClick={(event) => {
+          event.stopPropagation()
+          onMirror(file)
+        }}
         data-testid="action-mirror"
       >
         <RefreshCw className="h-4 w-4" />
@@ -30,7 +36,10 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
       <button
         className="rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600"
         title="Delete file"
-        onClick={() => onDelete(file)}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete(file)
+        }}
         data-testid="action-delete"
       >
         <Trash2 className="h-4 w-4" />

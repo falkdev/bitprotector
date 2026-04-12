@@ -229,6 +229,200 @@ describe('TrackingWorkspacePage', () => {
     })
   })
 
+  it('removes the redundant virtual path prefix text filter', async () => {
+    mockBaseTrackingPage()
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('tracking-table')
+    expect(screen.queryByPlaceholderText('Virtual path prefix (/docs)')).not.toBeInTheDocument()
+  })
+
+  it('shows the bulk action bar for multi-select and can deselect all', async () => {
+    const user = userEvent.setup()
+
+    mockBaseTrackingPage([
+      makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+      makeTrackingItem({ id: 12, kind: 'file', path: 'docs/b.txt' }),
+    ])
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-11')
+    await user.click(screen.getByTestId('select-row-file-11'))
+    expect(screen.getByTestId('tracking-bulk-actions')).toBeInTheDocument()
+    expect(screen.getByTestId('selected-count')).toHaveTextContent('1 selected')
+
+    await user.click(screen.getByTestId('select-row-file-12'))
+    expect(screen.getByTestId('selected-count')).toHaveTextContent('2 selected')
+
+    await user.click(screen.getByTestId('bulk-deselect'))
+    expect(screen.queryByTestId('tracking-bulk-actions')).not.toBeInTheDocument()
+  })
+
+  it('mirrors selected files and folders from the bulk action bar', async () => {
+    const user = userEvent.setup()
+    let mirroredFiles = 0
+    let mirroredFolders = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+            makeTrackingItem({
+              id: 21,
+              kind: 'folder',
+              path: 'docs',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+            }),
+          ])
+        )
+      ),
+      api.post('/files/11/mirror', () => {
+        mirroredFiles += 1
+        return HttpResponse.json({ mirrored: true })
+      }),
+      api.post('/folders/21/mirror', () => {
+        mirroredFolders += 1
+        return HttpResponse.json({ mirrored_files: 3 })
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-11')
+    await user.click(screen.getByTestId('select-row-file-11'))
+    await user.click(screen.getByTestId('select-row-folder-21'))
+    await user.click(screen.getByTestId('bulk-mirror'))
+
+    await waitFor(() => {
+      expect(mirroredFiles).toBe(1)
+      expect(mirroredFolders).toBe(1)
+    })
+  })
+
+  it('deletes mixed selected items from the bulk action bar', async () => {
+    const user = userEvent.setup()
+    let listCalls = 0
+    let deletedFiles = 0
+    let deletedFolders = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () => {
+        listCalls += 1
+        if (listCalls === 1) {
+          return HttpResponse.json(
+            makeTrackingListResponse([
+              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+              makeTrackingItem({
+                id: 21,
+                kind: 'folder',
+                path: 'docs',
+                source: 'folder',
+                is_mirrored: null,
+                tracked_direct: null,
+                tracked_via_folder: null,
+              }),
+            ])
+          )
+        }
+        return HttpResponse.json(makeTrackingListResponse([]))
+      }),
+      api.delete('/files/11', () => {
+        deletedFiles += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+      api.delete('/folders/21', () => {
+        deletedFolders += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-11')
+    await user.click(screen.getByTestId('select-row-file-11'))
+    await user.click(screen.getByTestId('select-row-folder-21'))
+    await user.click(screen.getByTestId('bulk-delete'))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => {
+      expect(deletedFiles).toBe(1)
+      expect(deletedFolders).toBe(1)
+      expect(screen.queryByTestId('file-row-11')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
+    })
+  })
+
+  it('moves details to the next file after delete and closes details after deleting the last file', async () => {
+    const user = userEvent.setup()
+    let listCalls = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () => {
+        listCalls += 1
+        if (listCalls === 1) {
+          return HttpResponse.json(
+            makeTrackingListResponse([
+              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+              makeTrackingItem({ id: 12, kind: 'file', path: 'docs/b.txt' }),
+            ])
+          )
+        }
+        if (listCalls === 2) {
+          return HttpResponse.json(
+            makeTrackingListResponse([makeTrackingItem({ id: 12, kind: 'file', path: 'docs/b.txt' })])
+          )
+        }
+        return HttpResponse.json(makeTrackingListResponse([]))
+      }),
+      api.get('/files/:id', ({ params }) => {
+        const id = Number(params.id)
+        return HttpResponse.json(
+          makeTrackedFile({
+            id,
+            relative_path: id === 11 ? 'docs/a.txt' : 'docs/b.txt',
+          })
+        )
+      }),
+      api.delete('/files/11', () => new HttpResponse(null, { status: 204 })),
+      api.delete('/files/12', () => new HttpResponse(null, { status: 204 })),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const firstRow = await screen.findByTestId('file-row-11')
+    await user.click(firstRow)
+    await waitFor(() => {
+      expect(within(screen.getByTestId('file-details')).getByText('docs/a.txt')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByTestId('select-row-file-11'))
+    await user.click(screen.getByTestId('bulk-delete'))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('file-details')).getByText('docs/b.txt')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByTestId('select-row-file-12'))
+    await user.click(screen.getByTestId('bulk-delete'))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('file-details')).not.toBeInTheDocument()
+    })
+  })
+
   it('filters table rows from virtual-tree clicks using folder-derived virtual paths', async () => {
     const seenVirtualPrefixes: Array<string | null> = []
 

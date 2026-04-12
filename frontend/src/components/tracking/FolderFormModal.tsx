@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
-import { getActiveDrivePath, resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
+import { resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
 import type { CreateFolderRequest } from '@/types/folder'
 
@@ -44,14 +44,8 @@ export function FolderFormModal({
   const rawPath = watch('folder_path') ?? ''
   const rawVirtualPath = watch('virtual_path') ?? ''
   const selectedDrive = drives.find((drive) => drive.id === Number(drivePairId))
-  const activeRoot = selectedDrive
-    ? getActiveDrivePath(
-        selectedDrive.primary_path,
-        selectedDrive.secondary_path,
-        selectedDrive.active_role
-      )
-    : null
-  const pathResolution = resolveTrackedPathInput(activeRoot, rawPath)
+  const primaryRoot = selectedDrive?.primary_path ?? null
+  const pathResolution = resolveTrackedPathInput(primaryRoot, rawPath)
 
   return (
     <>
@@ -60,7 +54,7 @@ export function FolderFormModal({
           <h2 className="mb-4 font-semibold">Add Tracked Folder</h2>
           <form
             onSubmit={handleSubmit(async (data) => {
-              const resolution = resolveTrackedPathInput(activeRoot, data.folder_path)
+              const resolution = resolveTrackedPathInput(primaryRoot, data.folder_path)
               if (resolution.error || !resolution.relativePath) {
                 setError('folder_path', {
                   type: 'manual',
@@ -118,7 +112,7 @@ export function FolderFormModal({
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {selectedDrive
-                  ? `Active root: ${activeRoot}`
+                  ? `Primary root: ${primaryRoot}`
                   : 'Select a drive pair before browsing or submitting.'}
               </p>
               {selectedDrive && rawPath.trim() && !pathResolution.error && pathResolution.relativePath ? (
@@ -174,12 +168,13 @@ export function FolderFormModal({
       <PathPickerDialog
         open={showPicker}
         title="Select Folder Path"
-        description="Browse the BitProtector host filesystem and choose a directory under the selected drive pair’s active root."
+        description="Browse the BitProtector host filesystem and choose a directory under the selected drive pair’s primary root."
         mode="directory"
         value={rawPath}
-        startPath={resolveAbsolutePathForPicker(activeRoot, rawPath)}
+        startPath={resolveAbsolutePathForPicker(primaryRoot, rawPath)}
+        rootPath={primaryRoot ?? undefined}
         confirmLabel="Use Folder Path"
-        validatePath={(path) => resolveTrackedPathInput(activeRoot, path).error}
+        validatePath={(path) => resolveTrackedPathInput(primaryRoot, path).error}
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
           setValue('folder_path', path, { shouldDirty: true, shouldValidate: true })

@@ -23,6 +23,7 @@ export interface TrackedFileListResponse {
 export interface TrackFileRequest {
   drive_pair_id: number
   relative_path: string
+  virtual_path?: string
 }
 
 export interface FilesQueryParams {

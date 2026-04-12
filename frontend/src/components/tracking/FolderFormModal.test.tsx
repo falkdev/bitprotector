@@ -15,7 +15,7 @@ const drive: DrivePair = {
   secondary_path: '/mnt/secondary',
   primary_state: 'active',
   secondary_state: 'active',
-  active_role: 'primary',
+  active_role: 'secondary',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }

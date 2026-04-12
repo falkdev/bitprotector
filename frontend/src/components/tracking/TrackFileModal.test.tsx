@@ -15,7 +15,7 @@ const drive: DrivePair = {
   secondary_path: '/mnt/secondary',
   primary_state: 'active',
   secondary_state: 'active',
-  active_role: 'primary',
+  active_role: 'secondary',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -44,6 +44,34 @@ describe('TrackFileModal', () => {
     expect(onTrack).toHaveBeenCalledWith({
       drive_pair_id: 1,
       relative_path: 'docs/report.pdf',
+    })
+  })
+
+  it('submits an optional virtual path when provided', async () => {
+    const user = userEvent.setup()
+    const onTrack = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <TrackFileModal
+        open
+        onClose={() => {}}
+        onTrack={onTrack}
+        drives={[drive]}
+      />
+    )
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
+      '/mnt/primary/docs/report.pdf'
+    )
+    await user.type(screen.getByPlaceholderText('/docs/report.pdf'), '/virtual/docs/report.pdf')
+    await user.click(screen.getByRole('button', { name: 'Track file' }))
+
+    expect(onTrack).toHaveBeenCalledWith({
+      drive_pair_id: 1,
+      relative_path: 'docs/report.pdf',
+      virtual_path: '/virtual/docs/report.pdf',
     })
   })
 })

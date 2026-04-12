@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderPlus, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
@@ -29,6 +29,34 @@ type TreeNode = VirtualPathTreeNode & {
   loaded?: boolean
   loading?: boolean
   children?: TreeNode[]
+}
+
+type DetailPostDeleteAction =
+  | {
+      type: 'open'
+      fileId: number
+    }
+  | {
+      type: 'close'
+    }
+
+function trackingRowKey(item: TrackingItem): string {
+  return `${item.kind}-${item.id}`
+}
+
+function nextFileAfterDeletion(
+  items: TrackingItem[],
+  selectedFileId: number,
+  deletedFileIds: Set<number>
+): number | null {
+  const fileItems = items.filter((item) => item.kind === 'file')
+  const selectedIndex = fileItems.findIndex((item) => item.id === selectedFileId)
+  if (selectedIndex === -1) {
+    return null
+  }
+
+  const next = fileItems.slice(selectedIndex + 1).find((item) => !deletedFileIds.has(item.id))
+  return next?.id ?? null
 }
 
 function updateTreeChildren(nodes: TreeNode[], parent: string, children: TreeNode[]): TreeNode[] {
@@ -127,6 +155,39 @@ function FolderStatusBadge({
       {label}
       {ratio}
     </span>
+  )
+}
+
+function SelectAllCheckbox({
+  checked,
+  indeterminate,
+  disabled,
+  onChange,
+}: {
+  checked: boolean
+  indeterminate: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = indeterminate
+    }
+  }, [indeterminate])
+
+  return (
+    <input
+      ref={inputRef}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.checked)}
+      aria-label="Select all rows"
+      data-testid="select-all-rows"
+      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
+    />
   )
 }
 
@@ -336,11 +397,16 @@ export function TrackingWorkspacePage() {
   const [showTrackModal, setShowTrackModal] = useState(false)
   const [showFolderModal, setShowFolderModal] = useState(false)
   const [selectedFile, setSelectedFile] = useState<TrackedFile | null>(null)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
   const [folderPathModal, setFolderPathModal] = useState<TrackedFolder | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TrackingItem | null>(null)
+  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false)
   const [filePathModal, setFilePathModal] = useState<TrackedFile | null>(null)
   const [treeRefreshKey, setTreeRefreshKey] = useState(0)
   const [virtualPaneCollapsed, setVirtualPaneCollapsed] = useState(true)
+  const [bulkMirroring, setBulkMirroring] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [postDeleteDetailAction, setPostDeleteDetailAction] = useState<DetailPostDeleteAction | null>(null)
 
   const virtualPrefix = params.virtual_prefix ?? ''
   const hasDrivePairs = drives.length > 0
@@ -408,6 +474,54 @@ export function TrackingWorkspacePage() {
         ),
     [items]
   )
+  const selectedItems = useMemo(
+    () => items.filter((item) => selectedRowKeys.has(trackingRowKey(item))),
+    [items, selectedRowKeys]
+  )
+  const allVisibleSelected = items.length > 0 && items.every((item) => selectedRowKeys.has(trackingRowKey(item)))
+  const someVisibleSelected = !allVisibleSelected && items.some((item) => selectedRowKeys.has(trackingRowKey(item)))
+
+  const toggleRowSelection = useCallback((item: TrackingItem, checked: boolean) => {
+    const key = trackingRowKey(item)
+    setSelectedRowKeys((current) => {
+      const next = new Set(current)
+      if (checked) {
+        next.add(key)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
+  }, [])
+
+  const toggleAllVisible = useCallback((checked: boolean) => {
+    setSelectedRowKeys((current) => {
+      const next = new Set(current)
+      for (const item of items) {
+        const key = trackingRowKey(item)
+        if (checked) {
+          next.add(key)
+        } else {
+          next.delete(key)
+        }
+      }
+      return next
+    })
+  }, [items])
+
+  useEffect(() => {
+    const visibleKeys = new Set(items.map((item) => trackingRowKey(item)))
+    setSelectedRowKeys((current) => {
+      const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)))
+      return next.size === current.size ? current : next
+    })
+  }, [items])
+
+  useEffect(() => {
+    if (selectedItems.length === 0 && confirmBulkDeleteOpen) {
+      setConfirmBulkDeleteOpen(false)
+    }
+  }, [confirmBulkDeleteOpen, selectedItems.length])
 
   const handleTrack = async (data: TrackFileRequest) => {
     try {
@@ -463,26 +577,7 @@ export function TrackingWorkspacePage() {
     }
   }
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return
-
-    try {
-      if (deleteTarget.kind === 'file') {
-        await filesApi.delete(deleteTarget.id)
-        toast.success('File removed from tracking')
-      } else {
-        await foldersApi.delete(deleteTarget.id)
-        toast.success('Folder removed')
-      }
-      setDeleteTarget(null)
-      await load(params)
-      setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Delete failed')
-    }
-  }
-
-  const openFileDetails = async (item: TrackingItem) => {
+  const openFileDetails = useCallback(async (item: TrackingItem) => {
     if (item.kind !== 'file') return
     try {
       const file = await filesApi.get(item.id)
@@ -493,7 +588,122 @@ export function TrackingWorkspacePage() {
     } catch {
       setSelectedFile(toTrackedFile(item))
     }
+  }, [])
+
+  const performDelete = useCallback(async (targets: TrackingItem[]) => {
+    if (targets.length === 0) return
+
+    setBulkDeleting(true)
+    const deleted: TrackingItem[] = []
+    let failedCount = 0
+
+    for (const target of targets) {
+      try {
+        if (target.kind === 'file') {
+          await filesApi.delete(target.id)
+        } else {
+          await foldersApi.delete(target.id)
+        }
+        deleted.push(target)
+      } catch {
+        failedCount += 1
+      }
+    }
+
+    const deletedCount = deleted.length
+    if (deletedCount > 0) {
+      const deletedKeys = new Set(deleted.map((item) => trackingRowKey(item)))
+      setSelectedRowKeys((current) => {
+        const next = new Set(current)
+        for (const key of deletedKeys) {
+          next.delete(key)
+        }
+        return next
+      })
+
+      const deletedFileIds = new Set(deleted.filter((item) => item.kind === 'file').map((item) => item.id))
+      if (selectedFile && deletedFileIds.has(selectedFile.id)) {
+        const nextFileId = nextFileAfterDeletion(items, selectedFile.id, deletedFileIds)
+        setPostDeleteDetailAction(nextFileId ? { type: 'open', fileId: nextFileId } : { type: 'close' })
+      }
+
+      if (targets.length === 1) {
+        toast.success(targets[0].kind === 'file' ? 'File removed from tracking' : 'Folder removed')
+      } else {
+        toast.success(`Removed ${deletedCount} item(s) from tracking`)
+      }
+      setTreeRefreshKey((current) => current + 1)
+    }
+
+    if (failedCount > 0) {
+      toast.error(targets.length === 1 ? 'Delete failed' : `Failed to remove ${failedCount} item(s)`)
+    }
+
+    setDeleteTarget(null)
+    setConfirmBulkDeleteOpen(false)
+    await load(params)
+    setBulkDeleting(false)
+  }, [items, load, params, selectedFile])
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    await performDelete([deleteTarget])
   }
+
+  const handleDeleteSelected = async () => {
+    await performDelete(selectedItems)
+  }
+
+  const handleMirrorSelected = async () => {
+    if (selectedItems.length === 0) return
+
+    setBulkMirroring(true)
+    let mirroredCount = 0
+    let failedCount = 0
+
+    for (const item of selectedItems) {
+      try {
+        if (item.kind === 'file') {
+          await filesApi.mirror(item.id)
+        } else {
+          await foldersApi.mirror(item.id)
+        }
+        mirroredCount += 1
+      } catch {
+        failedCount += 1
+      }
+    }
+
+    if (mirroredCount > 0) {
+      toast.success(`Mirror requested for ${mirroredCount} item(s)`)
+    }
+    if (failedCount > 0) {
+      toast.error(`Failed to mirror ${failedCount} item(s)`)
+    }
+
+    await load(params)
+    setBulkMirroring(false)
+  }
+
+  useEffect(() => {
+    if (!postDeleteDetailAction) return
+
+    if (postDeleteDetailAction.type === 'close') {
+      setSelectedFile(null)
+      setPostDeleteDetailAction(null)
+      return
+    }
+
+    const nextItem = items.find(
+      (item) => item.kind === 'file' && item.id === postDeleteDetailAction.fileId
+    )
+    setPostDeleteDetailAction(null)
+    if (!nextItem) {
+      setSelectedFile(null)
+      return
+    }
+    void openFileDetails(nextItem)
+  }, [items, openFileDetails, postDeleteDetailAction])
 
   const handleSetFileVirtualPath = async (fileId: number, vpath: string) => {
     try {
@@ -588,7 +798,7 @@ export function TrackingWorkspacePage() {
             </p>
           ) : null}
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             <input
               value={params.q ?? ''}
               onChange={(event) => updateParams({ q: event.target.value || undefined })}
@@ -647,12 +857,6 @@ export function TrackingWorkspacePage() {
               <option value="yes">With Virtual Path</option>
               <option value="no">Without Virtual Path</option>
             </select>
-            <input
-              value={params.virtual_prefix ?? ''}
-              onChange={(event) => updateParams({ virtual_prefix: event.target.value || undefined })}
-              placeholder="Virtual path prefix (/docs)"
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
-            />
           </div>
         </div>
 
@@ -666,6 +870,29 @@ export function TrackingWorkspacePage() {
               <DataTable
                 tableTestId="tracking-table"
                 columns={[
+                  {
+                    key: 'select',
+                    header: (
+                      <SelectAllCheckbox
+                        checked={allVisibleSelected}
+                        indeterminate={someVisibleSelected}
+                        disabled={items.length === 0}
+                        onChange={(checked) => toggleAllVisible(checked)}
+                      />
+                    ),
+                    className: 'w-10',
+                    cell: (item) => (
+                      <input
+                        type="checkbox"
+                        checked={selectedRowKeys.has(trackingRowKey(item))}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => toggleRowSelection(item, event.target.checked)}
+                        aria-label={`Select ${item.kind} ${item.path}`}
+                        data-testid={`select-row-${trackingRowKey(item)}`}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    ),
+                  },
                   {
                     key: 'kind',
                     header: 'Kind',
@@ -746,7 +973,8 @@ export function TrackingWorkspacePage() {
                       ) : (
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation()
                               const folder = folderItems.find((entry) => entry.id === item.id)
                               if (folder) setFolderPathModal(folder)
                             }}
@@ -755,7 +983,8 @@ export function TrackingWorkspacePage() {
                             Set Path
                           </button>
                           <button
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation()
                               const folder = folderItems.find((entry) => entry.id === item.id)
                               if (!folder) return
                               const status = item.folder_status ?? 'not_scanned'
@@ -773,7 +1002,10 @@ export function TrackingWorkspacePage() {
                               : 'Scan'}
                           </button>
                           <button
-                            onClick={() => setDeleteTarget(item)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setDeleteTarget(item)
+                            }}
                             className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                             data-testid={`delete-folder-${item.id}`}
                           >
@@ -784,7 +1016,7 @@ export function TrackingWorkspacePage() {
                   },
                 ]}
                 data={items}
-                rowKey={(item) => `${item.kind}-${item.id}`}
+                rowKey={(item) => trackingRowKey(item)}
                 rowTestId={(item) => `${item.kind}-row-${item.id}`}
                 onRowClick={(item) => {
                   if (item.kind === 'file') {
@@ -792,6 +1024,7 @@ export function TrackingWorkspacePage() {
                   }
                 }}
                 selectedRowKey={selectedFile ? `file-${selectedFile.id}` : null}
+                selectedRowKeys={selectedRowKeys}
                 emptyState={
                   <EmptyState
                     title="No tracked items"
@@ -811,6 +1044,46 @@ export function TrackingWorkspacePage() {
             </div>
           )}
         </div>
+        {selectedItems.length > 0 ? (
+          <div
+            className="border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur"
+            data-testid="tracking-bulk-actions"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-gray-600" data-testid="selected-count">
+                {selectedItems.length} selected
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedRowKeys(new Set())}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                  data-testid="bulk-deselect"
+                >
+                  Deselect all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleMirrorSelected()}
+                  disabled={bulkMirroring || bulkDeleting}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  data-testid="bulk-mirror"
+                >
+                  {bulkMirroring ? 'Mirroring...' : 'Mirror selected'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmBulkDeleteOpen(true)}
+                  disabled={bulkDeleting || bulkMirroring}
+                  className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  data-testid="bulk-delete"
+                >
+                  Delete selected
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {selectedFile ? (
@@ -861,6 +1134,16 @@ export function TrackingWorkspacePage() {
         }
         destructive
         onConfirm={handleDelete}
+      />
+      <ConfirmDialog
+        open={confirmBulkDeleteOpen && selectedItems.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setConfirmBulkDeleteOpen(false)
+        }}
+        title="Remove selected items"
+        description={`Remove ${selectedItems.length} selected item(s) from tracking?`}
+        destructive
+        onConfirm={handleDeleteSelected}
       />
       <FileDetailsPathModalBridge
         file={filePathModal}

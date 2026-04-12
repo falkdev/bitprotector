@@ -3,6 +3,7 @@ import { ChevronRight, Eye, EyeOff, FileText, Folder, FolderOpen, RefreshCw, X }
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
 import { filesystemApi } from '@/api/filesystem'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { normalizeAbsoluteFilesystemPath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import type { FilesystemEntry, FilesystemEntryKind } from '@/types/filesystem'
 
@@ -27,17 +28,18 @@ interface PathPickerDialogProps {
   mode: PickerMode
   value: string
   startPath?: string
+  rootPath?: string
   confirmLabel?: string
   onClose: () => void
   onPick: (path: string) => void
   validatePath?: (path: string) => string | null
 }
 
-function createRootNode(): PickerNode {
+function createRootNode(rootPath: string): PickerNode {
   return {
-    id: '/',
-    name: '/',
-    path: '/',
+    id: rootPath,
+    name: rootPath === '/' ? '/' : rootPath,
+    path: rootPath,
     kind: 'directory',
     isHidden: false,
     isSelectable: true,
@@ -99,16 +101,42 @@ function replaceChildren(nodes: PickerNode[], targetPath: string, children: Pick
   })
 }
 
-function buildAncestorChain(path: string): string[] {
-  if (path === '/' || !path.startsWith('/')) {
-    return ['/']
+function isPathInsideRoot(path: string, rootPath: string): boolean {
+  if (rootPath === '/') return path.startsWith('/')
+  return path === rootPath || path.startsWith(`${rootPath}/`)
+}
+
+function buildAncestorChainWithinRoot(path: string, rootPath: string): string[] {
+  if (!path.startsWith('/')) {
+    return [rootPath]
   }
 
-  const parts = path.split('/').filter(Boolean)
-  const ancestors = ['/']
-  let current = ''
+  if (rootPath === '/') {
+    if (path === '/') {
+      return ['/']
+    }
 
-  for (const part of parts) {
+    const parts = path.split('/').filter(Boolean)
+    const ancestors = ['/']
+    let current = ''
+
+    for (const part of parts) {
+      current = `${current}/${part}`
+      ancestors.push(current)
+    }
+
+    return ancestors
+  }
+
+  if (!isPathInsideRoot(path, rootPath)) {
+    return [rootPath]
+  }
+
+  const suffix = path.slice(rootPath.length).split('/').filter(Boolean)
+  const ancestors = [rootPath]
+  let current = rootPath
+
+  for (const part of suffix) {
     current = `${current}/${part}`
     ancestors.push(current)
   }
@@ -129,16 +157,21 @@ export function PathPickerDialog({
   mode,
   value,
   startPath,
+  rootPath,
   confirmLabel = 'Use Path',
   onClose,
   onPick,
   validatePath,
 }: PathPickerDialogProps) {
+  const scopedRootPath = useMemo(
+    () => normalizeAbsoluteFilesystemPath(rootPath?.trim() || '/'),
+    [rootPath]
+  )
   const treeRef = useRef<TreeApi<PickerNode> | null>(null)
-  const nodesRef = useRef<PickerNode[]>([createRootNode()])
+  const nodesRef = useRef<PickerNode[]>([createRootNode(scopedRootPath)])
   const loadingPathsRef = useRef<Set<string>>(new Set())
   const loadingPromisesRef = useRef<Map<string, Promise<void>>>(new Map())
-  const [treeData, setTreeData] = useState<PickerNode[]>([createRootNode()])
+  const [treeData, setTreeData] = useState<PickerNode[]>([createRootNode(scopedRootPath)])
   const [treeKey, setTreeKey] = useState(0)
   const [draftPath, setDraftPath] = useState(value)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -190,7 +223,9 @@ export function PathPickerDialog({
           directories_only: mode === 'directory',
         })
         const children = response.entries.map(toNode)
-        setTreeData((current) => replaceChildren(current, path, children))
+        setTreeData((current) =>
+          path === scopedRootPath ? children : replaceChildren(current, path, children)
+        )
       } finally {
         loadingPathsRef.current.delete(path)
         loadingPromisesRef.current.delete(path)
@@ -200,7 +235,7 @@ export function PathPickerDialog({
 
     loadingPromisesRef.current.set(path, request)
     return request
-  }, [mode])
+  }, [mode, scopedRootPath])
 
   const renderNode = useCallback(({ node, style }: NodeRendererProps<PickerNode>) => {
     const isDirectory = node.data.kind === 'directory'
@@ -260,31 +295,32 @@ export function PathPickerDialog({
   }, [loadChildren, showHidden])
 
   const initializeTree = useCallback(async (initialPath: string, includeHidden: boolean) => {
+    const normalizedInitialPath = normalizeAbsoluteFilesystemPath(initialPath || scopedRootPath)
+    const scopedInitialPath = isPathInsideRoot(normalizedInitialPath, scopedRootPath)
+      ? normalizedInitialPath
+      : scopedRootPath
+
     setLoading(true)
     setTreeError(null)
-    const nextTree = [createRootNode()]
+    const nextTree = [createRootNode(scopedRootPath)]
     nodesRef.current = nextTree
     loadingPathsRef.current.clear()
     setTreeData(nextTree)
     setTreeKey((current) => current + 1)
     setSelectedPath(null)
     setSelectedKind(null)
-    setDraftPath(initialPath)
+    setDraftPath(scopedInitialPath)
 
     try {
       await nextTick()
-      await loadChildren('/', includeHidden, true)
+      await loadChildren(scopedRootPath, includeHidden, true)
       await nextTick()
-      treeRef.current?.open('/')
-
-      if (!initialPath.startsWith('/')) {
-        return
-      }
+      treeRef.current?.open(scopedRootPath)
 
       const directoryTarget = mode === 'file'
-        ? initialPath.split('/').slice(0, -1).join('/') || '/'
-        : initialPath
-      const ancestors = buildAncestorChain(directoryTarget)
+        ? scopedInitialPath.split('/').slice(0, -1).join('/') || scopedRootPath
+        : scopedInitialPath
+      const ancestors = buildAncestorChainWithinRoot(directoryTarget, scopedRootPath)
 
       for (const ancestor of ancestors.slice(1)) {
         await loadChildren(ancestor, includeHidden, true)
@@ -292,15 +328,15 @@ export function PathPickerDialog({
         treeRef.current?.open(ancestor)
       }
 
-      setSelectedPath(initialPath)
-      const initialNode = findNode(nodesRef.current, initialPath)
+      setSelectedPath(scopedInitialPath)
+      const initialNode = findNode(nodesRef.current, scopedInitialPath)
       setSelectedKind(initialNode?.kind ?? null)
     } catch (error) {
       setTreeError(error instanceof Error ? error.message : 'Failed to load filesystem browser')
     } finally {
       setLoading(false)
     }
-  }, [loadChildren, mode])
+  }, [loadChildren, mode, scopedRootPath])
 
   useEffect(() => {
     if (!open) {
@@ -308,8 +344,8 @@ export function PathPickerDialog({
     }
 
     setShowHidden(false)
-    void initializeTree((startPath && startPath.trim()) || value.trim() || '/', false)
-  }, [initializeTree, open, startPath, value])
+    void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
+  }, [initializeTree, open, scopedRootPath, startPath, value])
 
   if (!open) {
     return null
@@ -355,7 +391,7 @@ export function PathPickerDialog({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void initializeTree(draftPath.trim() || '/', showHidden)}
+                onClick={() => void initializeTree(draftPath.trim() || scopedRootPath, showHidden)}
                 className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -366,7 +402,7 @@ export function PathPickerDialog({
                 onClick={() => {
                   const nextShowHidden = !showHidden
                   setShowHidden(nextShowHidden)
-                  void initializeTree(draftPath.trim() || '/', nextShowHidden)
+                  void initializeTree(draftPath.trim() || scopedRootPath, nextShowHidden)
                 }}
                 className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
               >
