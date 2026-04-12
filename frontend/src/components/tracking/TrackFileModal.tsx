@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
@@ -52,7 +53,7 @@ export function TrackFileModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <ModalLayer>
         <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl">
           <h2 className="mb-4 text-lg font-semibold">Track new file</h2>
           <form
@@ -178,7 +179,7 @@ export function TrackFileModal({
             </div>
           </form>
         </div>
-      </div>
+      </ModalLayer>
       <PathPickerDialog
         open={showPicker}
         title="Select File Path"

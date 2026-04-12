@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { Pagination } from '@/components/shared/Pagination'
 import { PageIntro } from '@/components/shared/PageIntro'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
@@ -229,7 +230,7 @@ function FolderVirtualPathModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <ModalLayer>
         <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
           <h2 className="mb-1 text-lg font-semibold">Set Folder Virtual Path</h2>
           <p className="mb-4 truncate font-mono text-sm text-gray-500">{folder.folder_path}</p>
@@ -273,7 +274,7 @@ function FolderVirtualPathModal({
             </button>
           </div>
         </div>
-      </div>
+      </ModalLayer>
       <PathPickerDialog
         open={showPicker}
         title="Select Folder Virtual Path"
@@ -1207,7 +1208,7 @@ function FileVirtualPathModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <ModalLayer>
         <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
           <h2 className="text-lg font-semibold">Set File Virtual Path</h2>
           <p className="mt-1 font-mono text-sm text-muted-foreground">{file.relative_path}</p>
@@ -1252,7 +1253,7 @@ function FileVirtualPathModal({
             </button>
           </div>
         </div>
-      </div>
+      </ModalLayer>
       <PathPickerDialog
         open={showPicker}
         title="Select File Virtual Path"

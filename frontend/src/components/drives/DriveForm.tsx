@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { X } from 'lucide-react'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import type { DrivePair, CreateDrivePairRequest, UpdateDrivePairRequest } from '@/types/drive'
 import type { ApiError } from '@/types/api'
@@ -108,80 +109,80 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-semibold">{initial ? 'Edit Drive Pair' : 'New Drive Pair'}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-accent transition-colors">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <form onSubmit={submitForm} className="space-y-4">
-          <Field label="Name" error={errors.name?.message}>
-            <input
-              {...register('name')}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="e.g. Main Mirror"
-              data-testid="drive-name-input"
-            />
-          </Field>
-          <Field label="Primary Path" error={errors.primary_path?.message}>
-            <div className="flex gap-2">
-              <input
-                {...register('primary_path')}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                placeholder="/mnt/drive-a"
-                data-testid="drive-primary-path-input"
-              />
-              <button
-                type="button"
-                onClick={() => setPickerField('primary_path')}
-                className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
-              >
-                Browse
-              </button>
-            </div>
-          </Field>
-          <Field label="Secondary Path" error={errors.secondary_path?.message}>
-            <div className="flex gap-2">
-              <input
-                {...register('secondary_path')}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                placeholder="/mnt/drive-b"
-                data-testid="drive-secondary-path-input"
-              />
-              <button
-                type="button"
-                onClick={() => setPickerField('secondary_path')}
-                className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
-              >
-                Browse
-              </button>
-            </div>
-          </Field>
-
-          {!initial ? (
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input type="checkbox" {...register('skip_validation')} checked={skipValidation} />
-              Skip path validation when creating this drive pair
-            </label>
-          ) : null}
-
-          <div className="flex justify-end gap-2 pt-2">
-            <div className="mr-auto max-w-xs self-center text-xs text-destructive">
-              {submitError}
-            </div>
-            <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors">
-              Cancel
-            </button>
-            <button type="submit" disabled={isSubmitting} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60">
-              {isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
+      <ModalLayer className="px-4">
+        <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">{initial ? 'Edit Drive Pair' : 'New Drive Pair'}</h2>
+            <button type="button" onClick={onClose} className="rounded p-1 hover:bg-accent transition-colors">
+              <X className="h-4 w-4" />
             </button>
           </div>
-        </form>
-      </div>
-      </div>
+
+          <form onSubmit={submitForm} className="space-y-4">
+            <Field label="Name" error={errors.name?.message}>
+              <input
+                {...register('name')}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                placeholder="e.g. Main Mirror"
+                data-testid="drive-name-input"
+              />
+            </Field>
+            <Field label="Primary Path" error={errors.primary_path?.message}>
+              <div className="flex gap-2">
+                <input
+                  {...register('primary_path')}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                  placeholder="/mnt/drive-a"
+                  data-testid="drive-primary-path-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPickerField('primary_path')}
+                  className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
+                >
+                  Browse
+                </button>
+              </div>
+            </Field>
+            <Field label="Secondary Path" error={errors.secondary_path?.message}>
+              <div className="flex gap-2">
+                <input
+                  {...register('secondary_path')}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                  placeholder="/mnt/drive-b"
+                  data-testid="drive-secondary-path-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPickerField('secondary_path')}
+                  className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
+                >
+                  Browse
+                </button>
+              </div>
+            </Field>
+
+            {!initial ? (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" {...register('skip_validation')} checked={skipValidation} />
+                Skip path validation when creating this drive pair
+              </label>
+            ) : null}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <div className="mr-auto max-w-xs self-center text-xs text-destructive">
+                {submitError}
+              </div>
+              <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={isSubmitting} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60">
+                {isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </ModalLayer>
       <PathPickerDialog
         open={pickerField !== null}
         title={pickerField === 'primary_path' ? 'Select Primary Drive Path' : 'Select Secondary Drive Path'}

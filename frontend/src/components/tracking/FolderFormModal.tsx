@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
@@ -49,7 +50,7 @@ export function FolderFormModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <ModalLayer>
         <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-lg">
           <h2 className="mb-4 font-semibold">Add Tracked Folder</h2>
           <form
@@ -164,7 +165,7 @@ export function FolderFormModal({
             </div>
           </form>
         </div>
-      </div>
+      </ModalLayer>
       <PathPickerDialog
         open={showPicker}
         title="Select Folder Path"

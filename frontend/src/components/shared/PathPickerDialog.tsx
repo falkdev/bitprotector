@@ -3,6 +3,7 @@ import { ChevronRight, Eye, EyeOff, FileText, Folder, FolderOpen, RefreshCw, X }
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
 import { filesystemApi } from '@/api/filesystem'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { normalizeAbsoluteFilesystemPath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import type { FilesystemEntry, FilesystemEntryKind } from '@/types/filesystem'
@@ -352,7 +353,7 @@ export function PathPickerDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+    <ModalLayer className="px-4">
       <div className="flex h-[42rem] w-full max-w-4xl flex-col rounded-xl border border-border bg-card shadow-lg">
         <div className="flex items-start justify-between border-b border-border px-6 py-4">
           <div className="space-y-1">
@@ -493,6 +494,6 @@ export function PathPickerDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   )
 }

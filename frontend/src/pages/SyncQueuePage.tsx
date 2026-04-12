@@ -6,6 +6,7 @@ import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PageIntro } from '@/components/shared/PageIntro'
 import { useSyncStore } from '@/stores/sync-store'
 import { formatDate } from '@/lib/format'
@@ -56,7 +57,7 @@ function ResolveDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <ModalLayer>
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
         <h2 className="text-lg font-semibold">Resolve Queue Item</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -125,7 +126,7 @@ function ResolveDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   )
 }
 

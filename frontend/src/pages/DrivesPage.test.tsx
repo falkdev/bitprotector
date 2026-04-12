@@ -21,6 +21,7 @@ describe('DrivesPage', () => {
     expect(addButtons).toHaveLength(1)
 
     await user.click(addButtons[0])
+    expect(screen.getByTestId('modal-overlay')).toBeInTheDocument()
     expect(await screen.findByTestId('drive-name-input')).toBeInTheDocument()
   })
 })
