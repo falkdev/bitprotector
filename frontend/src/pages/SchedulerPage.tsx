@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus } from 'lucide-react'
+import { Plus, RefreshCw, ShieldCheck } from 'lucide-react'
 import { schedulerApi } from '@/api/scheduler'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { DataTable } from '@/components/shared/DataTable'
@@ -16,15 +16,72 @@ import type {
   UpdateScheduleRequest,
 } from '@/types/scheduler'
 
+/* ── Interval helpers ─────────────────────────────────────────────────── */
+
+type IntervalUnit = 'minutes' | 'hours' | 'days'
+
+function intervalToSeconds(value: number, unit: IntervalUnit): number {
+  const multiplier = { minutes: 60, hours: 3600, days: 86400 }
+  return value * multiplier[unit]
+}
+
+function secondsToInterval(seconds: number): { value: number; unit: IntervalUnit } {
+  if (seconds % 86400 === 0) return { value: seconds / 86400, unit: 'days' }
+  if (seconds % 3600 === 0) return { value: seconds / 3600, unit: 'hours' }
+  return { value: Math.round(seconds / 60), unit: 'minutes' }
+}
+
+function humanizeInterval(seconds: number): string {
+  const { value, unit } = secondsToInterval(seconds)
+  if (value === 1) return `Every ${unit.slice(0, -1)}`
+  return `Every ${value} ${unit}`
+}
+
+/* ── Cron helpers ─────────────────────────────────────────────────────── */
+
+function formatHour(hour: number): string {
+  const locale =
+    typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined
+  const date = new Date(2000, 0, 1, hour, 0)
+  return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+}
+
+function buildCronPresets(): { label: string; cron: string }[] {
+  return [
+    { label: 'Every hour', cron: '0 * * * *' },
+    { label: 'Every 6 hours', cron: '0 */6 * * *' },
+    { label: `Daily at ${formatHour(0)}`, cron: '0 0 * * *' },
+    { label: `Daily at ${formatHour(2)}`, cron: '0 2 * * *' },
+    { label: 'Weekly on Sunday', cron: '0 0 * * 0' },
+  ]
+}
+
+const CRON_PRESETS = buildCronPresets()
+
+function describeCron(expr: string): string {
+  const preset = CRON_PRESETS.find((p) => p.cron === expr)
+  if (preset) return preset.label
+  return `Cron: ${expr}`
+}
+
+/* ── Table display ────────────────────────────────────────────────────── */
+
 function describeSchedule(schedule: Pick<ScheduleConfig, 'cron_expr' | 'interval_seconds'>) {
-  if (schedule.cron_expr) {
-    return `Cron: ${schedule.cron_expr}`
-  }
-  if (schedule.interval_seconds) {
-    return `Every ${schedule.interval_seconds}s`
-  }
+  if (schedule.cron_expr) return describeCron(schedule.cron_expr)
+  if (schedule.interval_seconds) return humanizeInterval(schedule.interval_seconds)
   return 'No schedule configured'
 }
+
+const TASK_LABELS: Record<ScheduleTaskType, string> = {
+  sync: 'File Sync',
+  integrity_check: 'Integrity Check',
+}
+
+/* ── Timing method type ───────────────────────────────────────────────── */
+
+type TimingMethod = 'interval' | 'cron'
+
+/* ── Form modal ───────────────────────────────────────────────────────── */
 
 function ScheduleFormModal({
   schedule,
@@ -36,33 +93,83 @@ function ScheduleFormModal({
   onSave: (data: CreateScheduleRequest | UpdateScheduleRequest) => Promise<void>
 }) {
   const [taskType, setTaskType] = useState<ScheduleTaskType>('sync')
+  const [timingMethod, setTimingMethod] = useState<TimingMethod>('interval')
+  const [intervalValue, setIntervalValue] = useState('1')
+  const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('hours')
   const [cronExpr, setCronExpr] = useState('')
-  const [intervalSeconds, setIntervalSeconds] = useState('')
+  const [cronMode, setCronMode] = useState<'preset' | 'custom'>('preset')
+  const [selectedPreset, setSelectedPreset] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setTaskType(schedule?.task_type ?? 'sync')
-    setCronExpr(schedule?.cron_expr ?? '')
-    setIntervalSeconds(schedule?.interval_seconds ? String(schedule.interval_seconds) : '')
     setEnabled(schedule?.enabled ?? true)
     setError(null)
     setSaving(false)
+
+    if (schedule?.cron_expr) {
+      setTimingMethod('cron')
+      setCronExpr(schedule.cron_expr)
+      const preset = CRON_PRESETS.find((p) => p.cron === schedule.cron_expr)
+      if (preset) {
+        setCronMode('preset')
+        setSelectedPreset(preset.cron)
+      } else {
+        setCronMode('custom')
+        setSelectedPreset('')
+      }
+      setIntervalValue('1')
+      setIntervalUnit('hours')
+    } else if (schedule?.interval_seconds) {
+      setTimingMethod('interval')
+      const { value, unit } = secondsToInterval(schedule.interval_seconds)
+      setIntervalValue(String(value))
+      setIntervalUnit(unit)
+      setCronExpr('')
+      setCronMode('preset')
+      setSelectedPreset('')
+    } else {
+      setTimingMethod('interval')
+      setIntervalValue('1')
+      setIntervalUnit('hours')
+      setCronExpr('')
+      setCronMode('preset')
+      setSelectedPreset('')
+    }
   }, [schedule])
 
+  const selectPreset = (cron: string) => {
+    setSelectedPreset(cron)
+    setCronExpr(cron)
+    setCronMode('preset')
+  }
+
+  const switchToCustomCron = () => {
+    setCronMode('custom')
+    setSelectedPreset('')
+    setCronExpr('')
+  }
+
   const submit = async () => {
-    const normalizedCron = cronExpr.trim() || null
-    const normalizedInterval = intervalSeconds.trim() ? Number(intervalSeconds.trim()) : null
+    let finalCron: string | null = null
+    let finalInterval: number | null = null
 
-    if (!normalizedCron && !normalizedInterval) {
-      setError('Provide either a cron expression or an interval in seconds.')
-      return
-    }
-
-    if (normalizedInterval !== null && (!Number.isFinite(normalizedInterval) || normalizedInterval <= 0)) {
-      setError('Interval must be a positive number.')
-      return
+    if (timingMethod === 'cron') {
+      const trimmed = cronExpr.trim()
+      if (!trimmed) {
+        setError('Select a preset or enter a custom cron expression.')
+        return
+      }
+      finalCron = trimmed
+    } else {
+      const num = Number(intervalValue)
+      if (!Number.isFinite(num) || num <= 0) {
+        setError('Interval must be a positive number.')
+        return
+      }
+      finalInterval = intervalToSeconds(num, intervalUnit)
     }
 
     setSaving(true)
@@ -71,15 +178,15 @@ function ScheduleFormModal({
     try {
       if (schedule) {
         await onSave({
-          cron_expr: normalizedCron,
-          interval_seconds: normalizedInterval,
+          cron_expr: finalCron,
+          interval_seconds: finalInterval,
           enabled,
         })
       } else {
         await onSave({
           task_type: taskType,
-          cron_expr: normalizedCron ?? undefined,
-          interval_seconds: normalizedInterval ?? undefined,
+          cron_expr: finalCron ?? undefined,
+          interval_seconds: finalInterval ?? undefined,
           enabled,
         })
       }
@@ -88,65 +195,173 @@ function ScheduleFormModal({
     }
   }
 
+  const isEditing = !!schedule
+
   return (
     <ModalLayer>
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
         <h2 className="text-lg font-semibold">
-          {schedule ? 'Edit Schedule' : 'Add Schedule'}
+          {isEditing ? 'Edit Schedule' : 'Add Schedule'}
         </h2>
 
-        <div className="mt-4 space-y-4">
-          <div>
-            <label htmlFor="task-type" className="mb-1 block text-sm font-medium">
-              Task Type
-            </label>
-            <select
-              id="task-type"
-              value={taskType}
-              onChange={(event) => setTaskType(event.target.value as ScheduleTaskType)}
-              disabled={!!schedule}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-70"
-            >
-              <option value="sync">sync</option>
-              <option value="integrity_check">integrity_check</option>
-            </select>
-          </div>
+        <div className="mt-5 space-y-6">
+          {/* ── Section 1: Task type ───────────────────────────────── */}
+          <fieldset disabled={isEditing}>
+            <legend className="mb-2 text-sm font-medium">
+              What do you want to schedule?
+            </legend>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                aria-pressed={taskType === 'sync'}
+                onClick={() => setTaskType('sync')}
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 text-center transition-colors ${
+                  taskType === 'sync'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/40'
+                } disabled:opacity-60`}
+              >
+                <RefreshCw className="h-6 w-6" />
+                <span className="text-sm font-medium">File Sync</span>
+                <span className="text-xs text-muted-foreground">
+                  Sync tracked files to their backup destinations
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={taskType === 'integrity_check'}
+                onClick={() => setTaskType('integrity_check')}
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 text-center transition-colors ${
+                  taskType === 'integrity_check'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/40'
+                } disabled:opacity-60`}
+              >
+                <ShieldCheck className="h-6 w-6" />
+                <span className="text-sm font-medium">Integrity Check</span>
+                <span className="text-xs text-muted-foreground">
+                  Verify backup integrity by checking checksums
+                </span>
+              </button>
+            </div>
+          </fieldset>
 
-          <div>
-            <label htmlFor="cron-expr" className="mb-1 block text-sm font-medium">
-              Cron Expression
-            </label>
-            <input
-              id="cron-expr"
-              value={cronExpr}
-              onChange={(event) => setCronExpr(event.target.value)}
-              placeholder="0 2 * * *"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
+          {/* ── Section 2: Timing ──────────────────────────────────── */}
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium">
+              How often should it run?
+            </legend>
 
-          <div>
-            <label htmlFor="interval-seconds" className="mb-1 block text-sm font-medium">
-              Interval Seconds
-            </label>
-            <input
-              id="interval-seconds"
-              type="number"
-              min={1}
-              value={intervalSeconds}
-              onChange={(event) => setIntervalSeconds(event.target.value)}
-              placeholder="3600"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
+            {/* Timing method toggle */}
+            <div className="mb-3 flex rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => setTimingMethod('interval')}
+                className={`flex-1 rounded-l-md px-3 py-2 text-sm font-medium transition-colors ${
+                  timingMethod === 'interval'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Recurring Interval
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimingMethod('cron')}
+                className={`flex-1 rounded-r-md px-3 py-2 text-sm font-medium transition-colors ${
+                  timingMethod === 'cron'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Cron Schedule
+              </button>
+            </div>
 
+            {timingMethod === 'interval' ? (
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  Run this task every:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    aria-label="Interval value"
+                    type="number"
+                    min={1}
+                    value={intervalValue}
+                    onChange={(e) => setIntervalValue(e.target.value)}
+                    className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                  <select
+                    aria-label="Interval unit"
+                    value={intervalUnit}
+                    onChange={(e) => setIntervalUnit(e.target.value as IntervalUnit)}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="minutes">Minutes</option>
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  Choose a preset or enter a custom cron expression:
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {CRON_PRESETS.map((preset) => (
+                    <button
+                      key={preset.cron}
+                      type="button"
+                      onClick={() => selectPreset(preset.cron)}
+                      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                        cronMode === 'preset' && selectedPreset === preset.cron
+                          ? 'border-primary bg-primary/10 font-medium text-primary'
+                          : 'border-border hover:border-primary/40'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={switchToCustomCron}
+                    className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                      cronMode === 'custom'
+                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                        : 'border-border hover:border-primary/40'
+                    }`}
+                  >
+                    Custom…
+                  </button>
+                </div>
+                {cronMode === 'custom' && (
+                  <div>
+                    <input
+                      aria-label="Custom cron expression"
+                      value={cronExpr}
+                      onChange={(e) => setCronExpr(e.target.value)}
+                      placeholder="min hour dom month dow"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      5-field format: minute (0-59) hour (0-23) day-of-month (1-31) month (1-12) day-of-week (0-6, Sun=0)
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </fieldset>
+
+          {/* ── Section 3: Options ─────────────────────────────────── */}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(event) => setEnabled(event.target.checked)}
+              onChange={(e) => setEnabled(e.target.checked)}
             />
-            Enabled
+            Enable schedule immediately
           </label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
@@ -166,7 +381,7 @@ function ScheduleFormModal({
             disabled={saving}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'Saving…' : schedule ? 'Save Changes' : 'Create Schedule'}
+            {saving ? 'Saving…' : isEditing ? 'Save Changes' : 'Create Schedule'}
           </button>
         </div>
       </div>
@@ -281,7 +496,7 @@ export function SchedulerPage() {
           {
             key: 'task_type',
             header: 'Task',
-            cell: (schedule) => schedule.task_type,
+            cell: (schedule) => TASK_LABELS[schedule.task_type] ?? schedule.task_type,
           },
           {
             key: 'schedule',
@@ -360,7 +575,7 @@ export function SchedulerPage() {
           if (!open) setDeleteTarget(null)
         }}
         title="Delete schedule?"
-        description={`Delete the ${deleteTarget?.task_type ?? 'selected'} schedule?`}
+        description={`Delete the ${deleteTarget ? TASK_LABELS[deleteTarget.task_type] : 'selected'} schedule?`}
         confirmLabel="Delete"
         destructive
         onConfirm={deleteSchedule}
