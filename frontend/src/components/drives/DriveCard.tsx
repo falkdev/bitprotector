@@ -40,6 +40,10 @@ export function DriveCard({ drive, onEdit, onDelete, onManageReplacement }: Driv
       {/* Paths */}
       <div className="space-y-1 text-xs text-muted-foreground font-mono">
         <div className="flex items-center gap-2">
+          <span className="w-16 flex-shrink-0 text-foreground font-sans font-medium">ID</span>
+          <span className="truncate">{drive.id}</span>
+        </div>
+        <div className="flex items-center gap-2">
           <span className="w-16 flex-shrink-0 text-foreground font-sans font-medium">Primary</span>
           <span className="truncate">{drive.primary_path}</span>
         </div>
