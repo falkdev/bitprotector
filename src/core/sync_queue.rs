@@ -44,11 +44,16 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
                 repo.update_tracked_file_mirror_status(file.id, true)?;
                 let _ = drive::maybe_finalize_rebuild_for_action(repo, pair.id, &item.action);
             }
-            let _ = event_logger::log_sync_completed(repo, file.id, &item.action);
+            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+            let _ = event_logger::log_sync_completed(repo, file.id, &item.action, &full_path);
+            if item.action == "mirror" {
+                let _ = event_logger::log_file_mirrored(repo, file.id, &full_path, &file.checksum);
+            }
         }
         Err(e) => {
+            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?;
-            let _ = event_logger::log_sync_failed(repo, file.id, &item.action, &e.to_string());
+            let _ = event_logger::log_sync_failed(repo, file.id, &item.action, &e.to_string(), &full_path);
         }
     }
 
@@ -152,7 +157,8 @@ pub fn resolve_queue_item(
 
     repo.update_sync_queue_status(item_id, "completed", None)?;
     repo.update_tracked_file_mirror_status(file.id, true)?;
-    let _ = event_logger::log_sync_completed(repo, file.id, resolution);
+    let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+    let _ = event_logger::log_sync_completed(repo, file.id, resolution, &full_path);
 
     repo.get_sync_queue_item(item_id)
 }

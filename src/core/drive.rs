@@ -226,17 +226,12 @@ pub fn maybe_emergency_failover(repo: &Repository, pair: &DrivePair) -> anyhow::
         "drive failover required after fatal root error",
     );
     let _ = refresh_pair_virtual_paths(repo, &updated);
-    let _ = event_logger::log_event(
+    let _ = event_logger::log_drive_failover(
         repo,
-        "sync_failed",
-        None,
-        &format!(
-            "Emergency failover for drive pair #{}: {} root unavailable, switched active role to {}",
-            pair.id,
-            active_role.as_str(),
-            standby_role.as_str()
-        ),
-        Some(pair.path_for_role(active_role)),
+        pair.id,
+        active_role.as_str(),
+        standby_role.as_str(),
+        pair.path_for_role(active_role),
     );
 
     repo.get_drive_pair(pair.id)
@@ -272,17 +267,7 @@ pub fn mark_drive_quiescing(
         },
         None,
     )?;
-    let _ = event_logger::log_event(
-        repo,
-        "sync_completed",
-        None,
-        &format!(
-            "Drive pair #{} entered quiescing state for {} replacement",
-            pair_id,
-            role.as_str()
-        ),
-        None,
-    );
+    let _ = event_logger::log_drive_quiescing(repo, pair_id, role.as_str());
     Ok(updated)
 }
 
@@ -316,17 +301,7 @@ pub fn cancel_drive_quiescing(
         },
         None,
     )?;
-    let _ = event_logger::log_event(
-        repo,
-        "sync_completed",
-        None,
-        &format!(
-            "Drive pair #{} cancelled {} replacement quiesce",
-            pair_id,
-            role.as_str()
-        ),
-        None,
-    );
+    let _ = event_logger::log_drive_quiesce_cancelled(repo, pair_id, role.as_str());
     Ok(updated)
 }
 
@@ -381,17 +356,12 @@ pub fn confirm_drive_failure(
         "drive replacement confirmed; rebuild required",
     );
     let _ = refresh_pair_virtual_paths(repo, &updated);
-    let _ = event_logger::log_event(
+    let _ = event_logger::log_drive_failure_confirmed(
         repo,
-        "sync_failed",
-        None,
-        &format!(
-            "Drive pair #{} confirmed {} failure; active role is now {}",
-            pair_id,
-            role.as_str(),
-            updated.active_role
-        ),
-        Some(updated.path_for_role(role)),
+        pair_id,
+        role.as_str(),
+        &updated.active_role,
+        updated.path_for_role(role),
     );
     Ok(updated)
 }
@@ -449,17 +419,12 @@ pub fn assign_replacement_drive(
         }
     }
 
-    let _ = event_logger::log_event(
+    let _ = event_logger::log_drive_replacement_assigned(
         repo,
-        "sync_completed",
-        None,
-        &format!(
-            "Drive pair #{} assigned replacement {} path and queued {} rebuild item(s)",
-            pair_id,
-            role.as_str(),
-            queued
-        ),
-        Some(new_path),
+        pair_id,
+        role.as_str(),
+        new_path,
+        queued,
     );
     Ok((updated, queued))
 }
@@ -518,17 +483,11 @@ pub fn maybe_finalize_rebuild_for_action(
         }
     }
     let _ = refresh_pair_virtual_paths(repo, &updated);
-    let _ = event_logger::log_event(
+    let _ = event_logger::log_drive_rebuild_completed(
         repo,
-        "sync_completed",
-        None,
-        &format!(
-            "Drive pair #{} finished rebuilding {}; active role is {}",
-            pair_id,
-            role.as_str(),
-            updated.active_role
-        ),
-        Some(updated.path_for_role(role)),
+        pair_id,
+        role.as_str(),
+        &updated.active_role,
     );
     Ok(Some(updated))
 }

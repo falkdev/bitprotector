@@ -67,7 +67,7 @@ pub fn track_file(
         }
     }
 
-    let _ = event_logger::log_file_tracked(repo, tracked.id, relative_path);
+    let _ = event_logger::log_file_tracked(repo, tracked.id, &format!("{}/{}", drive_pair.primary_path, relative_path));
     repo.get_tracked_file(tracked.id)
 }
 
@@ -98,7 +98,10 @@ pub fn track_folder(
     }
 
     repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
-    repo.get_tracked_folder(tracked.id)
+    let result = repo.get_tracked_folder(tracked.id)?;
+    let full_path = format!("{}/{}", drive_pair.primary_path, folder_path);
+    let _ = event_logger::log_folder_tracked(repo, result.id, &full_path, drive_pair.id);
+    Ok(result)
 }
 
 /// Scan a tracked folder and auto-track any untracked files.
@@ -138,6 +141,8 @@ pub fn auto_track_folder_files(
         }
 
         let file = create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
+        let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
+        let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
         if drive_pair.standby_accepts_sync() {
             let _ = sync_queue::create_from_change(repo, file.id)?;
         } else {

@@ -2,6 +2,7 @@ use crate::api::models::ApiError;
 use crate::core::drive::{self, DriveRole};
 use crate::core::mirror::validate_drive_pair;
 use crate::db::repository::Repository;
+use crate::logging::event_logger;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
 
@@ -54,7 +55,10 @@ pub async fn create_drive_pair(
         }
     }
     match repo.create_drive_pair(&body.name, &body.primary_path, &body.secondary_path) {
-        Ok(pair) => HttpResponse::Created().json(pair),
+        Ok(pair) => {
+            let _ = event_logger::log_drive_created(&repo, pair.id, &pair.name, &pair.primary_path, &pair.secondary_path);
+            HttpResponse::Created().json(pair)
+        }
         Err(e) => HttpResponse::InternalServerError()
             .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
     }
@@ -94,7 +98,10 @@ pub async fn update_drive_pair(
         body.primary_path.as_deref(),
         body.secondary_path.as_deref(),
     ) {
-        Ok(pair) => HttpResponse::Ok().json(pair),
+        Ok(pair) => {
+            let _ = event_logger::log_drive_updated(&repo, pair.id, &pair.name);
+            HttpResponse::Ok().json(pair)
+        }
         Err(e) => HttpResponse::InternalServerError()
             .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
     }
@@ -106,8 +113,14 @@ pub async fn delete_drive_pair(
     path: web::Path<i64>,
 ) -> impl Responder {
     let id = path.into_inner();
+    let pair_name = repo.get_drive_pair(id).ok().map(|p| p.name);
     match repo.delete_drive_pair(id) {
-        Ok(()) => HttpResponse::NoContent().finish(),
+        Ok(()) => {
+            if let Some(name) = pair_name {
+                let _ = event_logger::log_drive_deleted(&repo, id, &name);
+            }
+            HttpResponse::NoContent().finish()
+        }
         Err(e) => {
             HttpResponse::BadRequest().json(ApiError::new("VALIDATION_ERROR", &e.to_string()))
         }

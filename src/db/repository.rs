@@ -148,6 +148,7 @@ pub struct EventLogEntry {
     pub id: i64,
     pub event_type: String,
     pub tracked_file_id: Option<i64>,
+    pub file_path: Option<String>,
     pub message: String,
     pub details: Option<String>,
     pub created_at: String,
@@ -1695,17 +1696,23 @@ impl Repository {
     pub fn get_event_log(&self, id: i64) -> anyhow::Result<EventLogEntry> {
         let conn = self.conn()?;
         let entry = conn.query_row(
-            "SELECT id, event_type, tracked_file_id, message, details, created_at
-             FROM event_log WHERE id=?1",
+            "SELECT e.id, e.event_type, e.tracked_file_id,
+                    CASE WHEN tf.id IS NOT NULL THEN dp.primary_path || '/' || tf.relative_path ELSE NULL END,
+                    e.message, e.details, e.created_at
+             FROM event_log e
+             LEFT JOIN tracked_files tf ON e.tracked_file_id = tf.id
+             LEFT JOIN drive_pairs dp ON tf.drive_pair_id = dp.id
+             WHERE e.id=?1",
             rusqlite::params![id],
             |row| {
                 Ok(EventLogEntry {
                     id: row.get(0)?,
                     event_type: row.get(1)?,
                     tracked_file_id: row.get(2)?,
-                    message: row.get(3)?,
-                    details: row.get(4)?,
-                    created_at: row.get(5)?,
+                    file_path: row.get(3)?,
+                    message: row.get(4)?,
+                    details: row.get(5)?,
+                    created_at: row.get(6)?,
                 })
             },
         )?;
@@ -1725,16 +1732,16 @@ impl Repository {
         let offset = (page - 1) * per_page;
         let mut conditions = Vec::new();
         if let Some(et) = event_type {
-            conditions.push(format!("event_type='{}'", et.replace('\'', "''")));
+            conditions.push(format!("e.event_type='{}'", et.replace('\'', "''")));
         }
         if let Some(fid) = tracked_file_id {
-            conditions.push(format!("tracked_file_id={}", fid));
+            conditions.push(format!("e.tracked_file_id={}", fid));
         }
         if let Some(f) = from {
-            conditions.push(format!("created_at>='{}'", f.replace('\'', "''")));
+            conditions.push(format!("e.created_at>='{}'", f.replace('\'', "''")));
         }
         if let Some(t) = to {
-            conditions.push(format!("created_at<='{}'", t.replace('\'', "''")));
+            conditions.push(format!("e.created_at<='{}'", t.replace('\'', "''")));
         }
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -1743,10 +1750,15 @@ impl Repository {
         };
 
         let query = format!(
-            "SELECT id, event_type, tracked_file_id, message, details, created_at
-             FROM event_log {where_clause} ORDER BY id DESC LIMIT {per_page} OFFSET {offset}"
+            "SELECT e.id, e.event_type, e.tracked_file_id,
+                    CASE WHEN tf.id IS NOT NULL THEN dp.primary_path || '/' || tf.relative_path ELSE NULL END,
+                    e.message, e.details, e.created_at
+             FROM event_log e
+             LEFT JOIN tracked_files tf ON e.tracked_file_id = tf.id
+             LEFT JOIN drive_pairs dp ON tf.drive_pair_id = dp.id
+             {where_clause} ORDER BY e.id DESC LIMIT {per_page} OFFSET {offset}"
         );
-        let count_query = format!("SELECT COUNT(*) FROM event_log {where_clause}");
+        let count_query = format!("SELECT COUNT(*) FROM event_log e {where_clause}");
 
         let entries = conn
             .prepare(&query)?
@@ -1755,9 +1767,10 @@ impl Repository {
                     id: row.get(0)?,
                     event_type: row.get(1)?,
                     tracked_file_id: row.get(2)?,
-                    message: row.get(3)?,
-                    details: row.get(4)?,
-                    created_at: row.get(5)?,
+                    file_path: row.get(3)?,
+                    message: row.get(4)?,
+                    details: row.get(5)?,
+                    created_at: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

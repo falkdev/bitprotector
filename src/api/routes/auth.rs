@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
-struct LoginRequest {
+pub struct LoginRequest {
     username: String,
     password: String,
 }

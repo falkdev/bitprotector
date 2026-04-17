@@ -1,6 +1,7 @@
 use crate::core::drive;
 use crate::core::mirror::validate_drive_pair;
 use crate::db::repository::Repository;
+use crate::logging::event_logger;
 use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Subcommand, Debug)]
@@ -125,6 +126,7 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 validate_drive_pair(&args.primary, &args.secondary)?;
             }
             let pair = repo.create_drive_pair(&args.name, &args.primary, &args.secondary)?;
+            let _ = event_logger::log_drive_created(repo, pair.id, &pair.name, &pair.primary_path, &pair.secondary_path);
             println!("Created drive pair #{}: {}", pair.id, pair.name);
             println!("  Primary:   {}", pair.primary_path);
             println!("  Secondary: {}", pair.secondary_path);
@@ -170,10 +172,15 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 args.primary.as_deref(),
                 args.secondary.as_deref(),
             )?;
+            let _ = event_logger::log_drive_updated(repo, pair.id, &pair.name);
             println!("Updated drive pair #{}: {}", pair.id, pair.name);
         }
         DrivesCommand::Remove { id } => {
+            let pair_name = repo.get_drive_pair(id).ok().map(|p| p.name);
             repo.delete_drive_pair(id)?;
+            if let Some(name) = &pair_name {
+                let _ = event_logger::log_drive_deleted(repo, id, name);
+            }
             println!("Removed drive pair #{}", id);
         }
         DrivesCommand::Replace { action } => match action {

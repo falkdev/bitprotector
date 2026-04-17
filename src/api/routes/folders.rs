@@ -1,6 +1,7 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
 use crate::core::{change_detection, drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
+use crate::logging::event_logger;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -94,6 +95,10 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
 
     match repo.delete_tracked_folder(id) {
         Ok(_) => {
+            let full_path = repo.get_drive_pair(folder.drive_pair_id)
+                .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
+                .unwrap_or_else(|_| folder.folder_path.clone());
+            let _ = event_logger::log_folder_untracked(&repo, id, &full_path);
             if let Err(e) = repo.recompute_folder_provenance_for_drive(folder.drive_pair_id) {
                 return HttpResponse::InternalServerError().body(e.to_string());
             }

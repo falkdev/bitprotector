@@ -1,6 +1,7 @@
 use crate::core::drive;
 use crate::core::integrity::{self, IntegrityStatus};
 use crate::db::repository::{IntegrityRun, Repository};
+use crate::logging::event_logger;
 
 pub const RUN_STATUS_RUNNING: &str = "running";
 pub const RUN_STATUS_STOPPING: &str = "stopping";
@@ -68,6 +69,13 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
     let mut page = 1i64;
     let per_page = 100i64;
 
+    let _ = event_logger::log_integrity_run_started(
+        repo,
+        run_id,
+        run.total_files,
+        &run.trigger,
+    );
+
     loop {
         let (files, total) =
             repo.list_tracked_files(scope_drive_pair_id, None, None, page, per_page)?;
@@ -125,6 +133,38 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
                         .unwrap_or(false);
             }
 
+            // Log per-file integrity result to event log.
+            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+            match &result.status {
+                IntegrityStatus::Ok => {
+                    let _ = event_logger::log_integrity_pass(repo, file.id, &full_path);
+                }
+                IntegrityStatus::BothCorrupted => {
+                    let _ = event_logger::log_both_corrupted(
+                        repo,
+                        file.id,
+                        &full_path,
+                        result.master_checksum.as_deref(),
+                        result.mirror_checksum.as_deref(),
+                        &result.stored_checksum,
+                    );
+                    let _ = event_logger::log_integrity_fail(
+                        repo,
+                        file.id,
+                        &full_path,
+                        status_str(&result.status),
+                    );
+                }
+                _ => {
+                    let _ = event_logger::log_integrity_fail(
+                        repo,
+                        file.id,
+                        &full_path,
+                        status_str(&result.status),
+                    );
+                }
+            }
+
             let needs_attention = result.status != IntegrityStatus::Ok && !recovered;
             repo.update_tracked_file_last_integrity_check_at(file.id)?;
             repo.append_integrity_run_result(
@@ -150,10 +190,18 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
     }
 
     let final_state = repo.get_integrity_run(run_id)?;
-    if final_state.stop_requested {
-        repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
+    let final_status = if final_state.stop_requested {
+        RUN_STATUS_STOPPED
     } else {
-        repo.finish_integrity_run(run_id, RUN_STATUS_COMPLETED, None)?;
-    }
+        RUN_STATUS_COMPLETED
+    };
+    repo.finish_integrity_run(run_id, final_status, None)?;
+    let _ = event_logger::log_integrity_run_completed(
+        repo,
+        run_id,
+        final_status,
+        final_state.attention_files,
+        final_state.recovered_files,
+    );
     Ok(())
 }

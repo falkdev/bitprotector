@@ -13,6 +13,7 @@ const EVENT_TYPES: EventType[] = [
   'file_created',
   'file_edited',
   'file_mirrored',
+  'file_untracked',
   'integrity_pass',
   'integrity_fail',
   'recovery_success',
@@ -21,12 +22,26 @@ const EVENT_TYPES: EventType[] = [
   'change_detected',
   'sync_completed',
   'sync_failed',
+  'folder_tracked',
+  'folder_untracked',
+  'integrity_run_started',
+  'integrity_run_completed',
+  'drive_created',
+  'drive_updated',
+  'drive_deleted',
+  'drive_failover',
+  'drive_quiescing',
+  'drive_quiesce_cancelled',
+  'drive_failure_confirmed',
+  'drive_replacement_assigned',
+  'drive_rebuild_completed',
 ]
 
 const EVENT_STYLES: Record<EventType, string> = {
   file_created: 'bg-blue-100 text-blue-800',
   file_edited: 'bg-blue-100 text-blue-800',
   file_mirrored: 'bg-green-100 text-green-800',
+  file_untracked: 'bg-gray-100 text-gray-800',
   integrity_pass: 'bg-green-100 text-green-800',
   integrity_fail: 'bg-red-100 text-red-800',
   recovery_success: 'bg-green-100 text-green-800',
@@ -35,6 +50,19 @@ const EVENT_STYLES: Record<EventType, string> = {
   change_detected: 'bg-yellow-100 text-yellow-800',
   sync_completed: 'bg-green-100 text-green-800',
   sync_failed: 'bg-red-100 text-red-800',
+  folder_tracked: 'bg-blue-100 text-blue-800',
+  folder_untracked: 'bg-gray-100 text-gray-800',
+  integrity_run_started: 'bg-purple-100 text-purple-800',
+  integrity_run_completed: 'bg-purple-100 text-purple-800',
+  drive_created: 'bg-blue-100 text-blue-800',
+  drive_updated: 'bg-blue-100 text-blue-800',
+  drive_deleted: 'bg-gray-100 text-gray-800',
+  drive_failover: 'bg-red-100 text-red-800',
+  drive_quiescing: 'bg-yellow-100 text-yellow-800',
+  drive_quiesce_cancelled: 'bg-gray-100 text-gray-800',
+  drive_failure_confirmed: 'bg-red-100 text-red-800',
+  drive_replacement_assigned: 'bg-yellow-100 text-yellow-800',
+  drive_rebuild_completed: 'bg-green-100 text-green-800',
 }
 
 const PER_PAGE = 25
@@ -54,6 +82,36 @@ function toIsoDate(value: string) {
 
 function formatEventType(eventType: EventType) {
   return eventType.replace(/_/g, ' ')
+}
+
+function StructuredDetails({ details }: { details: string | null }) {
+  if (!details) {
+    return (
+      <p className="mt-3 text-xs text-muted-foreground italic">No additional details</p>
+    )
+  }
+
+  try {
+    const parsed = JSON.parse(details) as Record<string, unknown>
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return (
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md bg-muted p-3 text-xs">
+          {Object.entries(parsed).map(([key, value]) => (
+            <div key={key} className="contents">
+              <dt className="font-medium text-muted-foreground">{key.replace(/_/g, ' ')}</dt>
+              <dd className="font-mono break-all">{value === null ? '—' : String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )
+    }
+  } catch {
+    // Not JSON — fall through to raw display
+  }
+
+  return (
+    <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">{details}</pre>
+  )
 }
 
 export function LogsPage() {
@@ -253,10 +311,14 @@ export function LogsPage() {
             },
             {
               key: 'tracked_file_id',
-              header: 'File ID',
+              header: 'File',
               cell: (entry) =>
-                entry.tracked_file_id ? (
-                  <span className="font-mono text-xs">{entry.tracked_file_id}</span>
+                entry.file_path ? (
+                  <span className="font-mono text-xs" title={`File #${entry.tracked_file_id}`}>
+                    {entry.file_path}
+                  </span>
+                ) : entry.tracked_file_id ? (
+                  <span className="font-mono text-xs">#{entry.tracked_file_id}</span>
                 ) : (
                   '—'
                 ),
@@ -335,10 +397,17 @@ export function LogsPage() {
               {formatEventType(expandedEntry.event_type)}
             </span>
           </div>
-          <p className="mt-4 text-sm">{expandedEntry.message}</p>
-          <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">
-            {expandedEntry.details ?? 'No additional details'}
-          </pre>
+          {expandedEntry.file_path && (
+            <p className="mt-2 text-sm">
+              <span className="font-medium text-muted-foreground">File:</span>{' '}
+              <span className="font-mono text-xs">{expandedEntry.file_path}</span>
+              {expandedEntry.tracked_file_id && (
+                <span className="ml-1 text-muted-foreground">(#{expandedEntry.tracked_file_id})</span>
+              )}
+            </p>
+          )}
+          <p className="mt-2 text-sm">{expandedEntry.message}</p>
+          <StructuredDetails details={expandedEntry.details} />
         </div>
       )}
     </div>

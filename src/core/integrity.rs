@@ -208,7 +208,8 @@ pub fn attempt_recovery_with_reconciliation(
                 true,
             );
             if reconciled > 0 {
-                let _ = event_logger::log_sync_completed(repo, file.id, "mirror");
+                let full_path = format!("{}/{}", drive_pair.primary_path, file.relative_path);
+                let _ = event_logger::log_sync_completed(repo, file.id, "mirror", &full_path);
             }
             Ok(true)
         }

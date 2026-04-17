@@ -196,6 +196,7 @@ export function makeLogEntry(overrides: Partial<EventLogEntry> = {}): EventLogEn
     id: 1,
     event_type: 'file_created',
     tracked_file_id: 1,
+    file_path: null,
     message: 'Tracked file created',
     details: '{"source":"test"}',
     created_at: DEFAULT_DATE,

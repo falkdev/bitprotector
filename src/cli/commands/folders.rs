@@ -1,5 +1,6 @@
 use crate::core::{change_detection, drive, mirror, tracker};
 use crate::db::repository::Repository;
+use crate::logging::event_logger;
 use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
@@ -91,8 +92,13 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Created:           {}", folder.created_at);
         }
         FoldersCommand::Remove { id } => {
+            let folder = repo.get_tracked_folder(id)?;
             crate::core::virtual_path::remove_folder_virtual_path(repo, id)?;
             repo.delete_tracked_folder(id)?;
+            let full_path = repo.get_drive_pair(folder.drive_pair_id)
+                .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
+                .unwrap_or_else(|_| folder.folder_path.clone());
+            let _ = event_logger::log_folder_untracked(repo, id, &full_path);
             println!("Removed tracked folder #{}", id);
         }
         FoldersCommand::Scan(args) => {

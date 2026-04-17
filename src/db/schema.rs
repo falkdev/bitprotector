@@ -206,10 +206,17 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             event_type      TEXT NOT NULL CHECK(event_type IN (
                                 'file_created', 'file_edited', 'file_mirrored',
+                                'file_untracked',
                                 'integrity_pass', 'integrity_fail',
                                 'recovery_success', 'recovery_fail',
                                 'both_corrupted', 'change_detected',
-                                'sync_completed', 'sync_failed'
+                                'sync_completed', 'sync_failed',
+                                'folder_tracked', 'folder_untracked',
+                                'integrity_run_started', 'integrity_run_completed',
+                                'drive_created', 'drive_updated', 'drive_deleted',
+                                'drive_failover', 'drive_quiescing', 'drive_quiesce_cancelled',
+                                'drive_failure_confirmed', 'drive_replacement_assigned',
+                                'drive_rebuild_completed'
                             )),
             tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
             message         TEXT NOT NULL,
@@ -244,6 +251,63 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         );",
     )?;
 
+    // Migrate event_log CHECK constraint to include new event types.
+    // SQLite does not support ALTER CHECK, so we recreate the table.
+    migrate_event_log_check(conn)?;
+
+    Ok(())
+}
+
+/// Recreate event_log table with expanded CHECK constraint for new event types.
+/// This is a no-op when the table already has the new constraint (fresh installs).
+fn migrate_event_log_check(conn: &Connection) -> Result<()> {
+    // Probe whether the new event types are accepted by the current CHECK constraint.
+    // If the insert succeeds, the migration has already been applied (or it's a fresh DB).
+    let probe = conn.execute(
+        "INSERT INTO event_log (event_type, message) VALUES ('drive_created', '__probe__')",
+        [],
+    );
+    match probe {
+        Ok(_) => {
+            // Probe succeeded — delete the probe row and return.
+            conn.execute(
+                "DELETE FROM event_log WHERE event_type='drive_created' AND message='__probe__'",
+                [],
+            )?;
+            return Ok(());
+        }
+        Err(_) => {
+            // CHECK constraint rejected the value — migration needed.
+        }
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE event_log_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type      TEXT NOT NULL CHECK(event_type IN (
+                                'file_created', 'file_edited', 'file_mirrored',
+                                'file_untracked',
+                                'integrity_pass', 'integrity_fail',
+                                'recovery_success', 'recovery_fail',
+                                'both_corrupted', 'change_detected',
+                                'sync_completed', 'sync_failed',
+                                'folder_tracked', 'folder_untracked',
+                                'integrity_run_started', 'integrity_run_completed',
+                                'drive_created', 'drive_updated', 'drive_deleted',
+                                'drive_failover', 'drive_quiescing', 'drive_quiesce_cancelled',
+                                'drive_failure_confirmed', 'drive_replacement_assigned',
+                                'drive_rebuild_completed'
+                            )),
+            tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
+            message         TEXT NOT NULL,
+            details         TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO event_log_new (id, event_type, tracked_file_id, message, details, created_at)
+            SELECT id, event_type, tracked_file_id, message, details, created_at FROM event_log;
+        DROP TABLE event_log;
+        ALTER TABLE event_log_new RENAME TO event_log;",
+    )?;
     Ok(())
 }
 

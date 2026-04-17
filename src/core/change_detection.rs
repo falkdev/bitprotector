@@ -65,8 +65,8 @@ pub fn scan_and_record_changes(
             "change_detected",
             Some(file.id),
             &format!(
-                "Change detected on active {} drive: {}",
-                drive_pair.active_role, file.relative_path
+                "Change detected on active {} drive: {}/{}",
+                drive_pair.active_role, drive_pair.primary_path, file.relative_path
             ),
             Some(new_hash),
         );
