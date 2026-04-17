@@ -41,7 +41,8 @@ describe('LogsPage', () => {
     await user.click(screen.getByRole('button', { name: 'View' }))
 
     expect(await screen.findByText('Log Entry #9')).toBeInTheDocument()
-    expect(screen.getByText('{"result":"ok"}')).toBeInTheDocument()
+    expect(screen.getByText('result')).toBeInTheDocument()
+    expect(screen.getByText('ok')).toBeInTheDocument()
     expect(requestedFileId).toBe('42')
   })
 
