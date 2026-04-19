@@ -253,13 +253,13 @@ function ScheduleFormModal({
             </legend>
 
             {/* Timing method toggle */}
-            <div className="mb-3 flex rounded-md border border-border">
+            <div className="mb-3 flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => setTimingMethod('interval')}
-                className={`flex-1 rounded-l-md px-3 py-2 text-sm font-medium transition-colors ${
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
                   timingMethod === 'interval'
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'border-primary bg-primary text-primary-foreground'
                     : 'hover:bg-accent'
                 }`}
               >
@@ -268,9 +268,9 @@ function ScheduleFormModal({
               <button
                 type="button"
                 onClick={() => setTimingMethod('cron')}
-                className={`flex-1 rounded-r-md px-3 py-2 text-sm font-medium transition-colors ${
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
                   timingMethod === 'cron'
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'border-primary bg-primary text-primary-foreground'
                     : 'hover:bg-accent'
                 }`}
               >
@@ -482,7 +482,7 @@ export function SchedulerPage() {
         actions={
           <button
             onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
             Add Schedule

@@ -10,8 +10,8 @@ interface PageIntroProps {
 
 export function PageIntro({ title, subtitle, actions, className }: PageIntroProps) {
   return (
-    <div className={cn('flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between', className)}>
-      <div>
+    <div className={cn('flex flex-wrap items-start justify-between gap-3', className)}>
+      <div className="min-w-0">
         <h1 className="text-2xl font-semibold tracking-tight" data-testid="page-title">
           {title}
         </h1>
@@ -19,7 +19,7 @@ export function PageIntro({ title, subtitle, actions, className }: PageIntroProp
           {subtitle}
         </p>
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   )
 }

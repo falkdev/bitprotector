@@ -31,7 +31,7 @@ function MetricCard({ label, value, variant = 'default', testId }: MetricCardPro
       >
         {value.toLocaleString()}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-xs leading-snug text-muted-foreground">{label}</p>
     </div>
   )
 }
@@ -42,7 +42,7 @@ interface StatusOverviewProps {
 
 export function StatusOverview({ status }: StatusOverviewProps) {
   return (
-    <div className="grid grid-cols-3 gap-4 md:grid-cols-4 lg:grid-cols-5">
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-4">
       <MetricCard
         label="Files Tracked"
         value={status.files_tracked}

@@ -197,15 +197,15 @@ export function LogsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-full flex-col gap-6">
       <PageIntro
         title="Logs"
         subtitle="Browse system events, filter by type/date, and investigate recent activity."
       />
 
       <div className="rounded-lg border border-border bg-card p-4">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
+          <div className="min-w-0">
             <label htmlFor="log-event-type" className="mb-1 block text-sm font-medium">
               Event Type
             </label>
@@ -218,7 +218,7 @@ export function LogsPage() {
                   event_type: event.target.value as FilterState['event_type'],
                 }))
               }
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
               <option value="all">All event types</option>
               {EVENT_TYPES.map((eventType) => (
@@ -228,7 +228,7 @@ export function LogsPage() {
               ))}
             </select>
           </div>
-          <div>
+          <div className="min-w-0">
             <label htmlFor="log-file-id" className="mb-1 block text-sm font-medium">
               File ID
             </label>
@@ -241,10 +241,10 @@ export function LogsPage() {
                 setFilters((current) => ({ ...current, file_id: event.target.value }))
               }
               placeholder="123"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label htmlFor="log-from" className="mb-1 block text-sm font-medium">
               From
             </label>
@@ -255,10 +255,10 @@ export function LogsPage() {
               onChange={(event) =>
                 setFilters((current) => ({ ...current, from: event.target.value }))
               }
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label htmlFor="log-to" className="mb-1 block text-sm font-medium">
               To
             </label>
@@ -269,20 +269,20 @@ export function LogsPage() {
               onChange={(event) =>
                 setFilters((current) => ({ ...current, to: event.target.value }))
               }
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
-          <div className="flex items-end gap-2">
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap sm:items-end">
             <button
               onClick={applyFilters}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
               <Search className="h-4 w-4" />
               Apply
             </button>
             <button
               onClick={resetFilters}
-              className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
+              className="whitespace-nowrap rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
             >
               Reset
             </button>
@@ -290,126 +290,130 @@ export function LogsPage() {
         </div>
       </div>
 
-      {loading && entries.length === 0 ? (
-        <div className="flex items-center justify-center py-16">
-          <LoadingSpinner />
-        </div>
-      ) : (
-        <DataTable
-          tableTestId="logs-table"
-          columns={[
-            {
-              key: 'event_type',
-              header: 'Event Type',
-              cell: (entry) => (
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[entry.event_type]}`}
-                >
-                  {formatEventType(entry.event_type)}
-                </span>
-              ),
-            },
-            {
-              key: 'tracked_file_id',
-              header: 'File',
-              cell: (entry) =>
-                entry.file_path ? (
-                  <span className="font-mono text-xs" title={`File #${entry.tracked_file_id}`}>
-                    {entry.file_path}
-                  </span>
-                ) : entry.tracked_file_id ? (
-                  <span className="font-mono text-xs">#{entry.tracked_file_id}</span>
-                ) : (
-                  '—'
-                ),
-            },
-            {
-              key: 'message',
-              header: 'Message',
-              cell: (entry) => entry.message,
-            },
-            {
-              key: 'created_at',
-              header: 'Created',
-              cell: (entry) => formatDate(entry.created_at),
-            },
-            {
-              key: 'actions',
-              header: '',
-              cell: (entry) => (
-                <button
-                  onClick={() =>
-                    setExpandedLogId((current) => (current === entry.id ? null : entry.id))
-                  }
-                  className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-                >
-                  {expandedLogId === entry.id ? 'Hide' : 'View'}
-                </button>
-              ),
-            },
-          ]}
-          data={entries}
-          rowKey={(entry) => entry.id}
-          rowTestId={(entry) => `log-row-${entry.id}`}
-          emptyState={
-            <EmptyState
-              title="No matching log entries"
-              description="Try broadening the current filters or moving to an earlier page."
-            />
-          }
-        />
-      )}
-
-      <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4 text-sm">
-        <span className="text-muted-foreground">Page {page}</span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-            disabled={page === 1}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </button>
-          <button
-            onClick={() => setPage((current) => current + 1)}
-            disabled={!hasNext}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {expandedEntry && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-sm font-semibold">Log Entry #{expandedEntry.id}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {formatDate(expandedEntry.created_at)}
-              </p>
-            </div>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[expandedEntry.event_type]}`}
-            >
-              {formatEventType(expandedEntry.event_type)}
-            </span>
+      <div className="flex flex-1 flex-col gap-6">
+        {loading && entries.length === 0 ? (
+          <div className="flex items-center justify-center py-16">
+            <LoadingSpinner />
           </div>
-          {expandedEntry.file_path && (
-            <p className="mt-2 text-sm">
-              <span className="font-medium text-muted-foreground">File:</span>{' '}
-              <span className="font-mono text-xs">{expandedEntry.file_path}</span>
-              {expandedEntry.tracked_file_id && (
-                <span className="ml-1 text-muted-foreground">(#{expandedEntry.tracked_file_id})</span>
-              )}
-            </p>
-          )}
-          <p className="mt-2 text-sm">{expandedEntry.message}</p>
-          <StructuredDetails details={expandedEntry.details} />
-        </div>
-      )}
+        ) : (
+          <DataTable
+            tableTestId="logs-table"
+            columns={[
+              {
+                key: 'event_type',
+                header: 'Event Type',
+                cell: (entry) => (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[entry.event_type]}`}
+                  >
+                    {formatEventType(entry.event_type)}
+                  </span>
+                ),
+              },
+              {
+                key: 'tracked_file_id',
+                header: 'File',
+                cell: (entry) =>
+                  entry.file_path ? (
+                    <span className="font-mono text-xs" title={`File #${entry.tracked_file_id}`}>
+                      {entry.file_path}
+                    </span>
+                  ) : entry.tracked_file_id ? (
+                    <span className="font-mono text-xs">#{entry.tracked_file_id}</span>
+                  ) : (
+                    '—'
+                  ),
+              },
+              {
+                key: 'message',
+                header: 'Message',
+                cell: (entry) => entry.message,
+              },
+              {
+                key: 'created_at',
+                header: 'Created',
+                cell: (entry) => formatDate(entry.created_at),
+              },
+              {
+                key: 'actions',
+                header: '',
+                cell: (entry) => (
+                  <button
+                    onClick={() =>
+                      setExpandedLogId((current) => (current === entry.id ? null : entry.id))
+                    }
+                    className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
+                  >
+                    {expandedLogId === entry.id ? 'Hide' : 'View'}
+                  </button>
+                ),
+              },
+            ]}
+            data={entries}
+            rowKey={(entry) => entry.id}
+            rowTestId={(entry) => `log-row-${entry.id}`}
+            emptyState={
+              <EmptyState
+                title="No matching log entries"
+                description="Try broadening the current filters or moving to an earlier page."
+              />
+            }
+          />
+        )}
+
+        {expandedEntry && (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold">Log Entry #{expandedEntry.id}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {formatDate(expandedEntry.created_at)}
+                </p>
+              </div>
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[expandedEntry.event_type]}`}
+              >
+                {formatEventType(expandedEntry.event_type)}
+              </span>
+            </div>
+            {expandedEntry.file_path && (
+              <p className="mt-2 text-sm">
+                <span className="font-medium text-muted-foreground">File:</span>{' '}
+                <span className="font-mono text-xs">{expandedEntry.file_path}</span>
+                {expandedEntry.tracked_file_id && (
+                  <span className="ml-1 text-muted-foreground">(#{expandedEntry.tracked_file_id})</span>
+                )}
+              </p>
+            )}
+            <p className="mt-2 text-sm">{expandedEntry.message}</p>
+            <StructuredDetails details={expandedEntry.details} />
+          </div>
+        )}
+
+        {entries.length > 0 && (
+          <div className="mt-auto flex items-center justify-between rounded-lg border border-border bg-card p-4 text-sm">
+            <span className="text-muted-foreground">Page {page}</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((current) => current + 1)}
+                disabled={!hasNext}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

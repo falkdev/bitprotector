@@ -759,14 +759,14 @@ export function TrackingWorkspacePage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="border-b bg-white px-4 py-3">
-          <div className="mb-3 flex items-center justify-between gap-4">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <BreadcrumbNav
               path={virtualPrefix}
               onNavigate={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => {
                   if (!hasDrivePairs) {
                     return
@@ -779,7 +779,7 @@ export function TrackingWorkspacePage() {
                 <FolderPlus className="h-4 w-4" /> Add Folder
               </button>
               <button
-                className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => {
                   if (!hasDrivePairs) {
                     return
@@ -799,12 +799,12 @@ export function TrackingWorkspacePage() {
             </p>
           ) : null}
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
             <input
               value={params.q ?? ''}
               onChange={(event) => updateParams({ q: event.target.value || undefined })}
               placeholder="Search by path"
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
             <select
               value={params.drive_id ?? ''}
@@ -813,7 +813,7 @@ export function TrackingWorkspacePage() {
                   drive_id: event.target.value ? Number(event.target.value) : undefined,
                 })
               }
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
               <option value="">All drives</option>
               {drives.map((drive) => (
@@ -827,7 +827,7 @@ export function TrackingWorkspacePage() {
               onChange={(event) =>
                 updateParams({ item_kind: event.target.value as TrackingListParams['item_kind'] })
               }
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
               <option value="all">All items</option>
               <option value="file">Files</option>
@@ -838,7 +838,7 @@ export function TrackingWorkspacePage() {
               onChange={(event) =>
                 updateParams({ source: event.target.value as TrackingListParams['source'] })
               }
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
               <option value="all">All sources</option>
               <option value="direct">Direct</option>
@@ -852,7 +852,7 @@ export function TrackingWorkspacePage() {
                   has_virtual_path: value === 'all' ? undefined : value === 'yes',
                 })
               }}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
               <option value="all">With + Without Virtual Path</option>
               <option value="yes">With Virtual Path</option>
@@ -1054,11 +1054,11 @@ export function TrackingWorkspacePage() {
               <p className="text-sm text-gray-600" data-testid="selected-count">
                 {selectedItems.length} selected
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setSelectedRowKeys(new Set())}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                  className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
                   data-testid="bulk-deselect"
                 >
                   Deselect all
@@ -1067,7 +1067,7 @@ export function TrackingWorkspacePage() {
                   type="button"
                   onClick={() => void handleMirrorSelected()}
                   disabled={bulkMirroring || bulkDeleting}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                   data-testid="bulk-mirror"
                 >
                   {bulkMirroring ? 'Mirroring...' : 'Mirror selected'}
@@ -1076,7 +1076,7 @@ export function TrackingWorkspacePage() {
                   type="button"
                   onClick={() => setConfirmBulkDeleteOpen(true)}
                   disabled={bulkDeleting || bulkMirroring}
-                  className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="shrink-0 whitespace-nowrap rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                   data-testid="bulk-delete"
                 >
                   Delete selected
