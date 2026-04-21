@@ -446,7 +446,7 @@ async fn test_tracking_items_filters() {
 }
 
 #[actix_rt::test]
-async fn test_tracking_items_rejects_legacy_both_source_filter() {
+async fn test_tracking_items_rejects_invalid_source_filter() {
     let app = make_app!(make_repo()).await;
     let req = test::TestRequest::get()
         .uri("/api/v1/tracking/items?item_kind=file&source=both")

@@ -51,7 +51,7 @@ fn test_files_track_and_list() {
 }
 
 #[test]
-fn test_files_track_with_mirror() {
+fn test_files_track_enqueues_mirror() {
     let db = temp_db();
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
@@ -60,7 +60,7 @@ fn test_files_track_with_mirror() {
     fs::write(primary.path().join("to_mirror.txt"), b"mirror me").unwrap();
 
     cmd(db.path().to_str().unwrap())
-        .args(["files", "track", "--mirror", "1", "to_mirror.txt"])
+        .args(["files", "track", "1", "to_mirror.txt"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Mirror queued: yes"));

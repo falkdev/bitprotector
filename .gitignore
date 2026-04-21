@@ -1,2 +1,3 @@
 /target
 /.codex
+frontend/playwright/.auth/testuser.json

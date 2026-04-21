@@ -29,10 +29,8 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/files" element={<TrackingWorkspacePage />} />
           <Route path="/drives" element={<DrivesPage />} />
-          <Route path="/folders" element={<Navigate to="/files" replace />} />
           <Route path="/integrity" element={<IntegrityPage />} />
           <Route path="/sync" element={<SyncQueuePage />} />
-          <Route path="/virtual-paths" element={<Navigate to="/files" replace />} />
           <Route path="/scheduler" element={<SchedulerPage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/database" element={<DatabaseBackupsPage />} />

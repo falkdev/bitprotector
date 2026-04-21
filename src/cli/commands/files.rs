@@ -35,9 +35,6 @@ pub struct TrackArgs {
     /// Optional virtual path to assign
     #[arg(long)]
     pub virtual_path: Option<String>,
-    /// Deprecated compatibility flag; tracking now queues mirror work
-    #[arg(long)]
-    pub mirror: bool,
 }
 
 #[derive(Args, Debug)]
@@ -80,12 +77,6 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 println!("  Mirror queued: yes");
             } else {
                 println!("  Mirror queued: no");
-            }
-            if args.mirror {
-                println!(
-                    "  Note: --mirror is deprecated here; use `files mirror {}` for immediate copy",
-                    tracked.id
-                );
             }
         }
         FilesCommand::List(args) => {
@@ -203,7 +194,6 @@ mod tests {
                 drive_pair_id: pair.id,
                 relative_path: "a.txt".to_string(),
                 virtual_path: None,
-                mirror: false,
             }),
             &repo,
         )
@@ -227,7 +217,6 @@ mod tests {
                 drive_pair_id: pair.id,
                 relative_path: "b.txt".to_string(),
                 virtual_path: None,
-                mirror: true,
             }),
             &repo,
         )

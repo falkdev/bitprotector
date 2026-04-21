@@ -34,10 +34,6 @@ test('logs in through the live backend, visits protected pages, and logs out', a
   await openSidebarRoute(page, 'database')
   await expect(page.getByTestId('page-title')).toHaveText('Database Backups')
 
-  await page.goto('/folders')
-  await expect(page).toHaveURL(/\/files$/)
-  await expect(page.getByTestId('page-title')).toHaveText('Tracking Workspace')
-
   await page.getByTestId('user-menu-trigger').click()
   await page.getByTestId('user-menu-logout').click()
   await expect(page).toHaveURL(/\/login$/)

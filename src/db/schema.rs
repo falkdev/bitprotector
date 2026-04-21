@@ -1,17 +1,5 @@
 use rusqlite::{Connection, Result};
 
-fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for col in columns {
-        if col? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Create all database tables and apply migrations.
 pub fn initialize_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -31,28 +19,6 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )?;
-
-    if !column_exists(conn, "drive_pairs", "primary_state")? {
-        conn.execute_batch(
-            "ALTER TABLE drive_pairs
-             ADD COLUMN primary_state TEXT NOT NULL DEFAULT 'active'
-             CHECK(primary_state IN ('active', 'quiescing', 'failed', 'rebuilding'));",
-        )?;
-    }
-    if !column_exists(conn, "drive_pairs", "secondary_state")? {
-        conn.execute_batch(
-            "ALTER TABLE drive_pairs
-             ADD COLUMN secondary_state TEXT NOT NULL DEFAULT 'active'
-             CHECK(secondary_state IN ('active', 'quiescing', 'failed', 'rebuilding'));",
-        )?;
-    }
-    if !column_exists(conn, "drive_pairs", "active_role")? {
-        conn.execute_batch(
-            "ALTER TABLE drive_pairs
-             ADD COLUMN active_role TEXT NOT NULL DEFAULT 'primary'
-             CHECK(active_role IN ('primary', 'secondary'));",
-        )?;
-    }
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracked_files (
@@ -74,43 +40,15 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracked_folders (
-            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            drive_pair_id        INTEGER NOT NULL REFERENCES drive_pairs(id),
-            folder_path          TEXT NOT NULL,
-            virtual_path         TEXT,
-            auto_virtual_path    INTEGER NOT NULL DEFAULT 0,
-            default_virtual_base TEXT,
-            last_scanned_at      TEXT,
-            created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
+            folder_path     TEXT NOT NULL,
+            virtual_path    TEXT,
+            last_scanned_at TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
         );",
     )?;
-
-    if !column_exists(conn, "tracked_folders", "virtual_path")? {
-        conn.execute_batch(
-            "ALTER TABLE tracked_folders
-             ADD COLUMN virtual_path TEXT;",
-        )?;
-    }
-    if !column_exists(conn, "tracked_folders", "last_scanned_at")? {
-        conn.execute_batch(
-            "ALTER TABLE tracked_folders
-             ADD COLUMN last_scanned_at TEXT;",
-        )?;
-    }
-
-    if !column_exists(conn, "tracked_files", "tracked_direct")? {
-        conn.execute_batch(
-            "ALTER TABLE tracked_files
-             ADD COLUMN tracked_direct INTEGER NOT NULL DEFAULT 1;",
-        )?;
-    }
-    if !column_exists(conn, "tracked_files", "tracked_via_folder")? {
-        conn.execute_batch(
-            "ALTER TABLE tracked_files
-             ADD COLUMN tracked_via_folder INTEGER NOT NULL DEFAULT 0;",
-        )?;
-    }
 
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_tracked_files_virtual_path
@@ -154,34 +92,6 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             ON integrity_runs(status, started_at);
          CREATE INDEX IF NOT EXISTS idx_integrity_run_results_issue
             ON integrity_run_results(run_id, needs_attention, id);",
-    )?;
-
-    // Backfill folder-derived provenance for pre-migration rows.
-    conn.execute(
-        "UPDATE tracked_files
-         SET tracked_via_folder = 0",
-        [],
-    )?;
-    conn.execute(
-        "UPDATE tracked_files
-         SET tracked_via_folder = 1
-         WHERE EXISTS (
-            SELECT 1
-            FROM tracked_folders
-            WHERE tracked_folders.drive_pair_id = tracked_files.drive_pair_id
-              AND (
-                    tracked_files.relative_path = rtrim(tracked_folders.folder_path, '/')
-                    OR tracked_files.relative_path LIKE rtrim(tracked_folders.folder_path, '/') || '/%'
-              )
-         )",
-        [],
-    )?;
-    conn.execute(
-        "UPDATE tracked_files
-         SET tracked_via_folder = 0
-         WHERE tracked_direct = 1
-           AND tracked_via_folder = 1",
-        [],
     )?;
 
     conn.execute_batch(
@@ -251,63 +161,6 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         );",
     )?;
 
-    // Migrate event_log CHECK constraint to include new event types.
-    // SQLite does not support ALTER CHECK, so we recreate the table.
-    migrate_event_log_check(conn)?;
-
-    Ok(())
-}
-
-/// Recreate event_log table with expanded CHECK constraint for new event types.
-/// This is a no-op when the table already has the new constraint (fresh installs).
-fn migrate_event_log_check(conn: &Connection) -> Result<()> {
-    // Probe whether the new event types are accepted by the current CHECK constraint.
-    // If the insert succeeds, the migration has already been applied (or it's a fresh DB).
-    let probe = conn.execute(
-        "INSERT INTO event_log (event_type, message) VALUES ('drive_created', '__probe__')",
-        [],
-    );
-    match probe {
-        Ok(_) => {
-            // Probe succeeded — delete the probe row and return.
-            conn.execute(
-                "DELETE FROM event_log WHERE event_type='drive_created' AND message='__probe__'",
-                [],
-            )?;
-            return Ok(());
-        }
-        Err(_) => {
-            // CHECK constraint rejected the value — migration needed.
-        }
-    }
-
-    conn.execute_batch(
-        "CREATE TABLE event_log_new (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type      TEXT NOT NULL CHECK(event_type IN (
-                                'file_created', 'file_edited', 'file_mirrored',
-                                'file_untracked',
-                                'integrity_pass', 'integrity_fail',
-                                'recovery_success', 'recovery_fail',
-                                'both_corrupted', 'change_detected',
-                                'sync_completed', 'sync_failed',
-                                'folder_tracked', 'folder_untracked',
-                                'integrity_run_started', 'integrity_run_completed',
-                                'drive_created', 'drive_updated', 'drive_deleted',
-                                'drive_failover', 'drive_quiescing', 'drive_quiesce_cancelled',
-                                'drive_failure_confirmed', 'drive_replacement_assigned',
-                                'drive_rebuild_completed'
-                            )),
-            tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
-            message         TEXT NOT NULL,
-            details         TEXT,
-            created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO event_log_new (id, event_type, tracked_file_id, message, details, created_at)
-            SELECT id, event_type, tracked_file_id, message, details, created_at FROM event_log;
-        DROP TABLE event_log;
-        ALTER TABLE event_log_new RENAME TO event_log;",
-    )?;
     Ok(())
 }
 
@@ -317,16 +170,6 @@ mod tests {
 
     fn open_memory_db() -> Connection {
         Connection::open_in_memory().expect("Failed to open in-memory DB")
-    }
-
-    fn index_exists(conn: &Connection, index: &str) -> bool {
-        conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
-            rusqlite::params![index],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count == 1)
-        .unwrap_or(false)
     }
 
     #[test]
@@ -439,152 +282,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_drive_pair_state_columns_migrate_legacy_schema() {
-        let conn = open_memory_db();
-        conn.execute_batch(
-            "CREATE TABLE drive_pairs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                name            TEXT NOT NULL UNIQUE,
-                primary_path    TEXT NOT NULL,
-                secondary_path  TEXT NOT NULL,
-                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-            );",
-        )
-        .unwrap();
-
-        initialize_schema(&conn).expect("Schema migration failed");
-
-        for column in ["primary_state", "secondary_state", "active_role"] {
-            assert!(
-                column_exists(&conn, "drive_pairs", column).unwrap(),
-                "Column '{}' should be added during migration",
-                column
-            );
-        }
-    }
-
-    #[test]
-    fn test_tracked_file_provenance_columns_indexes_and_backfill_migrate_legacy_schema() {
-        let conn = open_memory_db();
-        conn.execute_batch(
-            "CREATE TABLE drive_pairs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                name            TEXT NOT NULL UNIQUE,
-                primary_path    TEXT NOT NULL,
-                secondary_path  TEXT NOT NULL,
-                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE tracked_files (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
-                relative_path   TEXT NOT NULL,
-                checksum        TEXT NOT NULL,
-                file_size       INTEGER NOT NULL,
-                virtual_path    TEXT,
-                is_mirrored     INTEGER NOT NULL DEFAULT 0,
-                last_integrity_check_at TEXT,
-                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(drive_pair_id, relative_path)
-            );
-            CREATE TABLE tracked_folders (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
-                folder_path     TEXT NOT NULL,
-                virtual_path    TEXT,
-                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(drive_pair_id, folder_path)
-            );",
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO drive_pairs (name, primary_path, secondary_path)
-             VALUES ('pair', '/p', '/s')",
-            [],
-        )
-        .unwrap();
-        let pair_id: i64 = conn
-            .query_row("SELECT id FROM drive_pairs LIMIT 1", [], |row| row.get(0))
-            .unwrap();
-
-        conn.execute(
-            "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
-             VALUES (?1, 'docs', '/virtual/docs')",
-            rusqlite::params![pair_id],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size)
-             VALUES (?1, 'docs/a.txt', 'h1', 10)",
-            rusqlite::params![pair_id],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size)
-             VALUES (?1, 'misc/b.txt', 'h2', 10)",
-            rusqlite::params![pair_id],
-        )
-        .unwrap();
-
-        initialize_schema(&conn).expect("Schema migration failed");
-
-        for column in ["tracked_direct", "tracked_via_folder"] {
-            assert!(
-                column_exists(&conn, "tracked_files", column).unwrap(),
-                "Column '{}' should be added during migration",
-                column
-            );
-        }
-        assert!(
-            column_exists(&conn, "tracked_folders", "last_scanned_at").unwrap(),
-            "Column 'last_scanned_at' should be added during migration"
-        );
-
-        assert!(
-            index_exists(&conn, "idx_tracked_files_virtual_path"),
-            "tracked_files virtual_path index should be present"
-        );
-        assert!(
-            index_exists(&conn, "idx_tracked_files_drive_relative"),
-            "tracked_files drive_pair_id + relative_path index should be present"
-        );
-        assert!(
-            index_exists(&conn, "idx_tracked_folders_drive_folder_path"),
-            "tracked_folders drive_pair_id + folder_path index should be present"
-        );
-
-        let docs_flags: (i64, i64) = conn
-            .query_row(
-                "SELECT tracked_direct, tracked_via_folder
-                 FROM tracked_files
-                 WHERE relative_path='docs/a.txt'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            docs_flags,
-            (1, 0),
-            "Directly tracked files should stay direct-only after provenance backfill"
-        );
-
-        let misc_flags: (i64, i64) = conn
-            .query_row(
-                "SELECT tracked_direct, tracked_via_folder
-                 FROM tracked_files
-                 WHERE relative_path='misc/b.txt'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            misc_flags,
-            (1, 0),
-            "File outside tracked folders should remain directly tracked only"
-        );
-    }
 }
