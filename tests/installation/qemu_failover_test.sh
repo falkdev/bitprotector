@@ -197,7 +197,7 @@ mkdir -p /mnt/primary/docs
 printf "before failover\n" > /mnt/primary/docs/report.txt
 
 bitprotector --db "${DB}" drives add lab /mnt/primary /mnt/mirror
-bitprotector --db "${DB}" files track 1 docs/report.txt --mirror
+bitprotector --db "${DB}" files track 1 docs/report.txt
 bitprotector --db "${DB}" files mirror 1
 bitprotector --db "${DB}" folders add 1 docs
 bitprotector --db "${DB}" virtual-paths set 1 "${VIRTUAL_FILE}"
