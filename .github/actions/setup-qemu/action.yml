@@ -1,0 +1,76 @@
+name: Setup QEMU
+description: Install QEMU packages, verify KVM access, and download/cache the requested Ubuntu cloud image
+
+inputs:
+  guest:
+    description: Guest OS label — ubuntu-24.04 or ubuntu-26.04
+    required: true
+    default: ubuntu-24.04
+
+runs:
+  using: composite
+  steps:
+    - name: Install QEMU and cloud-image utilities
+      shell: bash
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q \
+          qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
+
+    - name: Enable KVM access
+      shell: bash
+      run: |
+        sudo chmod 666 /dev/kvm || true
+        if command -v kvm-ok &>/dev/null; then
+          kvm-ok || echo "WARNING: kvm-ok reports no hardware KVM — QEMU will fall back to TCG (slower)"
+        fi
+
+    - name: Resolve image metadata
+      id: image-meta
+      shell: bash
+      run: |
+        case "${{ inputs.guest }}" in
+          ubuntu-24.04)
+            echo "filename=noble-server-cloudimg-amd64.img" >> "$GITHUB_OUTPUT"
+            echo "url=https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img" >> "$GITHUB_OUTPUT"
+            ;;
+          ubuntu-26.04)
+            echo "filename=plucky-server-cloudimg-amd64.img" >> "$GITHUB_OUTPUT"
+            echo "url=https://cloud-images.ubuntu.com/plucky/current/plucky-server-cloudimg-amd64.img" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "ERROR: unknown guest '${{ inputs.guest }}'" >&2
+            exit 1
+            ;;
+        esac
+        echo "cache-key=${{ inputs.guest }}-$(date -u '+%Y%m')" >> "$GITHUB_OUTPUT"
+
+    - name: Cache cloud image
+      id: image-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/images/${{ steps.image-meta.outputs.filename }}
+        key: ${{ steps.image-meta.outputs.cache-key }}
+
+    - name: Download cloud image (cache miss)
+      if: steps.image-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/images
+        wget --show-progress \
+          -O ~/images/${{ steps.image-meta.outputs.filename }}.tmp \
+          ${{ steps.image-meta.outputs.url }}
+        mv ~/images/${{ steps.image-meta.outputs.filename }}.tmp \
+           ~/images/${{ steps.image-meta.outputs.filename }}
+
+    - name: Generate throwaway SSH keypair
+      shell: bash
+      run: |
+        mkdir -p "${RUNNER_TEMP}/.ssh"
+        ssh-keygen -t ed25519 -N "" -f "${RUNNER_TEMP}/.ssh/id_ed25519" -C "ci-qemu"
+        echo "BITPROTECTOR_QEMU_SSH_KEY=$(cat "${RUNNER_TEMP}/.ssh/id_ed25519.pub")" >> "$GITHUB_ENV"
+        # Also place in ~/.ssh so the scripts' fallback path works
+        mkdir -p ~/.ssh
+        cp "${RUNNER_TEMP}/.ssh/id_ed25519.pub" ~/.ssh/id_ed25519.pub
+        cp "${RUNNER_TEMP}/.ssh/id_ed25519" ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519

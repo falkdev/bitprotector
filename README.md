@@ -1,5 +1,7 @@
 # BitProtector
 
+[![CI](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml/badge.svg)](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml)
+
 ## Distributed File Mirror and Integrity Protection System
 
 Monitors files across redundant storage, detects bit-decay and silent corruption using BLAKE3 checksums, automatically recovers from mirror copies, and supports live drive failover plus replacement rebuilds. Operates as a background daemon with both a CLI tool and a HTTPS REST API.
@@ -223,6 +225,7 @@ bitprotector --db /tmp/test.db drives list
 | [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |
 | [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, and the QEMU smoke plus failover suites |
+| [docs/CI.md](docs/CI.md) | CI pipeline layers, local debugging with `act`, and how to reproduce failures |
 
 ---
 

@@ -1,0 +1,13 @@
+# .actrc — project-local defaults for nektos/act
+# These are read by act on every invocation from this directory.
+# https://github.com/nektos/act#configuration
+
+# Use the full catthehacker image (includes qemu-system-x86_64)
+-P ubuntu-24.04=catthehacker/ubuntu:full-latest
+-P ubuntu-latest=catthehacker/ubuntu:full-latest
+
+# Don't pull images on every run (use what's cached locally)
+--pull=false
+
+# Run a local artifact server so upload-artifact / download-artifact work
+--artifact-server-path /tmp/act-artifacts

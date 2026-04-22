@@ -1,0 +1,13 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Full CI (nightly)
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
