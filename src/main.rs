@@ -32,7 +32,6 @@ struct ServerConfig {
     jwt_secret: Option<String>,
 }
 
-
 #[derive(serde::Deserialize, Default)]
 struct DatabaseConfig {
     path: Option<String>,
