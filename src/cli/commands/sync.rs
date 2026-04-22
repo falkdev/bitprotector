@@ -47,8 +47,8 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             let (items, total) =
                 repo.list_sync_queue(args.status.as_deref(), args.page, args.per_page)?;
             println!(
-                "{:<6} {:<10} {:<16} {:<12} {}",
-                "ID", "File", "Action", "Status", "Created"
+                "{:<6} {:<10} {:<16} {:<12} Created",
+                "ID", "File", "Action", "Status"
             );
             println!("{}", "-".repeat(70));
             for item in &items {

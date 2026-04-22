@@ -60,9 +60,9 @@ describe('api client interceptors', () => {
     const requestInterceptor = getRequestInterceptor()
     expect(requestInterceptor).toBeDefined()
 
-    const requestConfig = await requestInterceptor!(
-      { headers: {} } as unknown as InternalAxiosRequestConfig
-    )
+    const requestConfig = await requestInterceptor!({
+      headers: {},
+    } as unknown as InternalAxiosRequestConfig)
 
     expect(readAuthorizationHeader(requestConfig)).toBe('Bearer token-123')
   })

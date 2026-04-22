@@ -6,7 +6,11 @@ function apiUrl(path: string) {
 
 type Resolver = Parameters<typeof http.get<PathParams>>[1]
 
-function wrap(method: 'get' | 'post' | 'put' | 'delete', path: string, resolver: Resolver): HttpHandler {
+function wrap(
+  method: 'get' | 'post' | 'put' | 'delete',
+  path: string,
+  resolver: Resolver
+): HttpHandler {
   return http[method](apiUrl(path), resolver)
 }
 

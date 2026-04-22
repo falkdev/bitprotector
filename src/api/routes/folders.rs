@@ -95,7 +95,8 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
 
     match repo.delete_tracked_folder(id) {
         Ok(_) => {
-            let full_path = repo.get_drive_pair(folder.drive_pair_id)
+            let full_path = repo
+                .get_drive_pair(folder.drive_pair_id)
                 .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
                 .unwrap_or_else(|_| folder.folder_path.clone());
             let _ = event_logger::log_folder_untracked(&repo, id, &full_path);

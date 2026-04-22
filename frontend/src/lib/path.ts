@@ -95,9 +95,8 @@ export function resolveTrackedPathInput(
     }
   }
 
-  const relativePath = normalizedRoot === '/'
-    ? absolutePath.slice(1)
-    : absolutePath.slice(prefix.length)
+  const relativePath =
+    normalizedRoot === '/' ? absolutePath.slice(1) : absolutePath.slice(prefix.length)
 
   if (!relativePath) {
     return {
@@ -139,6 +138,10 @@ export function resolveAbsolutePathForPicker(
   return '/'
 }
 
-export function getActiveDrivePath(primaryPath: string, secondaryPath: string, activeRole: 'primary' | 'secondary'): string {
+export function getActiveDrivePath(
+  primaryPath: string,
+  secondaryPath: string,
+  activeRole: 'primary' | 'secondary'
+): string {
   return activeRole === 'primary' ? primaryPath : secondaryPath
 }

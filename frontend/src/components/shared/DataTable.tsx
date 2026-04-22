@@ -44,10 +44,7 @@ export function DataTable<T>({
         <thead className="bg-muted/40 text-muted-foreground">
           <tr>
             {columns.map((col) => (
-              <th
-                key={col.key}
-                className={cn('px-3 py-2 text-left font-medium', col.className)}
-              >
+              <th key={col.key} className={cn('px-3 py-2 text-left font-medium', col.className)}>
                 {col.header}
               </th>
             ))}

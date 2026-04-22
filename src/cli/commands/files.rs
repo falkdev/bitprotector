@@ -94,8 +94,8 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 args.page
             );
             println!(
-                "{:<6} {:<8} {:<40} {:<8} {}",
-                "ID", "Drive", "Path", "Mirrored", "Checksum"
+                "{:<6} {:<8} {:<40} {:<8} Checksum",
+                "ID", "Drive", "Path", "Mirrored"
             );
             println!("{}", "-".repeat(90));
             for f in files {
@@ -144,7 +144,8 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 virtual_path::remove_virtual_path(repo, id)?;
             }
             repo.delete_tracked_file(id)?;
-            let full_path = repo.get_drive_pair(file.drive_pair_id)
+            let full_path = repo
+                .get_drive_pair(file.drive_pair_id)
                 .map(|dp| format!("{}/{}", dp.primary_path, file.relative_path))
                 .unwrap_or_else(|_| file.relative_path.clone());
             let _ = event_logger::log_file_untracked(repo, id, &full_path);

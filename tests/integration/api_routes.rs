@@ -636,7 +636,8 @@ async fn test_tracking_items_folder_status_counts_match_underlying_file_states()
             )
             .unwrap();
         if i < 4 {
-            repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+            repo.update_tracked_file_mirror_status(file.id, true)
+                .unwrap();
         }
     }
 
@@ -652,7 +653,8 @@ async fn test_tracking_items_folder_status_counts_match_underlying_file_states()
                 true,
             )
             .unwrap();
-        repo.update_tracked_file_mirror_status(file.id, true).unwrap();
+        repo.update_tracked_file_mirror_status(file.id, true)
+            .unwrap();
     }
 
     let app = make_app!(repo).await;
@@ -1538,7 +1540,10 @@ async fn test_integrity_check_with_recovery_reconciles_mirror_queue_and_logs_fix
 
     let recovered_file = repo.get_tracked_file(file.id).unwrap();
     assert!(recovered_file.is_mirrored);
-    assert_eq!(fs::read(secondary.path().join("recover.txt")).unwrap(), content);
+    assert_eq!(
+        fs::read(secondary.path().join("recover.txt")).unwrap(),
+        content
+    );
 
     let (pending, pending_total) = repo.list_sync_queue(Some("pending"), 1, 50).unwrap();
     assert_eq!(pending_total, 0);
@@ -1560,8 +1565,12 @@ async fn test_integrity_check_with_recovery_reconciles_mirror_queue_and_logs_fix
     let (logs, _) = repo
         .list_event_logs(None, Some(file.id), None, None, 1, 50)
         .unwrap();
-    assert!(logs.iter().any(|entry| entry.event_type == "recovery_success"));
-    assert!(logs.iter().any(|entry| entry.event_type == "sync_completed"));
+    assert!(logs
+        .iter()
+        .any(|entry| entry.event_type == "recovery_success"));
+    assert!(logs
+        .iter()
+        .any(|entry| entry.event_type == "sync_completed"));
 }
 
 #[actix_rt::test]
@@ -1584,7 +1593,13 @@ async fn test_integrity_check_with_recovery_unrecoverable_keeps_queue_pending_an
     drive::ensure_drive_root_marker(primary.path().to_str().unwrap()).unwrap();
     drive::ensure_drive_root_marker(secondary.path().to_str().unwrap()).unwrap();
     let file = repo
-        .create_tracked_file(pair.id, "unrecoverable.txt", &hash, original.len() as i64, None)
+        .create_tracked_file(
+            pair.id,
+            "unrecoverable.txt",
+            &hash,
+            original.len() as i64,
+            None,
+        )
         .unwrap();
     let _pending = repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
@@ -1611,7 +1626,9 @@ async fn test_integrity_check_with_recovery_unrecoverable_keeps_queue_pending_an
     assert!(!logs
         .iter()
         .any(|entry| entry.event_type == "recovery_success"));
-    assert!(!logs.iter().any(|entry| entry.event_type == "sync_completed"));
+    assert!(!logs
+        .iter()
+        .any(|entry| entry.event_type == "sync_completed"));
 }
 
 #[actix_rt::test]
@@ -1649,7 +1666,10 @@ async fn test_integrity_run_with_recovery_reconciles_queue_and_logs_per_file() {
             .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
         let before_run = integrity::check_file_integrity(&pair, &file).unwrap();
-        assert_eq!(before_run.status, integrity::IntegrityStatus::MirrorCorrupted);
+        assert_eq!(
+            before_run.status,
+            integrity::IntegrityStatus::MirrorCorrupted
+        );
     }
 
     let app = make_app!(repo.clone()).await;
@@ -1717,15 +1737,21 @@ async fn test_integrity_run_with_recovery_reconciles_queue_and_logs_per_file() {
             "Recovered file should have queue history rows"
         );
         assert!(
-            file_queue_rows.iter().all(|item| item.status == "completed"),
+            file_queue_rows
+                .iter()
+                .all(|item| item.status == "completed"),
             "Recovered file queue rows should be completed"
         );
 
         let (logs, _) = repo
             .list_event_logs(None, Some(file_id), None, None, 1, 50)
             .unwrap();
-        assert!(logs.iter().any(|entry| entry.event_type == "recovery_success"));
-        assert!(logs.iter().any(|entry| entry.event_type == "sync_completed"));
+        assert!(logs
+            .iter()
+            .any(|entry| entry.event_type == "recovery_success"));
+        assert!(logs
+            .iter()
+            .any(|entry| entry.event_type == "sync_completed"));
     }
 }
 
@@ -2247,7 +2273,9 @@ async fn test_sync_clear_completed_queue_deletes_only_completed() {
     repo.update_sync_queue_status(completed.id, "completed", None)
         .unwrap();
     let _pending = repo.create_sync_queue_item(file2.id, "verify").unwrap();
-    let failed = repo.create_sync_queue_item(file3.id, "restore_master").unwrap();
+    let failed = repo
+        .create_sync_queue_item(file3.id, "restore_master")
+        .unwrap();
     repo.update_sync_queue_status(failed.id, "failed", Some("forced failure"))
         .unwrap();
 

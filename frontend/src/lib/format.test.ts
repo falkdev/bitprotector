@@ -14,7 +14,9 @@ describe('formatDate', () => {
 
   it('formats using navigator.language', () => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue('sv')
-    const toLocaleStringSpy = vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('formatted')
+    const toLocaleStringSpy = vi
+      .spyOn(Date.prototype, 'toLocaleString')
+      .mockReturnValue('formatted')
 
     expect(formatDate('2026-04-03T12:34:56Z')).toBe('formatted')
     expect(toLocaleStringSpy).toHaveBeenCalledWith('sv')
@@ -22,7 +24,9 @@ describe('formatDate', () => {
 
   it('falls back to default locale when navigator.language is empty', () => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue('')
-    const toLocaleStringSpy = vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('formatted')
+    const toLocaleStringSpy = vi
+      .spyOn(Date.prototype, 'toLocaleString')
+      .mockReturnValue('formatted')
 
     expect(formatDate('2026-04-03T12:34:56Z')).toBe('formatted')
     expect(toLocaleStringSpy).toHaveBeenCalledWith(undefined)

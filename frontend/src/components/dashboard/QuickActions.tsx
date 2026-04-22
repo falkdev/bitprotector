@@ -70,9 +70,7 @@ export function QuickActions({
             >
               <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
               <div>
-                <p className="text-sm font-medium">
-                  {loadingAction === key ? 'Running…' : label}
-                </p>
+                <p className="text-sm font-medium">{loadingAction === key ? 'Running…' : label}</p>
                 <p className="text-xs text-muted-foreground">{description}</p>
               </div>
             </button>

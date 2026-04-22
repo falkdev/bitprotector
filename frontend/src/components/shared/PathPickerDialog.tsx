@@ -80,7 +80,11 @@ function findNode(nodes: PickerNode[], path: string): PickerNode | null {
   return null
 }
 
-function replaceChildren(nodes: PickerNode[], targetPath: string, children: PickerNode[]): PickerNode[] {
+function replaceChildren(
+  nodes: PickerNode[],
+  targetPath: string,
+  children: PickerNode[]
+): PickerNode[] {
   return nodes.map((node) => {
     if (node.path === targetPath) {
       return {
@@ -191,153 +195,159 @@ export function PathPickerDialog({
       return 'Path is required'
     }
 
-    if (
-      mode === 'file' &&
-      selectedPath === draftPath.trim() &&
-      selectedKind === 'directory'
-    ) {
+    if (mode === 'file' && selectedPath === draftPath.trim() && selectedKind === 'directory') {
       return 'Select a file, not a folder'
     }
 
     return validatePath?.(draftPath.trim()) ?? null
   }, [draftPath, mode, selectedKind, selectedPath, validatePath])
 
-  const loadChildren = useCallback(async (path: string, includeHidden: boolean, force = false) => {
-    const existingNode = findNode(nodesRef.current, path)
-    if (existingNode?.isLoaded && !force) {
-      return
-    }
-    if (!force) {
-      const inFlight = loadingPromisesRef.current.get(path)
-      if (inFlight) {
-        return inFlight
+  const loadChildren = useCallback(
+    async (path: string, includeHidden: boolean, force = false) => {
+      const existingNode = findNode(nodesRef.current, path)
+      if (existingNode?.isLoaded && !force) {
+        return
       }
-    }
-
-    const request = (async () => {
-      loadingPathsRef.current.add(path)
-      setLoadingPaths((current) => [...current, path])
-      try {
-        const response = await filesystemApi.children({
-          path,
-          include_hidden: includeHidden,
-          directories_only: mode === 'directory',
-        })
-        const children = response.entries.map(toNode)
-        setTreeData((current) =>
-          path === scopedRootPath ? children : replaceChildren(current, path, children)
-        )
-      } finally {
-        loadingPathsRef.current.delete(path)
-        loadingPromisesRef.current.delete(path)
-        setLoadingPaths((current) => current.filter((entry) => entry !== path))
+      if (!force) {
+        const inFlight = loadingPromisesRef.current.get(path)
+        if (inFlight) {
+          return inFlight
+        }
       }
-    })()
 
-    loadingPromisesRef.current.set(path, request)
-    return request
-  }, [mode, scopedRootPath])
+      const request = (async () => {
+        loadingPathsRef.current.add(path)
+        setLoadingPaths((current) => [...current, path])
+        try {
+          const response = await filesystemApi.children({
+            path,
+            include_hidden: includeHidden,
+            directories_only: mode === 'directory',
+          })
+          const children = response.entries.map(toNode)
+          setTreeData((current) =>
+            path === scopedRootPath ? children : replaceChildren(current, path, children)
+          )
+        } finally {
+          loadingPathsRef.current.delete(path)
+          loadingPromisesRef.current.delete(path)
+          setLoadingPaths((current) => current.filter((entry) => entry !== path))
+        }
+      })()
 
-  const renderNode = useCallback(({ node, style }: NodeRendererProps<PickerNode>) => {
-    const isDirectory = node.data.kind === 'directory'
+      loadingPromisesRef.current.set(path, request)
+      return request
+    },
+    [mode, scopedRootPath]
+  )
 
-    return (
-      <div style={style}>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            node.handleClick(event)
+  const renderNode = useCallback(
+    ({ node, style }: NodeRendererProps<PickerNode>) => {
+      const isDirectory = node.data.kind === 'directory'
 
-            if (!isDirectory) {
-              return
-            }
+      return (
+        <div style={style}>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              node.handleClick(event)
 
-            void (async () => {
-              if (node.isOpen) {
-                node.close()
+              if (!isDirectory) {
                 return
               }
 
-              const currentNode = findNode(nodesRef.current, node.data.path)
-              if (!currentNode?.isLoaded) {
-                await loadChildren(node.data.path, showHidden)
-              }
+              void (async () => {
+                if (node.isOpen) {
+                  node.close()
+                  return
+                }
 
-              node.open()
-            })()
-          }}
-          className={cn(
-            'flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
-            node.isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-          )}
-          data-testid={`path-picker-node-${node.data.path}`}
-        >
-          <span className="flex w-4 shrink-0 items-center justify-center text-muted-foreground">
+                const currentNode = findNode(nodesRef.current, node.data.path)
+                if (!currentNode?.isLoaded) {
+                  await loadChildren(node.data.path, showHidden)
+                }
+
+                node.open()
+              })()
+            }}
+            className={cn(
+              'flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
+              node.isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+            )}
+            data-testid={`path-picker-node-${node.data.path}`}
+          >
+            <span className="flex w-4 shrink-0 items-center justify-center text-muted-foreground">
+              {isDirectory ? (
+                <ChevronRight
+                  className={cn('h-4 w-4 transition-transform', node.isOpen && 'rotate-90')}
+                />
+              ) : null}
+            </span>
             {isDirectory ? (
-              <ChevronRight
-                className={cn('h-4 w-4 transition-transform', node.isOpen && 'rotate-90')}
-              />
-            ) : null}
-          </span>
-          {isDirectory ? (
-            node.isOpen ? (
-              <FolderOpen className="h-4 w-4 shrink-0 text-yellow-500" />
+              node.isOpen ? (
+                <FolderOpen className="h-4 w-4 shrink-0 text-yellow-500" />
+              ) : (
+                <Folder className="h-4 w-4 shrink-0 text-yellow-500" />
+              )
             ) : (
-              <Folder className="h-4 w-4 shrink-0 text-yellow-500" />
-            )
-          ) : (
-            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
-          <span className="truncate">{node.data.name}</span>
-        </button>
-      </div>
-    )
-  }, [loadChildren, showHidden])
+              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate">{node.data.name}</span>
+          </button>
+        </div>
+      )
+    },
+    [loadChildren, showHidden]
+  )
 
-  const initializeTree = useCallback(async (initialPath: string, includeHidden: boolean) => {
-    const normalizedInitialPath = normalizeAbsoluteFilesystemPath(initialPath || scopedRootPath)
-    const scopedInitialPath = isPathInsideRoot(normalizedInitialPath, scopedRootPath)
-      ? normalizedInitialPath
-      : scopedRootPath
+  const initializeTree = useCallback(
+    async (initialPath: string, includeHidden: boolean) => {
+      const normalizedInitialPath = normalizeAbsoluteFilesystemPath(initialPath || scopedRootPath)
+      const scopedInitialPath = isPathInsideRoot(normalizedInitialPath, scopedRootPath)
+        ? normalizedInitialPath
+        : scopedRootPath
 
-    setLoading(true)
-    setTreeError(null)
-    const nextTree = [createRootNode(scopedRootPath)]
-    nodesRef.current = nextTree
-    loadingPathsRef.current.clear()
-    setTreeData(nextTree)
-    setTreeKey((current) => current + 1)
-    setSelectedPath(null)
-    setSelectedKind(null)
-    setDraftPath(scopedInitialPath)
+      setLoading(true)
+      setTreeError(null)
+      const nextTree = [createRootNode(scopedRootPath)]
+      nodesRef.current = nextTree
+      loadingPathsRef.current.clear()
+      setTreeData(nextTree)
+      setTreeKey((current) => current + 1)
+      setSelectedPath(null)
+      setSelectedKind(null)
+      setDraftPath(scopedInitialPath)
 
-    try {
-      await nextTick()
-      await loadChildren(scopedRootPath, includeHidden, true)
-      await nextTick()
-      treeRef.current?.open(scopedRootPath)
-
-      const directoryTarget = mode === 'file'
-        ? scopedInitialPath.split('/').slice(0, -1).join('/') || scopedRootPath
-        : scopedInitialPath
-      const ancestors = buildAncestorChainWithinRoot(directoryTarget, scopedRootPath)
-
-      for (const ancestor of ancestors.slice(1)) {
-        await loadChildren(ancestor, includeHidden, true)
+      try {
         await nextTick()
-        treeRef.current?.open(ancestor)
-      }
+        await loadChildren(scopedRootPath, includeHidden, true)
+        await nextTick()
+        treeRef.current?.open(scopedRootPath)
 
-      setSelectedPath(scopedInitialPath)
-      const initialNode = findNode(nodesRef.current, scopedInitialPath)
-      setSelectedKind(initialNode?.kind ?? null)
-    } catch (error) {
-      setTreeError(error instanceof Error ? error.message : 'Failed to load filesystem browser')
-    } finally {
-      setLoading(false)
-    }
-  }, [loadChildren, mode, scopedRootPath])
+        const directoryTarget =
+          mode === 'file'
+            ? scopedInitialPath.split('/').slice(0, -1).join('/') || scopedRootPath
+            : scopedInitialPath
+        const ancestors = buildAncestorChainWithinRoot(directoryTarget, scopedRootPath)
+
+        for (const ancestor of ancestors.slice(1)) {
+          await loadChildren(ancestor, includeHidden, true)
+          await nextTick()
+          treeRef.current?.open(ancestor)
+        }
+
+        setSelectedPath(scopedInitialPath)
+        const initialNode = findNode(nodesRef.current, scopedInitialPath)
+        setSelectedKind(initialNode?.kind ?? null)
+      } catch (error) {
+        setTreeError(error instanceof Error ? error.message : 'Failed to load filesystem browser')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [loadChildren, mode, scopedRootPath]
+  )
 
   useEffect(() => {
     if (!open) {
@@ -358,9 +368,7 @@ export function PathPickerDialog({
         <div className="flex items-start justify-between border-b border-border px-6 py-4">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">{title}</h2>
-            {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            ) : null}
+            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
           </div>
           <button
             type="button"
@@ -386,9 +394,7 @@ export function PathPickerDialog({
             />
           </div>
           <div className="flex items-center justify-between gap-3">
-            <div className="min-h-[1.25rem] text-xs text-destructive">
-              {validateSelectionError}
-            </div>
+            <div className="min-h-[1.25rem] text-xs text-destructive">{validateSelectionError}</div>
             <div className="flex items-center gap-2">
               <button
                 type="button"

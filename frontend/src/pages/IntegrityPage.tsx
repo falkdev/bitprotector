@@ -93,7 +93,11 @@ function StartRunDialog({
           </div>
 
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={recover} onChange={(event) => setRecover(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={recover}
+              onChange={(event) => setRecover(event.target.checked)}
+            />
             Attempt automatic recovery
           </label>
         </div>
@@ -109,7 +113,9 @@ function StartRunDialog({
           <button
             type="button"
             disabled={loading}
-            onClick={() => void onStart(selectedDrive === 'all' ? undefined : Number(selectedDrive), recover)}
+            onClick={() =>
+              void onStart(selectedDrive === 'all' ? undefined : Number(selectedDrive), recover)
+            }
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Play className="h-4 w-4" />
@@ -141,32 +147,29 @@ export function IntegrityPage() {
   const disableStartRun = !isRunning && !hasDrivePairs
   const lastIntegrityCheckLabel = getLastIntegrityCheckLabel(run)
 
-  const loadRunResults = useCallback(
-    async (runId: number, nextPage = 1, append = false) => {
-      if (append) {
-        setLoadingMore(true)
-      } else {
-        setTableLoading(true)
-      }
-      try {
-        const response = await integrityApi.runResults(runId, {
-          issues_only: true,
-          page: nextPage,
-          per_page: PAGE_SIZE,
-        })
-        setRun(response.run)
-        setTotal(response.total)
-        setPage(response.page)
-        setResults((current) => (append ? [...current, ...response.results] : response.results))
-      } catch {
-        toast.error('Failed to load integrity results')
-      } finally {
-        setTableLoading(false)
-        setLoadingMore(false)
-      }
-    },
-    []
-  )
+  const loadRunResults = useCallback(async (runId: number, nextPage = 1, append = false) => {
+    if (append) {
+      setLoadingMore(true)
+    } else {
+      setTableLoading(true)
+    }
+    try {
+      const response = await integrityApi.runResults(runId, {
+        issues_only: true,
+        page: nextPage,
+        per_page: PAGE_SIZE,
+      })
+      setRun(response.run)
+      setTotal(response.total)
+      setPage(response.page)
+      setResults((current) => (append ? [...current, ...response.results] : response.results))
+    } catch {
+      toast.error('Failed to load integrity results')
+    } finally {
+      setTableLoading(false)
+      setLoadingMore(false)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -302,10 +305,7 @@ export function IntegrityPage() {
     }
   }
 
-  const attentionRows = useMemo(
-    () => results.filter((result) => result.needs_attention),
-    [results]
-  )
+  const attentionRows = useMemo(() => results.filter((result) => result.needs_attention), [results])
 
   if (bootLoading) {
     return (
@@ -410,7 +410,10 @@ export function IntegrityPage() {
       )}
 
       {!tableLoading && run && attentionRows.length === 0 && !isRunning ? (
-        <EmptyState title="No files need attention" description="The latest run did not find actionable integrity issues." />
+        <EmptyState
+          title="No files need attention"
+          description="The latest run did not find actionable integrity issues."
+        />
       ) : null}
 
       {!tableLoading && attentionRows.length > 0 && (
@@ -451,7 +454,12 @@ export function IntegrityPage() {
             data={attentionRows}
             rowKey={(result) => result.id}
             rowTestId={(result) => `integrity-row-${result.file_id}`}
-            emptyState={<EmptyState title="No files need attention" description="No issue rows on this page." />}
+            emptyState={
+              <EmptyState
+                title="No files need attention"
+                description="No issue rows on this page."
+              />
+            }
           />
 
           {hasMore && (

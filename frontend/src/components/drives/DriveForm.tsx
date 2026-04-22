@@ -113,7 +113,11 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
         <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-semibold">{initial ? 'Edit Drive Pair' : 'New Drive Pair'}</h2>
-            <button type="button" onClick={onClose} className="rounded p-1 hover:bg-accent transition-colors">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 hover:bg-accent transition-colors"
+            >
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -173,10 +177,18 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
               <div className="mr-auto max-w-xs self-center text-xs text-destructive">
                 {submitError}
               </div>
-              <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors"
+              >
                 Cancel
               </button>
-              <button type="submit" disabled={isSubmitting} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60"
+              >
                 {isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
               </button>
             </div>
@@ -185,11 +197,15 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
       </ModalLayer>
       <PathPickerDialog
         open={pickerField !== null}
-        title={pickerField === 'primary_path' ? 'Select Primary Drive Path' : 'Select Secondary Drive Path'}
+        title={
+          pickerField === 'primary_path'
+            ? 'Select Primary Drive Path'
+            : 'Select Secondary Drive Path'
+        }
         description="Browse the BitProtector host filesystem and choose a directory path for this drive slot."
         mode="directory"
-        value={pickerField === 'primary_path' ? primaryPath ?? '' : secondaryPath ?? ''}
-        startPath={pickerField === 'primary_path' ? primaryPath ?? '' : secondaryPath ?? ''}
+        value={pickerField === 'primary_path' ? (primaryPath ?? '') : (secondaryPath ?? '')}
+        startPath={pickerField === 'primary_path' ? (primaryPath ?? '') : (secondaryPath ?? '')}
         confirmLabel="Use Directory"
         onClose={() => setPickerField(null)}
         onPick={(path) => {

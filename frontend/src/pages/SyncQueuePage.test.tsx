@@ -227,7 +227,9 @@ describe('SyncQueuePage', () => {
           per_page: 50,
         })
       ),
-      api.delete('/sync/queue/completed', () => HttpResponse.json({ error: 'failed' }, { status: 500 }))
+      api.delete('/sync/queue/completed', () =>
+        HttpResponse.json({ error: 'failed' }, { status: 500 })
+      )
     )
 
     renderWithApp(<SyncQueuePage />)

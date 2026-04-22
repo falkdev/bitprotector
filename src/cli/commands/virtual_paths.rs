@@ -65,7 +65,7 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
             if with_vp.is_empty() {
                 println!("No files have virtual paths assigned.");
             } else {
-                println!("{:<6} {:<40} {}", "ID", "Virtual Path", "Real Path");
+                println!("{:<6} {:<40} Real Path", "ID", "Virtual Path");
                 println!("{}", "-".repeat(90));
                 for f in with_vp {
                     let pair = drive::load_operational_pair(repo, f.drive_pair_id)?;

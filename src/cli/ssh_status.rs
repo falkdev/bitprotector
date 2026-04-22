@@ -115,7 +115,7 @@ pub fn print_status(db_path: &str) {
         Ok(c) => c,
         Err(_) => return,
     };
-    if initialize_schema(&*conn).is_err() {
+    if initialize_schema(&conn).is_err() {
         return;
     }
     drop(conn);

@@ -83,7 +83,10 @@ export function TrackFileModal({
             className="space-y-4"
           >
             <div>
-              <label htmlFor="track-file-drive-pair" className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="track-file-drive-pair"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 Drive pair
               </label>
               <select
@@ -98,10 +101,15 @@ export function TrackFileModal({
                   </option>
                 ))}
               </select>
-              {errors.drive_pair_id ? <p className="mt-1 text-xs text-red-500">{errors.drive_pair_id.message}</p> : null}
+              {errors.drive_pair_id ? (
+                <p className="mt-1 text-xs text-red-500">{errors.drive_pair_id.message}</p>
+              ) : null}
             </div>
             <div>
-              <label htmlFor="track-file-path" className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="track-file-path"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 File path
               </label>
               <div className="flex gap-2">
@@ -126,15 +134,23 @@ export function TrackFileModal({
                   ? `Primary root: ${primaryRoot}`
                   : 'Select a drive pair before browsing or submitting.'}
               </p>
-              {selectedDrive && rawPath.trim() && !pathResolution.error && pathResolution.relativePath ? (
+              {selectedDrive &&
+              rawPath.trim() &&
+              !pathResolution.error &&
+              pathResolution.relativePath ? (
                 <p className="mt-1 text-xs text-gray-500">
                   Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
                 </p>
               ) : null}
-              {errors.relative_path ? <p className="mt-1 text-xs text-red-500">{errors.relative_path.message}</p> : null}
+              {errors.relative_path ? (
+                <p className="mt-1 text-xs text-red-500">{errors.relative_path.message}</p>
+              ) : null}
             </div>
             <div>
-              <label htmlFor="track-file-virtual-path" className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="track-file-virtual-path"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 Virtual Path (optional)
               </label>
               <div className="flex gap-2">
@@ -156,7 +172,9 @@ export function TrackFileModal({
               <p className="mt-1 text-xs text-gray-500">
                 If set, BitProtector will create a symlink exactly at this path to the tracked file.
               </p>
-              {errors.virtual_path ? <p className="mt-1 text-xs text-red-500">{errors.virtual_path.message}</p> : null}
+              {errors.virtual_path ? (
+                <p className="mt-1 text-xs text-red-500">{errors.virtual_path.message}</p>
+              ) : null}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button

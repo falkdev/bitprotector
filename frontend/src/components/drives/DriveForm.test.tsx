@@ -4,13 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DriveForm } from './DriveForm'
 
 vi.mock('@/components/shared/PathPickerDialog', () => ({
-  PathPickerDialog: ({
-    open,
-    onPick,
-  }: {
-    open: boolean
-    onPick: (path: string) => void
-  }) =>
+  PathPickerDialog: ({ open, onPick }: { open: boolean; onPick: (path: string) => void }) =>
     open ? (
       <button type="button" onClick={() => onPick('/mnt/picked-directory')}>
         Use Mock Directory
@@ -22,12 +16,7 @@ describe('DriveForm', () => {
   it('fills the selected drive path from the picker', async () => {
     const user = userEvent.setup()
 
-    render(
-      <DriveForm
-        onClose={() => {}}
-        onSave={vi.fn().mockResolvedValue(undefined)}
-      />
-    )
+    render(<DriveForm onClose={() => {}} onSave={vi.fn().mockResolvedValue(undefined)} />)
 
     await user.click(screen.getAllByRole('button', { name: 'Browse' })[0])
     await user.click(screen.getByRole('button', { name: 'Use Mock Directory' }))
@@ -39,17 +28,14 @@ describe('DriveForm', () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
 
-    render(
-      <DriveForm
-        onClose={() => {}}
-        onSave={onSave}
-      />
-    )
+    render(<DriveForm onClose={() => {}} onSave={onSave} />)
 
     await user.type(screen.getByTestId('drive-name-input'), 'Mirror A')
     await user.type(screen.getByTestId('drive-primary-path-input'), '/mnt/primary')
     await user.type(screen.getByTestId('drive-secondary-path-input'), '/mnt/secondary')
-    await user.click(screen.getByRole('checkbox', { name: 'Skip path validation when creating this drive pair' }))
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Skip path validation when creating this drive pair' })
+    )
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
     expect(onSave).toHaveBeenCalledWith({
@@ -74,12 +60,7 @@ describe('DriveForm', () => {
       },
     })
 
-    render(
-      <DriveForm
-        onClose={() => {}}
-        onSave={onSave}
-      />
-    )
+    render(<DriveForm onClose={() => {}} onSave={onSave} />)
 
     await user.type(screen.getByTestId('drive-name-input'), 'Mirror A')
     await user.type(screen.getByTestId('drive-primary-path-input'), '/mnt/primary')

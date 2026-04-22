@@ -126,7 +126,13 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 validate_drive_pair(&args.primary, &args.secondary)?;
             }
             let pair = repo.create_drive_pair(&args.name, &args.primary, &args.secondary)?;
-            let _ = event_logger::log_drive_created(repo, pair.id, &pair.name, &pair.primary_path, &pair.secondary_path);
+            let _ = event_logger::log_drive_created(
+                repo,
+                pair.id,
+                &pair.name,
+                &pair.primary_path,
+                &pair.secondary_path,
+            );
             println!("Created drive pair #{}: {}", pair.id, pair.name);
             println!("  Primary:   {}", pair.primary_path);
             println!("  Secondary: {}", pair.secondary_path);
@@ -137,14 +143,8 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 println!("No drive pairs registered.");
             } else {
                 println!(
-                    "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} {}",
-                    "ID",
-                    "Name",
-                    "Active",
-                    "Primary",
-                    "Secondary",
-                    "Primary Path",
-                    "Secondary Path"
+                    "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} Secondary Path",
+                    "ID", "Name", "Active", "Primary", "Secondary", "Primary Path",
                 );
                 println!("{}", "-".repeat(136));
                 for p in pairs {

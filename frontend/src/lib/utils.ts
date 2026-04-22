@@ -12,9 +12,6 @@ export function truncate(str: string, maxLength: number): string {
 }
 
 /** Resolve a file's full active-side path from drive pair and relative_path */
-export function resolveActivePath(
-  activePath: string,
-  relativePath: string
-): string {
+export function resolveActivePath(activePath: string, relativePath: string): string {
   return activePath.replace(/\/$/, '') + '/' + relativePath.replace(/^\//, '')
 }

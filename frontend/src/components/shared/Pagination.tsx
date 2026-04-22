@@ -17,7 +17,9 @@ export function Pagination({ page, perPage, total, onPageChange, className }: Pa
   if (total === 0) return null
 
   return (
-    <div className={cn('flex items-center justify-between text-sm text-muted-foreground', className)}>
+    <div
+      className={cn('flex items-center justify-between text-sm text-muted-foreground', className)}
+    >
       <span>
         {from}–{to} of {total}
       </span>

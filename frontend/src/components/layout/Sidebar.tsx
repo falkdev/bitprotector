@@ -130,7 +130,11 @@ export function Sidebar() {
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           data-testid="sidebar-toggle"
         >
-          {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          {collapsed ? (
+            <PanelLeftOpen className="h-5 w-5" />
+          ) : (
+            <PanelLeftClose className="h-5 w-5" />
+          )}
         </button>
       </div>
 
@@ -146,7 +150,7 @@ export function Sidebar() {
             data-testid="user-menu-trigger"
             aria-haspopup="menu"
             aria-expanded={userMenuOpen}
-            title={collapsed ? username ?? 'Unknown' : undefined}
+            title={collapsed ? (username ?? 'Unknown') : undefined}
           >
             <User className="h-5 w-5" />
             {!collapsed ? <span className="truncate">{username ?? 'Unknown'}</span> : null}

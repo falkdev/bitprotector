@@ -200,16 +200,12 @@ function ScheduleFormModal({
   return (
     <ModalLayer>
       <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
-        <h2 className="text-lg font-semibold">
-          {isEditing ? 'Edit Schedule' : 'Add Schedule'}
-        </h2>
+        <h2 className="text-lg font-semibold">{isEditing ? 'Edit Schedule' : 'Add Schedule'}</h2>
 
         <div className="mt-5 space-y-6">
           {/* ── Section 1: Task type ───────────────────────────────── */}
           <fieldset disabled={isEditing}>
-            <legend className="mb-2 text-sm font-medium">
-              What do you want to schedule?
-            </legend>
+            <legend className="mb-2 text-sm font-medium">What do you want to schedule?</legend>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
@@ -248,9 +244,7 @@ function ScheduleFormModal({
 
           {/* ── Section 2: Timing ──────────────────────────────────── */}
           <fieldset>
-            <legend className="mb-2 text-sm font-medium">
-              How often should it run?
-            </legend>
+            <legend className="mb-2 text-sm font-medium">How often should it run?</legend>
 
             {/* Timing method toggle */}
             <div className="mb-3 flex flex-wrap gap-2">
@@ -346,7 +340,8 @@ function ScheduleFormModal({
                       className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
                     />
                     <p className="mt-1 text-xs text-muted-foreground">
-                      5-field format: minute (0-59) hour (0-23) day-of-month (1-31) month (1-12) day-of-week (0-6, Sun=0)
+                      5-field format: minute (0-59) hour (0-23) day-of-month (1-31) month (1-12)
+                      day-of-week (0-6, Sun=0)
                     </p>
                   </div>
                 )}
@@ -510,9 +505,7 @@ export function SchedulerPage() {
               <button
                 onClick={() => void toggleEnabled(schedule)}
                 className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  schedule.enabled
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-gray-100 text-gray-700'
+                  schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
                 }`}
               >
                 {schedule.enabled ? 'Enabled' : 'Disabled'}
@@ -562,11 +555,7 @@ export function SchedulerPage() {
       />
 
       {(showCreate || formTarget) && (
-        <ScheduleFormModal
-          schedule={formTarget}
-          onClose={closeForm}
-          onSave={saveSchedule}
-        />
+        <ScheduleFormModal schedule={formTarget} onClose={closeForm} onSave={saveSchedule} />
       )}
 
       <ConfirmDialog

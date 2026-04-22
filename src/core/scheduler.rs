@@ -147,7 +147,7 @@ impl Scheduler {
                 return;
             }
 
-            if let Err(e) = run_task(&task_type, &*repo) {
+            if let Err(e) = run_task(&task_type, &repo) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
             }
         });

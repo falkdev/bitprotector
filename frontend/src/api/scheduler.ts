@@ -8,9 +8,7 @@ import type {
 
 export const schedulerApi = {
   list(): Promise<ScheduleConfig[]> {
-    return apiClient
-      .get<ScheduleListResponse>('/scheduler/schedules')
-      .then((r) => r.data.schedules)
+    return apiClient.get<ScheduleListResponse>('/scheduler/schedules').then((r) => r.data.schedules)
   },
 
   get(id: number): Promise<ScheduleConfig> {

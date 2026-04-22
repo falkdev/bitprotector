@@ -6,10 +6,7 @@ interface UsePollingOptions {
   immediate?: boolean
 }
 
-export function usePolling<T>(
-  fetchFn: () => Promise<T>,
-  options: UsePollingOptions = {}
-) {
+export function usePolling<T>(fetchFn: () => Promise<T>, options: UsePollingOptions = {}) {
   const { interval = 5000, enabled = true, immediate = true } = options
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(false)

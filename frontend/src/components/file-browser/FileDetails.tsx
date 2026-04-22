@@ -24,12 +24,16 @@ export function FileDetails({ file, drivePairName, onClose }: FileDetailsProps) 
       </div>
       <div className="flex-1 overflow-auto p-4 space-y-4">
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Relative path</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            Relative path
+          </p>
           <p className="text-sm text-gray-900 break-all font-mono">{file.relative_path}</p>
         </div>
         {file.virtual_path && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Virtual path</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Virtual path
+            </p>
             <p className="text-sm text-gray-900 break-all font-mono">{file.virtual_path}</p>
           </div>
         )}
@@ -40,12 +44,16 @@ export function FileDetails({ file, drivePairName, onClose }: FileDetailsProps) 
           </div>
         )}
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Drive pair</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            Drive pair
+          </p>
           <p className="text-sm text-gray-900">{drivePairName ?? `ID ${file.drive_pair_id}`}</p>
         </div>
         {file.checksum && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Checksum (BLAKE3)</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Checksum (BLAKE3)
+            </p>
             <p className="text-sm font-mono text-gray-900 break-all">{file.checksum}</p>
           </div>
         )}
@@ -55,7 +63,9 @@ export function FileDetails({ file, drivePairName, onClose }: FileDetailsProps) 
         </div>
         {file.last_integrity_check_at && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Last integrity check</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Last integrity check
+            </p>
             <p className="text-sm text-gray-900">{formatDate(file.last_integrity_check_at)}</p>
           </div>
         )}

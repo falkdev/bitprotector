@@ -13,11 +13,7 @@ pub fn log_event(
 }
 
 /// Log a file tracking event.
-pub fn log_file_tracked(
-    repo: &Repository,
-    file_id: i64,
-    path: &str,
-) -> anyhow::Result<()> {
+pub fn log_file_tracked(repo: &Repository, file_id: i64, path: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "file_created",
@@ -28,11 +24,7 @@ pub fn log_file_tracked(
 }
 
 /// Log a file untrack event.
-pub fn log_file_untracked(
-    repo: &Repository,
-    file_id: i64,
-    path: &str,
-) -> anyhow::Result<()> {
+pub fn log_file_untracked(repo: &Repository, file_id: i64, path: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "file_untracked",
@@ -62,11 +54,7 @@ pub fn log_file_mirrored(
 }
 
 /// Log an integrity check that passed.
-pub fn log_integrity_pass(
-    repo: &Repository,
-    file_id: i64,
-    path: &str,
-) -> anyhow::Result<()> {
+pub fn log_integrity_pass(repo: &Repository, file_id: i64, path: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "integrity_pass",
@@ -181,7 +169,9 @@ pub fn log_sync_failed(
         &format!("Sync failed ({}): {}", action, path),
         Some(&format!(
             "{{\"action\":\"{}\",\"path\":\"{}\",\"error\":\"{}\"}}",
-            action, path, error.replace('"', "\\\"")
+            action,
+            path,
+            error.replace('"', "\\\"")
         )),
     )
 }
@@ -289,11 +279,7 @@ pub fn log_drive_created(
 }
 
 /// Log a drive pair update event.
-pub fn log_drive_updated(
-    repo: &Repository,
-    pair_id: i64,
-    name: &str,
-) -> anyhow::Result<()> {
+pub fn log_drive_updated(repo: &Repository, pair_id: i64, name: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "drive_updated",
@@ -307,11 +293,7 @@ pub fn log_drive_updated(
 }
 
 /// Log a drive pair deletion event.
-pub fn log_drive_deleted(
-    repo: &Repository,
-    pair_id: i64,
-    name: &str,
-) -> anyhow::Result<()> {
+pub fn log_drive_deleted(repo: &Repository, pair_id: i64, name: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "drive_deleted",
@@ -348,11 +330,7 @@ pub fn log_drive_failover(
 }
 
 /// Log a drive entering quiescing state.
-pub fn log_drive_quiescing(
-    repo: &Repository,
-    pair_id: i64,
-    role: &str,
-) -> anyhow::Result<()> {
+pub fn log_drive_quiescing(repo: &Repository, pair_id: i64, role: &str) -> anyhow::Result<()> {
     log_event(
         repo,
         "drive_quiescing",
@@ -594,7 +572,11 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(logs[0].event_type, "file_untracked");
         assert!(logs[0].message.contains("foo.txt"));
-        assert!(logs[0].details.as_ref().unwrap().contains("\"path\":\"foo.txt\""));
+        assert!(logs[0]
+            .details
+            .as_ref()
+            .unwrap()
+            .contains("\"path\":\"foo.txt\""));
     }
 
     #[test]
@@ -725,7 +707,9 @@ mod tests {
         let (repo, fid) = setup_repo_with_file();
         log_file_tracked(&repo, fid, "foo.txt").unwrap();
 
-        let (logs, _) = repo.list_event_logs(None, Some(fid), None, None, 1, 50).unwrap();
+        let (logs, _) = repo
+            .list_event_logs(None, Some(fid), None, None, 1, 50)
+            .unwrap();
         assert_eq!(
             logs[0].file_path.as_deref(),
             Some("/tmp/p/foo.txt"),
@@ -750,7 +734,9 @@ mod tests {
         log_integrity_fail(&repo, fid, "foo.txt", "mirror_corrupted").unwrap();
         log_recovery(&repo, fid, "restore_mirror", true).unwrap();
 
-        let (logs, _) = repo.list_event_logs(None, Some(fid), None, None, 1, 50).unwrap();
+        let (logs, _) = repo
+            .list_event_logs(None, Some(fid), None, None, 1, 50)
+            .unwrap();
         // All enriched functions should now have non-null JSON details
         for log in &logs {
             assert!(

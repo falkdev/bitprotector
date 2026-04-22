@@ -56,7 +56,13 @@ pub async fn create_drive_pair(
     }
     match repo.create_drive_pair(&body.name, &body.primary_path, &body.secondary_path) {
         Ok(pair) => {
-            let _ = event_logger::log_drive_created(&repo, pair.id, &pair.name, &pair.primary_path, &pair.secondary_path);
+            let _ = event_logger::log_drive_created(
+                &repo,
+                pair.id,
+                &pair.name,
+                &pair.primary_path,
+                &pair.secondary_path,
+            );
             HttpResponse::Created().json(pair)
         }
         Err(e) => HttpResponse::InternalServerError()

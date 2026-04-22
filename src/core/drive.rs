@@ -27,6 +27,7 @@ impl DriveRole {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> DriveRole {
         match value {
             "secondary" => DriveRole::Secondary,
@@ -53,6 +54,7 @@ impl DriveState {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> DriveState {
         match value {
             "quiescing" => DriveState::Quiescing,

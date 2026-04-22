@@ -10,7 +10,12 @@ import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PageIntro } from '@/components/shared/PageIntro'
 import { useSyncStore } from '@/stores/sync-store'
 import { formatDate } from '@/lib/format'
-import type { ResolveQueueItemRequest, SyncQueueItem, SyncResolution, SyncStatus } from '@/types/sync'
+import type {
+  ResolveQueueItemRequest,
+  SyncQueueItem,
+  SyncResolution,
+  SyncStatus,
+} from '@/types/sync'
 
 type QueueFilter = SyncStatus | 'all'
 
@@ -175,8 +180,7 @@ export function SyncQueuePage() {
     }
   }, [])
 
-  const visibleItems =
-    filter === 'all' ? items : items.filter((item) => item.status === filter)
+  const visibleItems = filter === 'all' ? items : items.filter((item) => item.status === filter)
   const completedCount = items.filter((item) => item.status === 'completed').length
   const disableProcessQueue = hasDrivePairs === false
 

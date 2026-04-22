@@ -1,5 +1,10 @@
 import { apiClient } from './client'
-import type { TrackedFile, TrackedFileListResponse, TrackFileRequest, FilesQueryParams } from '@/types/file'
+import type {
+  TrackedFile,
+  TrackedFileListResponse,
+  TrackFileRequest,
+  FilesQueryParams,
+} from '@/types/file'
 
 export const filesApi = {
   list(params?: FilesQueryParams): Promise<TrackedFileListResponse> {
