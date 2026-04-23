@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Validate that the tag format is correct and matches Cargo.toml version.
+  # This is a cheap gate — no toolchain needed. If it fails, the build never starts.
+  # ---------------------------------------------------------------------------
+  validate-tag:
+    name: Validate Tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse and validate tag
+        id: parse
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "ERROR: Tag '${TAG}' does not match v{MAJOR}.{MINOR}.{PATCH}[-prerelease]" >&2
+            echo "Valid examples: v1.0.0  v1.0.0-alpha1  v1.0.0-rc1" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Parsed version: ${VERSION}"
+
+      - name: Check tag matches Cargo.toml version
+        run: |
+          TAG_VERSION="${{ steps.parse.outputs.version }}"
+          CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Tag version   : ${TAG_VERSION}"
+          echo "Cargo version : ${CARGO_VERSION}"
+          if [[ "${TAG_VERSION}" != "${CARGO_VERSION}" ]]; then
+            echo "" >&2
+            echo "ERROR: Tag version '${TAG_VERSION}' does not match Cargo.toml version '${CARGO_VERSION}'" >&2
+            echo "Update Cargo.toml version to '${TAG_VERSION}' before tagging, or retag as 'v${CARGO_VERSION}'." >&2
+            exit 1
+          fi
+          echo "Version match confirmed: ${TAG_VERSION}"
+
+  # ---------------------------------------------------------------------------
+  # Build release .deb and verify its version is correct.
+  # Uses --deb-version to produce a proper Ubuntu-style version:
+  #   Cargo.toml "1.0.0-alpha1" → Debian "1.0.0~alpha1-0ubuntu1~24.04.1"
+  #   Cargo.toml "1.0.0"        → Debian "1.0.0-0ubuntu1~24.04.1"
+  # ---------------------------------------------------------------------------
+  build-and-verify:
+    name: Build and Verify
+    needs: validate-tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install cargo-deb
+        run: |
+          if ! cargo deb --version &>/dev/null; then
+            cargo install cargo-deb
+          fi
+
+      - name: Compute Debian release version
+        run: |
+          CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          DEB_UPSTREAM=$(echo "${CARGO_VERSION}" | sed 's/-/~/')
+          RELEASE_DEB_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1"
+          echo "RELEASE_DEB_VERSION=${RELEASE_DEB_VERSION}" >> "$GITHUB_ENV"
+          echo "Debian version: ${RELEASE_DEB_VERSION}"
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: cargo deb
+        run: cargo deb --deb-version "${RELEASE_DEB_VERSION}"
+
+      - name: Run version consistency check
+        run: |
+          chmod +x scripts/check-version.sh
+          DEB_PATH=$(ls target/debian/bitprotector_*.deb | head -1)
+          ./scripts/check-version.sh --deb "${DEB_PATH}" --binary target/release/bitprotector
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitprotector-deb-release
+          path: target/debian/bitprotector_*.deb
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Create GitHub Release and attach the .deb.
+  # Only this job needs contents:write.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish Release
+    needs: [validate-tag, build-and-verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bitprotector-deb-release
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.validate-tag.outputs.version }}"
+          DEB_FILE=$(ls dist/bitprotector_*.deb | head -1)
+          gh release create "v${VERSION}" \
+            --title "bitprotector v${VERSION}" \
+            --generate-notes \
+            "${DEB_FILE}"

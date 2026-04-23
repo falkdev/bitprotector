@@ -92,7 +92,17 @@ run_build_artifacts() {
     if ! cargo deb --version &>/dev/null; then
         cargo install cargo-deb
     fi
-    cargo deb
+    # Compute dev version matching CI logic.
+    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+    if [[ -n "${LAST_TAG}" ]]; then
+        CARGO_BASE="${LAST_TAG#v}"
+    else
+        CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+    fi
+    DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
+    SHORT_SHA=$(git rev-parse --short HEAD)
+    DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+    cargo deb --deb-version "${DEV_VERSION}"
     echo "build-artifacts: OK"
     echo "  .deb: $(ls -1 target/debian/bitprotector_*.deb | head -1)"
 }

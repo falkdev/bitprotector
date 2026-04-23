@@ -147,6 +147,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for git describe to find the last tag
 
       - uses: ./.github/actions/setup-rust
 
@@ -166,8 +168,24 @@ jobs:
             cargo install cargo-deb
           fi
 
+      - name: Compute dev version
+        run: |
+          # Use last tag as base; fall back to Cargo.toml version if no tags exist.
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [[ -n "${LAST_TAG}" ]]; then
+            CARGO_BASE="${LAST_TAG#v}"
+          else
+            CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          # Convert '-' to '~' for Debian pre-release ordering, append Ubuntu revision + git SHA.
+          DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
+          echo "Dev version: ${DEV_VERSION}"
+
       - name: Build .deb
-        run: cargo deb
+        run: cargo deb --deb-version "${DEV_VERSION}"
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
