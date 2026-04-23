@@ -33,7 +33,10 @@ export function ConfirmDialog({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogPortal>
-        <AlertDialogOverlay className="fixed inset-0 z-[70] bg-black/40" data-testid="modal-overlay" />
+        <AlertDialogOverlay
+          className="fixed inset-0 z-[70] bg-black/40"
+          data-testid="modal-overlay"
+        />
         <AlertDialogContent className="fixed left-1/2 top-1/2 z-[71] w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-6 shadow-lg">
           <div>
             <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
@@ -50,7 +53,9 @@ export function ConfirmDialog({
             <AlertDialogAction
               onClick={onConfirm}
               className={`rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${
-                destructive ? 'bg-destructive hover:bg-destructive/90' : 'bg-primary hover:bg-primary/90'
+                destructive
+                  ? 'bg-destructive hover:bg-destructive/90'
+                  : 'bg-primary hover:bg-primary/90'
               }`}
             >
               {confirmLabel}

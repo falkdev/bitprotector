@@ -86,9 +86,7 @@ function formatEventType(eventType: EventType) {
 
 function StructuredDetails({ details }: { details: string | null }) {
   if (!details) {
-    return (
-      <p className="mt-3 text-xs text-muted-foreground italic">No additional details</p>
-    )
+    return <p className="mt-3 text-xs text-muted-foreground italic">No additional details</p>
   }
 
   try {
@@ -109,9 +107,7 @@ function StructuredDetails({ details }: { details: string | null }) {
     // Not JSON — fall through to raw display
   }
 
-  return (
-    <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">{details}</pre>
-  )
+  return <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">{details}</pre>
 }
 
 export function LogsPage() {
@@ -141,8 +137,7 @@ export function LogsPage() {
       const params: LogsQueryParams = {
         page,
         per_page: PER_PAGE,
-        event_type:
-          appliedFilters.event_type === 'all' ? undefined : appliedFilters.event_type,
+        event_type: appliedFilters.event_type === 'all' ? undefined : appliedFilters.event_type,
         file_id: appliedFilters.file_id ? Number(appliedFilters.file_id) : undefined,
         from: toIsoDate(appliedFilters.from),
         to: toIsoDate(appliedFilters.to),
@@ -381,7 +376,9 @@ export function LogsPage() {
                 <span className="font-medium text-muted-foreground">File:</span>{' '}
                 <span className="font-mono text-xs">{expandedEntry.file_path}</span>
                 {expandedEntry.tracked_file_id && (
-                  <span className="ml-1 text-muted-foreground">(#{expandedEntry.tracked_file_id})</span>
+                  <span className="ml-1 text-muted-foreground">
+                    (#{expandedEntry.tracked_file_id})
+                  </span>
                 )}
               </p>
             )}

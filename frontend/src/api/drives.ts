@@ -41,7 +41,12 @@ export const drivesApi = {
     return apiClient.post<DrivePair>(`/drives/${id}/replacement/confirm`, data).then((r) => r.data)
   },
 
-  assignReplacement(id: number, data: AssignReplacementRequest): Promise<AssignReplacementResponse> {
-    return apiClient.post<AssignReplacementResponse>(`/drives/${id}/replacement/assign`, data).then((r) => r.data)
+  assignReplacement(
+    id: number,
+    data: AssignReplacementRequest
+  ): Promise<AssignReplacementResponse> {
+    return apiClient
+      .post<AssignReplacementResponse>(`/drives/${id}/replacement/assign`, data)
+      .then((r) => r.data)
   },
 }

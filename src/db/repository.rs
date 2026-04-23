@@ -424,6 +424,7 @@ impl Repository {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_tracked_file_with_source(
         &self,
         drive_pair_id: i64,
@@ -856,6 +857,7 @@ impl Repository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn append_integrity_run_result(
         &self,
         run_id: i64,
@@ -1086,6 +1088,7 @@ impl Repository {
         Ok(files)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn list_tracking_items(
         &self,
         drive_pair_id: Option<i64>,
@@ -2205,7 +2208,9 @@ mod tests {
 
         let pending = repo.create_sync_queue_item(file2.id, "verify").unwrap();
 
-        let failed = repo.create_sync_queue_item(file3.id, "restore_master").unwrap();
+        let failed = repo
+            .create_sync_queue_item(file3.id, "restore_master")
+            .unwrap();
         repo.update_sync_queue_status(failed.id, "failed", Some("forced failure"))
             .unwrap();
 

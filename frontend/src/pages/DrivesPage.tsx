@@ -10,11 +10,7 @@ import { PageIntro } from '@/components/shared/PageIntro'
 import { DriveCard } from '@/components/drives/DriveCard'
 import { DriveForm } from '@/components/drives/DriveForm'
 import { ReplacementWorkflow } from '@/components/drives/ReplacementWorkflow'
-import type {
-  DrivePair,
-  CreateDrivePairRequest,
-  UpdateDrivePairRequest,
-} from '@/types/drive'
+import type { DrivePair, CreateDrivePairRequest, UpdateDrivePairRequest } from '@/types/drive'
 
 export function DrivesPage() {
   const { drives, loading, fetch, create, update, remove, refresh } = useDrivesStore()

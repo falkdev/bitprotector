@@ -1,9 +1,6 @@
 import { apiClient } from './client'
 import { isAxiosError } from 'axios'
-import type {
-  SetVirtualPathRequest,
-  VirtualPathTreeResponse,
-} from '@/types/virtual-path'
+import type { SetVirtualPathRequest, VirtualPathTreeResponse } from '@/types/virtual-path'
 
 export const virtualPathsApi = {
   set(fileId: number, data: SetVirtualPathRequest): Promise<string> {

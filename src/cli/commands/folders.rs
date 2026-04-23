@@ -65,8 +65,8 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 println!("No tracked folders.");
             } else {
                 println!(
-                    "{:<6} {:<8} {:<40} {}",
-                    "ID", "Drive", "Folder Path", "Virtual Path"
+                    "{:<6} {:<8} {:<40} Virtual Path",
+                    "ID", "Drive", "Folder Path"
                 );
                 println!("{}", "-".repeat(96));
                 for f in folders {
@@ -95,7 +95,8 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             let folder = repo.get_tracked_folder(id)?;
             crate::core::virtual_path::remove_folder_virtual_path(repo, id)?;
             repo.delete_tracked_folder(id)?;
-            let full_path = repo.get_drive_pair(folder.drive_pair_id)
+            let full_path = repo
+                .get_drive_pair(folder.drive_pair_id)
                 .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
                 .unwrap_or_else(|_| folder.folder_path.clone());
             let _ = event_logger::log_folder_untracked(repo, id, &full_path);

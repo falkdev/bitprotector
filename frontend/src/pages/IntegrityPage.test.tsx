@@ -52,7 +52,9 @@ describe('IntegrityPage', () => {
     expect(screen.getByTestId('page-subtitle')).toHaveTextContent(
       'Run integrity checks, monitor progress, and review files that need attention.'
     )
-    expect(await screen.findByTestId('integrity-last-check')).toHaveTextContent('Last integrity check:')
+    expect(await screen.findByTestId('integrity-last-check')).toHaveTextContent(
+      'Last integrity check:'
+    )
     expect(screen.getByTestId('integrity-last-check')).toHaveTextContent(formatDate(lastCheck))
     expect(await screen.findByTestId('integrity-row-11')).toHaveTextContent('docs/broken.txt')
   })
@@ -100,7 +102,9 @@ describe('IntegrityPage', () => {
 
     server.use(
       api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
-      api.get('/integrity/runs/active', () => HttpResponse.json({ run: activeRun?.status === 'running' ? activeRun : null })),
+      api.get('/integrity/runs/active', () =>
+        HttpResponse.json({ run: activeRun?.status === 'running' ? activeRun : null })
+      ),
       api.get('/integrity/runs/latest', () =>
         HttpResponse.json(
           makeIntegrityRunResultsResponse({

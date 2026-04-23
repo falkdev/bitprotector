@@ -24,16 +24,11 @@ export function FileRow({
 
   return (
     <tr
-      className={cn(
-        'cursor-pointer hover:bg-gray-50',
-        isSelected && 'bg-blue-50'
-      )}
+      className={cn('cursor-pointer hover:bg-gray-50', isSelected && 'bg-blue-50')}
       onClick={onClick}
       data-testid={`file-row-${file.id}`}
     >
-      <td className="px-4 py-2 text-sm font-medium text-gray-900 truncate max-w-xs">
-        {filename}
-      </td>
+      <td className="px-4 py-2 text-sm font-medium text-gray-900 truncate max-w-xs">{filename}</td>
       <td className="px-4 py-2 text-sm text-gray-600 font-mono truncate max-w-xs hidden md:table-cell">
         {file.virtual_path ?? <span className="text-gray-400 italic">none</span>}
       </td>
@@ -46,7 +41,9 @@ export function FileRow({
       <td className="px-4 py-2">
         <div className="flex items-center gap-1 justify-end">
           {file.is_mirrored && (
-            <span className="px-1.5 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Mirrored</span>
+            <span className="px-1.5 py-0.5 text-xs rounded-full bg-green-100 text-green-700">
+              Mirrored
+            </span>
           )}
         </div>
       </td>

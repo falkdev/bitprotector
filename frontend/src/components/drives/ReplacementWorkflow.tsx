@@ -65,7 +65,9 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
             <div className="grid grid-cols-3 gap-2">
               <button
                 disabled={loading}
-                onClick={() => run(() => drivesApi.markReplacement(drive.id, { role }), 'Marked for replacement')}
+                onClick={() =>
+                  run(() => drivesApi.markReplacement(drive.id, { role }), 'Marked for replacement')
+                }
                 className="rounded-md border border-yellow-300 bg-yellow-50 px-2 py-2 text-xs font-medium text-yellow-700 hover:bg-yellow-100 transition-colors disabled:opacity-60"
                 data-testid="mark-replacement-button"
               >
@@ -73,7 +75,9 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
               </button>
               <button
                 disabled={loading}
-                onClick={() => run(() => drivesApi.confirmFailure(drive.id, { role }), 'Failure confirmed')}
+                onClick={() =>
+                  run(() => drivesApi.confirmFailure(drive.id, { role }), 'Failure confirmed')
+                }
                 className="rounded-md border border-red-300 bg-red-50 px-2 py-2 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors disabled:opacity-60"
                 data-testid="confirm-failure-button"
               >
@@ -81,7 +85,12 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
               </button>
               <button
                 disabled={loading}
-                onClick={() => run(() => drivesApi.cancelReplacement(drive.id, { role }), 'Replacement cancelled')}
+                onClick={() =>
+                  run(
+                    () => drivesApi.cancelReplacement(drive.id, { role }),
+                    'Replacement cancelled'
+                  )
+                }
                 className="rounded-md border border-border px-2 py-2 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-60"
                 data-testid="cancel-replacement-button"
               >
@@ -120,7 +129,12 @@ export function ReplacementWorkflow({ drive, onClose, onUpdate }: ReplacementWor
                 disabled={loading || !newPath.trim()}
                 onClick={() =>
                   run(
-                    () => drivesApi.assignReplacement(drive.id, { role, new_path: newPath, skip_validation: skipValidation }),
+                    () =>
+                      drivesApi.assignReplacement(drive.id, {
+                        role,
+                        new_path: newPath,
+                        skip_validation: skipValidation,
+                      }),
                     'Replacement drive assigned'
                   )
                 }

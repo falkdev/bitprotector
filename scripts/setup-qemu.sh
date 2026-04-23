@@ -1,18 +1,29 @@
 #!/bin/bash
 # scripts/setup-qemu.sh
-# Install prerequisites for qemu_manual.sh, tests/installation/qemu_test.sh,
-# tests/installation/qemu_failover_test.sh, and
-# tests/installation/qemu_uninstall_test.sh.
+# Install prerequisites for qemu_manual.sh and the QEMU test suites, then
+# download the requested Ubuntu cloud image(s).
 #
 # Usage:
-#   ./scripts/setup-qemu.sh
+#   ./scripts/setup-qemu.sh [GUEST]
+#
+# GUEST may be:
+#   24.04   — download Ubuntu 24.04 Noble only
+#   26.04   — download Ubuntu 26.04 Plucky only
+#   all     — download both (default)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-UBUNTU_IMAGE="${UBUNTU_IMAGE:-${HOME}/images/noble-server-cloudimg-amd64.img}"
-UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+GUEST="${1:-all}"
+IMAGES_DIR="${HOME}/images"
+
+NOBLE_IMAGE="${IMAGES_DIR}/noble-server-cloudimg-amd64.img"
+NOBLE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+# 26.04 LTS codename is "Plucky Puffin". Image URL follows the standard pattern.
+PLUCKY_IMAGE="${IMAGES_DIR}/plucky-server-cloudimg-amd64.img"
+PLUCKY_URL="https://cloud-images.ubuntu.com/plucky/current/plucky-server-cloudimg-amd64.img"
 
 echo "=== Installing system packages ==="
 
@@ -47,18 +58,39 @@ else
     cargo install cargo-deb
 fi
 
-echo ""
-echo "=== Ubuntu 24 cloud image ==="
+download_image() {
+    local dest="$1"
+    local url="$2"
+    if [[ -f "${dest}" ]]; then
+        echo "Already present: ${dest}"
+    else
+        echo "Downloading $(basename "${dest}") to ${dest}..."
+        mkdir -p "$(dirname "${dest}")"
+        wget --show-progress -O "${dest}.tmp" "${url}"
+        mv "${dest}.tmp" "${dest}"
+        echo "Download complete."
+    fi
+}
 
-if [[ -f "${UBUNTU_IMAGE}" ]]; then
-    echo "Already present: ${UBUNTU_IMAGE}"
-else
-    echo "Downloading Ubuntu 24 (Noble) cloud image to ${UBUNTU_IMAGE}..."
-    mkdir -p "$(dirname "${UBUNTU_IMAGE}")"
-    wget --show-progress -O "${UBUNTU_IMAGE}.tmp" "${UBUNTU_IMAGE_URL}"
-    mv "${UBUNTU_IMAGE}.tmp" "${UBUNTU_IMAGE}"
-    echo "Download complete."
-fi
+echo ""
+echo "=== Ubuntu cloud image(s) ==="
+
+case "${GUEST}" in
+    24.04)
+        download_image "${NOBLE_IMAGE}" "${NOBLE_URL}"
+        ;;
+    26.04)
+        download_image "${PLUCKY_IMAGE}" "${PLUCKY_URL}"
+        ;;
+    all)
+        download_image "${NOBLE_IMAGE}" "${NOBLE_URL}"
+        download_image "${PLUCKY_IMAGE}" "${PLUCKY_URL}"
+        ;;
+    *)
+        echo "ERROR: unknown GUEST '${GUEST}'. Use 24.04, 26.04, or all." >&2
+        exit 1
+        ;;
+esac
 
 echo ""
 echo "=== SSH key ==="
@@ -92,10 +124,14 @@ echo "    ENABLE_QMP=1 ./scripts/qemu_manual.sh"
 echo ""
 echo "  Installation smoke test:"
 echo "    ./tests/installation/qemu_test.sh"
+echo "    GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh"
 echo ""
 echo "  Failover / replacement QEMU test:"
 echo "    ./tests/installation/qemu_failover_test.sh"
 echo ""
 echo "  Full uninstall (purge) QEMU test:"
 echo "    ./tests/installation/qemu_uninstall_test.sh"
+echo ""
+echo "  Run all local tests natively:"
+echo "    ./scripts/run-tests.sh smoke"
 echo "========================================="

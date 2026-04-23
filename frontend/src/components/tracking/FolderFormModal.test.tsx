@@ -25,13 +25,7 @@ describe('FolderFormModal', () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
 
-    render(
-      <FolderFormModal
-        drives={[drive]}
-        onClose={() => {}}
-        onSave={onSave}
-      />
-    )
+    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={onSave} />)
 
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(

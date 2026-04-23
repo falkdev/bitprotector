@@ -25,14 +25,7 @@ describe('TrackFileModal', () => {
     const user = userEvent.setup()
     const onTrack = vi.fn().mockResolvedValue(undefined)
 
-    render(
-      <TrackFileModal
-        open
-        onClose={() => {}}
-        onTrack={onTrack}
-        drives={[drive]}
-      />
-    )
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
 
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
@@ -51,14 +44,7 @@ describe('TrackFileModal', () => {
     const user = userEvent.setup()
     const onTrack = vi.fn().mockResolvedValue(undefined)
 
-    render(
-      <TrackFileModal
-        open
-        onClose={() => {}}
-        onTrack={onTrack}
-        drives={[drive]}
-      />
-    )
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
 
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(

@@ -89,7 +89,9 @@ export function FolderFormModal({
                   </option>
                 ))}
               </select>
-              {errors.drive_pair_id ? <p className="mt-1 text-xs text-destructive">{errors.drive_pair_id.message}</p> : null}
+              {errors.drive_pair_id ? (
+                <p className="mt-1 text-xs text-destructive">{errors.drive_pair_id.message}</p>
+              ) : null}
             </div>
             <div>
               <label htmlFor="folder-path" className="mb-1 block text-sm font-medium">
@@ -116,12 +118,17 @@ export function FolderFormModal({
                   ? `Primary root: ${primaryRoot}`
                   : 'Select a drive pair before browsing or submitting.'}
               </p>
-              {selectedDrive && rawPath.trim() && !pathResolution.error && pathResolution.relativePath ? (
+              {selectedDrive &&
+              rawPath.trim() &&
+              !pathResolution.error &&
+              pathResolution.relativePath ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
                 </p>
               ) : null}
-              {errors.folder_path ? <p className="mt-1 text-xs text-destructive">{errors.folder_path.message}</p> : null}
+              {errors.folder_path ? (
+                <p className="mt-1 text-xs text-destructive">{errors.folder_path.message}</p>
+              ) : null}
             </div>
             <div>
               <label htmlFor="folder-virtual-path" className="mb-1 block text-sm font-medium">
@@ -143,9 +150,12 @@ export function FolderFormModal({
                 </button>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                If set, BitProtector will create a symlink exactly at this path to the tracked folder.
+                If set, BitProtector will create a symlink exactly at this path to the tracked
+                folder.
               </p>
-              {errors.virtual_path ? <p className="mt-1 text-xs text-destructive">{errors.virtual_path.message}</p> : null}
+              {errors.virtual_path ? (
+                <p className="mt-1 text-xs text-destructive">{errors.virtual_path.message}</p>
+              ) : null}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button

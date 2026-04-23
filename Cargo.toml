@@ -1,6 +1,6 @@
 [package]
 name = "bitprotector"
-version = "0.1.0"
+version = "1.0.0-alpha2"
 edition = "2021"
 authors = ["BitProtector Authors"]
 description = "Distributed File Mirror and Integrity Protection System"

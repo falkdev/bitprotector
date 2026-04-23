@@ -110,9 +110,12 @@ function toTrackedFile(item: TrackingItem): TrackedFile {
 
 function SourceBadge({ source }: { source: TrackingItem['source'] }) {
   const label = source === 'folder' ? 'Folder' : 'Direct'
-  const className = source === 'folder' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+  const className =
+    source === 'folder' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
 
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{label}</span>
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{label}</span>
+  )
 }
 
 function FolderStatusBadge({
@@ -128,12 +131,12 @@ function FolderStatusBadge({
     status === 'not_scanned'
       ? 'Not scanned'
       : status === 'mirrored'
-      ? 'Mirrored'
-      : status === 'tracked'
-        ? 'Tracked'
-        : status === 'partial'
-          ? 'Partial'
-          : 'Empty'
+        ? 'Mirrored'
+        : status === 'tracked'
+          ? 'Tracked'
+          : status === 'partial'
+            ? 'Partial'
+            : 'Empty'
   const ratio =
     status === 'empty' || status === 'not_scanned'
       ? ''
@@ -144,12 +147,12 @@ function FolderStatusBadge({
     status === 'not_scanned'
       ? 'bg-gray-100 text-gray-600'
       : status === 'mirrored'
-      ? 'bg-green-100 text-green-700'
-      : status === 'tracked'
-        ? 'bg-slate-100 text-slate-700'
-        : status === 'partial'
-          ? 'bg-amber-100 text-amber-700'
-          : 'bg-gray-100 text-gray-600'
+        ? 'bg-green-100 text-green-700'
+        : status === 'tracked'
+          ? 'bg-slate-100 text-slate-700'
+          : status === 'partial'
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-gray-100 text-gray-600'
 
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
@@ -235,7 +238,10 @@ function FolderVirtualPathModal({
           <h2 className="mb-1 text-lg font-semibold">Set Folder Virtual Path</h2>
           <p className="mb-4 truncate font-mono text-sm text-gray-500">{folder.folder_path}</p>
           <div className="space-y-3">
-            <label htmlFor="folder-virtual-path" className="mb-1 block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="folder-virtual-path"
+              className="mb-1 block text-sm font-medium text-gray-700"
+            >
               Virtual Path
             </label>
             <div className="flex gap-2">
@@ -407,7 +413,8 @@ export function TrackingWorkspacePage() {
   const [virtualPaneCollapsed, setVirtualPaneCollapsed] = useState(true)
   const [bulkMirroring, setBulkMirroring] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [postDeleteDetailAction, setPostDeleteDetailAction] = useState<DetailPostDeleteAction | null>(null)
+  const [postDeleteDetailAction, setPostDeleteDetailAction] =
+    useState<DetailPostDeleteAction | null>(null)
 
   const virtualPrefix = params.virtual_prefix ?? ''
   const hasDrivePairs = drives.length > 0
@@ -479,8 +486,10 @@ export function TrackingWorkspacePage() {
     () => items.filter((item) => selectedRowKeys.has(trackingRowKey(item))),
     [items, selectedRowKeys]
   )
-  const allVisibleSelected = items.length > 0 && items.every((item) => selectedRowKeys.has(trackingRowKey(item)))
-  const someVisibleSelected = !allVisibleSelected && items.some((item) => selectedRowKeys.has(trackingRowKey(item)))
+  const allVisibleSelected =
+    items.length > 0 && items.every((item) => selectedRowKeys.has(trackingRowKey(item)))
+  const someVisibleSelected =
+    !allVisibleSelected && items.some((item) => selectedRowKeys.has(trackingRowKey(item)))
 
   const toggleRowSelection = useCallback((item: TrackingItem, checked: boolean) => {
     const key = trackingRowKey(item)
@@ -495,20 +504,23 @@ export function TrackingWorkspacePage() {
     })
   }, [])
 
-  const toggleAllVisible = useCallback((checked: boolean) => {
-    setSelectedRowKeys((current) => {
-      const next = new Set(current)
-      for (const item of items) {
-        const key = trackingRowKey(item)
-        if (checked) {
-          next.add(key)
-        } else {
-          next.delete(key)
+  const toggleAllVisible = useCallback(
+    (checked: boolean) => {
+      setSelectedRowKeys((current) => {
+        const next = new Set(current)
+        for (const item of items) {
+          const key = trackingRowKey(item)
+          if (checked) {
+            next.add(key)
+          } else {
+            next.delete(key)
+          }
         }
-      }
-      return next
-    })
-  }, [items])
+        return next
+      })
+    },
+    [items]
+  )
 
   useEffect(() => {
     const visibleKeys = new Set(items.map((item) => trackingRowKey(item)))
@@ -591,60 +603,71 @@ export function TrackingWorkspacePage() {
     }
   }, [])
 
-  const performDelete = useCallback(async (targets: TrackingItem[]) => {
-    if (targets.length === 0) return
+  const performDelete = useCallback(
+    async (targets: TrackingItem[]) => {
+      if (targets.length === 0) return
 
-    setBulkDeleting(true)
-    const deleted: TrackingItem[] = []
-    let failedCount = 0
+      setBulkDeleting(true)
+      const deleted: TrackingItem[] = []
+      let failedCount = 0
 
-    for (const target of targets) {
-      try {
-        if (target.kind === 'file') {
-          await filesApi.delete(target.id)
+      for (const target of targets) {
+        try {
+          if (target.kind === 'file') {
+            await filesApi.delete(target.id)
+          } else {
+            await foldersApi.delete(target.id)
+          }
+          deleted.push(target)
+        } catch {
+          failedCount += 1
+        }
+      }
+
+      const deletedCount = deleted.length
+      if (deletedCount > 0) {
+        const deletedKeys = new Set(deleted.map((item) => trackingRowKey(item)))
+        setSelectedRowKeys((current) => {
+          const next = new Set(current)
+          for (const key of deletedKeys) {
+            next.delete(key)
+          }
+          return next
+        })
+
+        const deletedFileIds = new Set(
+          deleted.filter((item) => item.kind === 'file').map((item) => item.id)
+        )
+        if (selectedFile && deletedFileIds.has(selectedFile.id)) {
+          const nextFileId = nextFileAfterDeletion(items, selectedFile.id, deletedFileIds)
+          setPostDeleteDetailAction(
+            nextFileId ? { type: 'open', fileId: nextFileId } : { type: 'close' }
+          )
+        }
+
+        if (targets.length === 1) {
+          toast.success(
+            targets[0].kind === 'file' ? 'File removed from tracking' : 'Folder removed'
+          )
         } else {
-          await foldersApi.delete(target.id)
+          toast.success(`Removed ${deletedCount} item(s) from tracking`)
         }
-        deleted.push(target)
-      } catch {
-        failedCount += 1
-      }
-    }
-
-    const deletedCount = deleted.length
-    if (deletedCount > 0) {
-      const deletedKeys = new Set(deleted.map((item) => trackingRowKey(item)))
-      setSelectedRowKeys((current) => {
-        const next = new Set(current)
-        for (const key of deletedKeys) {
-          next.delete(key)
-        }
-        return next
-      })
-
-      const deletedFileIds = new Set(deleted.filter((item) => item.kind === 'file').map((item) => item.id))
-      if (selectedFile && deletedFileIds.has(selectedFile.id)) {
-        const nextFileId = nextFileAfterDeletion(items, selectedFile.id, deletedFileIds)
-        setPostDeleteDetailAction(nextFileId ? { type: 'open', fileId: nextFileId } : { type: 'close' })
+        setTreeRefreshKey((current) => current + 1)
       }
 
-      if (targets.length === 1) {
-        toast.success(targets[0].kind === 'file' ? 'File removed from tracking' : 'Folder removed')
-      } else {
-        toast.success(`Removed ${deletedCount} item(s) from tracking`)
+      if (failedCount > 0) {
+        toast.error(
+          targets.length === 1 ? 'Delete failed' : `Failed to remove ${failedCount} item(s)`
+        )
       }
-      setTreeRefreshKey((current) => current + 1)
-    }
 
-    if (failedCount > 0) {
-      toast.error(targets.length === 1 ? 'Delete failed' : `Failed to remove ${failedCount} item(s)`)
-    }
-
-    setDeleteTarget(null)
-    setConfirmBulkDeleteOpen(false)
-    await load(params)
-    setBulkDeleting(false)
-  }, [items, load, params, selectedFile])
+      setDeleteTarget(null)
+      setConfirmBulkDeleteOpen(false)
+      await load(params)
+      setBulkDeleting(false)
+    },
+    [items, load, params, selectedFile]
+  )
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -725,377 +748,396 @@ export function TrackingWorkspacePage() {
       />
 
       <div className="flex min-h-0 flex-1 gap-0">
-      <aside
-        className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-in-out`}
-      >
-        <div className={`${virtualPaneCollapsed ? 'flex items-center justify-center border-b px-1 py-2.5' : 'flex items-center justify-between border-b p-3'}`}>
-          {!virtualPaneCollapsed ? (
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Virtual paths</h2>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setVirtualPaneCollapsed((current) => !current)}
-            className="flex p-1 text-muted-foreground transition-colors hover:text-accent-foreground"
-            data-testid="toggle-virtual-pane"
-            title={virtualPaneCollapsed ? 'Expand virtual paths pane' : 'Collapse virtual paths pane'}
+        <aside
+          className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-in-out`}
+        >
+          <div
+            className={`${virtualPaneCollapsed ? 'flex items-center justify-center border-b px-1 py-2.5' : 'flex items-center justify-between border-b p-3'}`}
           >
-            {virtualPaneCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </button>
-        </div>
-        {virtualPaneCollapsed ? (
-          <div className="flex h-[calc(100%-44px)] items-center justify-center">
-            <span className="select-none text-sm font-semibold uppercase tracking-[0.14em] text-gray-400 [writing-mode:vertical-lr]">
-              Virtual Paths
-            </span>
-          </div>
-        ) : (
-          <VirtualPathTree
-            selected={virtualPrefix}
-            onSelect={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
-            refreshKey={treeRefreshKey}
-          />
-        )}
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b bg-white px-4 py-3">
-          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-            <BreadcrumbNav
-              path={virtualPrefix}
-              onNavigate={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => {
-                  if (!hasDrivePairs) {
-                    return
-                  }
-                  setShowFolderModal(true)
-                }}
-                disabled={!hasDrivePairs}
-                data-testid="add-folder-button"
-              >
-                <FolderPlus className="h-4 w-4" /> Add Folder
-              </button>
-              <button
-                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => {
-                  if (!hasDrivePairs) {
-                    return
-                  }
-                  setShowTrackModal(true)
-                }}
-                disabled={!hasDrivePairs}
-                data-testid="track-file-btn"
-              >
-                <Plus className="h-4 w-4" /> Track File
-              </button>
-            </div>
-          </div>
-          {!hasDrivePairs ? (
-            <p className="mb-3 text-xs text-muted-foreground" data-testid="tracking-no-drives-hint">
-              Add a drive pair first to track files or folders.
-            </p>
-          ) : null}
-
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
-            <input
-              value={params.q ?? ''}
-              onChange={(event) => updateParams({ q: event.target.value || undefined })}
-              placeholder="Search by path"
-              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-            <select
-              value={params.drive_id ?? ''}
-              onChange={(event) =>
-                updateParams({
-                  drive_id: event.target.value ? Number(event.target.value) : undefined,
-                })
+            {!virtualPaneCollapsed ? (
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Virtual paths
+              </h2>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setVirtualPaneCollapsed((current) => !current)}
+              className="flex p-1 text-muted-foreground transition-colors hover:text-accent-foreground"
+              data-testid="toggle-virtual-pane"
+              title={
+                virtualPaneCollapsed ? 'Expand virtual paths pane' : 'Collapse virtual paths pane'
               }
-              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             >
-              <option value="">All drives</option>
-              {drives.map((drive) => (
-                <option key={drive.id} value={drive.id}>
-                  {drive.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={params.item_kind ?? 'all'}
-              onChange={(event) =>
-                updateParams({ item_kind: event.target.value as TrackingListParams['item_kind'] })
-              }
-              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="all">All items</option>
-              <option value="file">Files</option>
-              <option value="folder">Folders</option>
-            </select>
-            <select
-              value={params.source ?? 'all'}
-              onChange={(event) =>
-                updateParams({ source: event.target.value as TrackingListParams['source'] })
-              }
-              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="all">All sources</option>
-              <option value="direct">Direct</option>
-              <option value="folder">Folder</option>
-            </select>
-            <select
-              value={params.has_virtual_path == null ? 'all' : params.has_virtual_path ? 'yes' : 'no'}
-              onChange={(event) => {
-                const value = event.target.value
-                updateParams({
-                  has_virtual_path: value === 'all' ? undefined : value === 'yes',
-                })
-              }}
-              className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="all">With + Without Virtual Path</option>
-              <option value="yes">With Virtual Path</option>
-              <option value="no">Without Virtual Path</option>
-            </select>
+              {virtualPaneCollapsed ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
           </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-4">
-          {loading && !response ? (
-            <div className="flex items-center justify-center py-16">
-              <LoadingSpinner />
+          {virtualPaneCollapsed ? (
+            <div className="flex h-[calc(100%-44px)] items-center justify-center">
+              <span className="select-none text-sm font-semibold uppercase tracking-[0.14em] text-gray-400 [writing-mode:vertical-lr]">
+                Virtual Paths
+              </span>
             </div>
           ) : (
-            <div className="space-y-3">
-              <DataTable
-                tableTestId="tracking-table"
-                columns={[
-                  {
-                    key: 'select',
-                    header: (
-                      <SelectAllCheckbox
-                        checked={allVisibleSelected}
-                        indeterminate={someVisibleSelected}
-                        disabled={items.length === 0}
-                        onChange={(checked) => toggleAllVisible(checked)}
-                      />
-                    ),
-                    className: 'w-10',
-                    cell: (item) => (
-                      <input
-                        type="checkbox"
-                        checked={selectedRowKeys.has(trackingRowKey(item))}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => toggleRowSelection(item, event.target.checked)}
-                        aria-label={`Select ${item.kind} ${item.path}`}
-                        data-testid={`select-row-${trackingRowKey(item)}`}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    ),
-                  },
-                  {
-                    key: 'kind',
-                    header: 'Kind',
-                    cell: (item) =>
-                      item.kind === 'file' ? (
-                        <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                          File
-                        </span>
-                      ) : (
-                        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                          Folder
-                        </span>
-                      ),
-                  },
-                  {
-                    key: 'path',
-                    header: 'Path',
-                    cell: (item) => <span className="font-mono text-xs">{item.path}</span>,
-                  },
-                  {
-                    key: 'drive',
-                    header: 'Drive Pair',
-                    cell: (item) => driveName(item.drive_pair_id),
-                  },
-                  {
-                    key: 'virtual_path',
-                    header: 'Virtual Path',
-                    cell: (item) =>
-                      item.virtual_path ? (
-                        <span className="font-mono text-xs">{item.virtual_path}</span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      ),
-                  },
-                  {
-                    key: 'source',
-                    header: 'Source',
-                    cell: (item) => <SourceBadge source={item.source} />,
-                  },
-                  {
-                    key: 'status',
-                    header: 'Status',
-                    cell: (item) => {
-                      if (item.kind === 'file') {
-                        return item.is_mirrored ? (
-                          <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
-                            Mirrored
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
-                            Tracked
-                          </span>
-                        )
-                      }
-
-                      const status = item.folder_status ?? 'not_scanned'
-                      const total = item.folder_total_files ?? 0
-                      const mirrored = item.folder_mirrored_files ?? 0
-                      return <FolderStatusBadge status={status} total={total} mirrored={mirrored} />
-                    },
-                  },
-                  {
-                    key: 'created',
-                    header: 'Created',
-                    cell: (item) => formatDate(item.created_at),
-                  },
-                  {
-                    key: 'actions',
-                    header: '',
-                    cell: (item) =>
-                      item.kind === 'file' ? (
-                        <FileActions
-                          file={toTrackedFile(item)}
-                          onMirror={handleMirror}
-                          onDelete={(file) => setDeleteTarget({ ...item, id: file.id })}
-                          onSetVirtualPath={(file) => setFilePathModal({ ...toTrackedFile(item), id: file.id })}
-                        />
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              const folder = folderItems.find((entry) => entry.id === item.id)
-                              if (folder) setFolderPathModal(folder)
-                            }}
-                            className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
-                          >
-                            Set Path
-                          </button>
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              const folder = folderItems.find((entry) => entry.id === item.id)
-                              if (!folder) return
-                              const status = item.folder_status ?? 'not_scanned'
-                              if (status === 'tracked' || status === 'partial') {
-                                void handleMirrorFolder(folder)
-                                return
-                              }
-                              void handleScanFolder(folder)
-                            }}
-                            className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
-                            data-testid={`folder-action-${item.id}`}
-                          >
-                            {item.folder_status === 'tracked' || item.folder_status === 'partial'
-                              ? 'Mirror'
-                              : 'Scan'}
-                          </button>
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setDeleteTarget(item)
-                            }}
-                            className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                            data-testid={`delete-folder-${item.id}`}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      ),
-                  },
-                ]}
-                data={items}
-                rowKey={(item) => trackingRowKey(item)}
-                rowTestId={(item) => `${item.kind}-row-${item.id}`}
-                onRowClick={(item) => {
-                  if (item.kind === 'file') {
-                    void openFileDetails(item)
-                  }
-                }}
-                selectedRowKey={selectedFile ? `file-${selectedFile.id}` : null}
-                selectedRowKeys={selectedRowKeys}
-                emptyState={
-                  <EmptyState
-                    title="No tracked items"
-                    description="Track files or add folders to start managing content here."
-                  />
-                }
-              />
-
-              {response ? (
-                <Pagination
-                  page={response.page}
-                  perPage={response.per_page}
-                  total={response.total}
-                  onPageChange={(page) => setParams((current) => ({ ...current, page }))}
-                />
-              ) : null}
-            </div>
+            <VirtualPathTree
+              selected={virtualPrefix}
+              onSelect={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
+              refreshKey={treeRefreshKey}
+            />
           )}
-        </div>
-        {selectedItems.length > 0 ? (
-          <div
-            className="border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur"
-            data-testid="tracking-bulk-actions"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-gray-600" data-testid="selected-count">
-                {selectedItems.length} selected
-              </p>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="border-b bg-white px-4 py-3">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <BreadcrumbNav
+                path={virtualPrefix}
+                onNavigate={(path) => updateParams({ virtual_prefix: path || undefined, page: 1 })}
+              />
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  type="button"
-                  onClick={() => setSelectedRowKeys(new Set())}
-                  className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-                  data-testid="bulk-deselect"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => {
+                    if (!hasDrivePairs) {
+                      return
+                    }
+                    setShowFolderModal(true)
+                  }}
+                  disabled={!hasDrivePairs}
+                  data-testid="add-folder-button"
                 >
-                  Deselect all
+                  <FolderPlus className="h-4 w-4" /> Add Folder
                 </button>
                 <button
-                  type="button"
-                  onClick={() => void handleMirrorSelected()}
-                  disabled={bulkMirroring || bulkDeleting}
-                  className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  data-testid="bulk-mirror"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => {
+                    if (!hasDrivePairs) {
+                      return
+                    }
+                    setShowTrackModal(true)
+                  }}
+                  disabled={!hasDrivePairs}
+                  data-testid="track-file-btn"
                 >
-                  {bulkMirroring ? 'Mirroring...' : 'Mirror selected'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmBulkDeleteOpen(true)}
-                  disabled={bulkDeleting || bulkMirroring}
-                  className="shrink-0 whitespace-nowrap rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  data-testid="bulk-delete"
-                >
-                  Delete selected
+                  <Plus className="h-4 w-4" /> Track File
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
-      </div>
+            {!hasDrivePairs ? (
+              <p
+                className="mb-3 text-xs text-muted-foreground"
+                data-testid="tracking-no-drives-hint"
+              >
+                Add a drive pair first to track files or folders.
+              </p>
+            ) : null}
 
-      {selectedFile ? (
-        <aside className="w-80 shrink-0 overflow-auto border-l border-gray-200 bg-white">
-          <FileDetails
-            file={selectedFile}
-            drivePairName={driveName(selectedFile.drive_pair_id)}
-            onClose={() => setSelectedFile(null)}
-          />
-        </aside>
-      ) : null}
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
+              <input
+                value={params.q ?? ''}
+                onChange={(event) => updateParams({ q: event.target.value || undefined })}
+                placeholder="Search by path"
+                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+              <select
+                value={params.drive_id ?? ''}
+                onChange={(event) =>
+                  updateParams({
+                    drive_id: event.target.value ? Number(event.target.value) : undefined,
+                  })
+                }
+                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="">All drives</option>
+                {drives.map((drive) => (
+                  <option key={drive.id} value={drive.id}>
+                    {drive.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={params.item_kind ?? 'all'}
+                onChange={(event) =>
+                  updateParams({ item_kind: event.target.value as TrackingListParams['item_kind'] })
+                }
+                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="all">All items</option>
+                <option value="file">Files</option>
+                <option value="folder">Folders</option>
+              </select>
+              <select
+                value={params.source ?? 'all'}
+                onChange={(event) =>
+                  updateParams({ source: event.target.value as TrackingListParams['source'] })
+                }
+                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="all">All sources</option>
+                <option value="direct">Direct</option>
+                <option value="folder">Folder</option>
+              </select>
+              <select
+                value={
+                  params.has_virtual_path == null ? 'all' : params.has_virtual_path ? 'yes' : 'no'
+                }
+                onChange={(event) => {
+                  const value = event.target.value
+                  updateParams({
+                    has_virtual_path: value === 'all' ? undefined : value === 'yes',
+                  })
+                }}
+                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="all">With + Without Virtual Path</option>
+                <option value="yes">With Virtual Path</option>
+                <option value="no">Without Virtual Path</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto p-4">
+            {loading && !response ? (
+              <div className="flex items-center justify-center py-16">
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <DataTable
+                  tableTestId="tracking-table"
+                  columns={[
+                    {
+                      key: 'select',
+                      header: (
+                        <SelectAllCheckbox
+                          checked={allVisibleSelected}
+                          indeterminate={someVisibleSelected}
+                          disabled={items.length === 0}
+                          onChange={(checked) => toggleAllVisible(checked)}
+                        />
+                      ),
+                      className: 'w-10',
+                      cell: (item) => (
+                        <input
+                          type="checkbox"
+                          checked={selectedRowKeys.has(trackingRowKey(item))}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => toggleRowSelection(item, event.target.checked)}
+                          aria-label={`Select ${item.kind} ${item.path}`}
+                          data-testid={`select-row-${trackingRowKey(item)}`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      ),
+                    },
+                    {
+                      key: 'kind',
+                      header: 'Kind',
+                      cell: (item) =>
+                        item.kind === 'file' ? (
+                          <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                            File
+                          </span>
+                        ) : (
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            Folder
+                          </span>
+                        ),
+                    },
+                    {
+                      key: 'path',
+                      header: 'Path',
+                      cell: (item) => <span className="font-mono text-xs">{item.path}</span>,
+                    },
+                    {
+                      key: 'drive',
+                      header: 'Drive Pair',
+                      cell: (item) => driveName(item.drive_pair_id),
+                    },
+                    {
+                      key: 'virtual_path',
+                      header: 'Virtual Path',
+                      cell: (item) =>
+                        item.virtual_path ? (
+                          <span className="font-mono text-xs">{item.virtual_path}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        ),
+                    },
+                    {
+                      key: 'source',
+                      header: 'Source',
+                      cell: (item) => <SourceBadge source={item.source} />,
+                    },
+                    {
+                      key: 'status',
+                      header: 'Status',
+                      cell: (item) => {
+                        if (item.kind === 'file') {
+                          return item.is_mirrored ? (
+                            <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
+                              Mirrored
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
+                              Tracked
+                            </span>
+                          )
+                        }
+
+                        const status = item.folder_status ?? 'not_scanned'
+                        const total = item.folder_total_files ?? 0
+                        const mirrored = item.folder_mirrored_files ?? 0
+                        return (
+                          <FolderStatusBadge status={status} total={total} mirrored={mirrored} />
+                        )
+                      },
+                    },
+                    {
+                      key: 'created',
+                      header: 'Created',
+                      cell: (item) => formatDate(item.created_at),
+                    },
+                    {
+                      key: 'actions',
+                      header: '',
+                      cell: (item) =>
+                        item.kind === 'file' ? (
+                          <FileActions
+                            file={toTrackedFile(item)}
+                            onMirror={handleMirror}
+                            onDelete={(file) => setDeleteTarget({ ...item, id: file.id })}
+                            onSetVirtualPath={(file) =>
+                              setFilePathModal({ ...toTrackedFile(item), id: file.id })
+                            }
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                const folder = folderItems.find((entry) => entry.id === item.id)
+                                if (folder) setFolderPathModal(folder)
+                              }}
+                              className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+                            >
+                              Set Path
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                const folder = folderItems.find((entry) => entry.id === item.id)
+                                if (!folder) return
+                                const status = item.folder_status ?? 'not_scanned'
+                                if (status === 'tracked' || status === 'partial') {
+                                  void handleMirrorFolder(folder)
+                                  return
+                                }
+                                void handleScanFolder(folder)
+                              }}
+                              className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+                              data-testid={`folder-action-${item.id}`}
+                            >
+                              {item.folder_status === 'tracked' || item.folder_status === 'partial'
+                                ? 'Mirror'
+                                : 'Scan'}
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setDeleteTarget(item)
+                              }}
+                              className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              data-testid={`delete-folder-${item.id}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ),
+                    },
+                  ]}
+                  data={items}
+                  rowKey={(item) => trackingRowKey(item)}
+                  rowTestId={(item) => `${item.kind}-row-${item.id}`}
+                  onRowClick={(item) => {
+                    if (item.kind === 'file') {
+                      void openFileDetails(item)
+                    }
+                  }}
+                  selectedRowKey={selectedFile ? `file-${selectedFile.id}` : null}
+                  selectedRowKeys={selectedRowKeys}
+                  emptyState={
+                    <EmptyState
+                      title="No tracked items"
+                      description="Track files or add folders to start managing content here."
+                    />
+                  }
+                />
+
+                {response ? (
+                  <Pagination
+                    page={response.page}
+                    perPage={response.per_page}
+                    total={response.total}
+                    onPageChange={(page) => setParams((current) => ({ ...current, page }))}
+                  />
+                ) : null}
+              </div>
+            )}
+          </div>
+          {selectedItems.length > 0 ? (
+            <div
+              className="border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur"
+              data-testid="tracking-bulk-actions"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-gray-600" data-testid="selected-count">
+                  {selectedItems.length} selected
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRowKeys(new Set())}
+                    className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                    data-testid="bulk-deselect"
+                  >
+                    Deselect all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleMirrorSelected()}
+                    disabled={bulkMirroring || bulkDeleting}
+                    className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    data-testid="bulk-mirror"
+                  >
+                    {bulkMirroring ? 'Mirroring...' : 'Mirror selected'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmBulkDeleteOpen(true)}
+                    disabled={bulkDeleting || bulkMirroring}
+                    className="shrink-0 whitespace-nowrap rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    data-testid="bulk-delete"
+                  >
+                    Delete selected
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {selectedFile ? (
+          <aside className="w-80 shrink-0 overflow-auto border-l border-gray-200 bg-white">
+            <FileDetails
+              file={selectedFile}
+              drivePairName={driveName(selectedFile.drive_pair_id)}
+              onClose={() => setSelectedFile(null)}
+            />
+          </aside>
+        ) : null}
       </div>
 
       <TrackFileModal

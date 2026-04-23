@@ -1,0 +1,21 @@
+name: Setup Rust
+description: Install Rust toolchain and restore cargo caches
+
+runs:
+  using: composite
+  steps:
+    - name: Install system build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q libpam0g-dev libclang-dev llvm
+
+    - name: Install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry and build artifacts
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-on-failure: true

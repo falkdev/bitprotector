@@ -22,7 +22,7 @@ struct AppConfig {
     database: DatabaseConfig,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct ServerConfig {
     host: Option<String>,
     port: Option<u16>,
@@ -30,19 +30,6 @@ struct ServerConfig {
     tls_key: Option<String>,
     rate_limit_rps: Option<usize>,
     jwt_secret: Option<String>,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: None,
-            port: None,
-            tls_cert: None,
-            tls_key: None,
-            rate_limit_rps: None,
-            jwt_secret: None,
-        }
-    }
 }
 
 #[derive(serde::Deserialize, Default)]

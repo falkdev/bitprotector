@@ -84,9 +84,7 @@ describe('SchedulerPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create Schedule' }))
 
-    expect(
-      await screen.findByText('Interval must be a positive number.')
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Interval must be a positive number.')).toBeInTheDocument()
   })
 
   it('creates a schedule with a cron preset', async () => {
@@ -200,8 +198,18 @@ describe('SchedulerPage', () => {
       api.get('/scheduler/schedules', () =>
         HttpResponse.json({
           schedules: [
-            makeSchedule({ id: 1, task_type: 'sync', cron_expr: '0 2 * * *', interval_seconds: null }),
-            makeSchedule({ id: 2, task_type: 'integrity_check', cron_expr: null, interval_seconds: 3600 }),
+            makeSchedule({
+              id: 1,
+              task_type: 'sync',
+              cron_expr: '0 2 * * *',
+              interval_seconds: null,
+            }),
+            makeSchedule({
+              id: 2,
+              task_type: 'integrity_check',
+              cron_expr: null,
+              interval_seconds: 3600,
+            }),
             makeSchedule({ id: 3, task_type: 'sync', cron_expr: null, interval_seconds: 120 }),
           ],
         })

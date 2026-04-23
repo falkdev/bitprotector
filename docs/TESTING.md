@@ -8,6 +8,7 @@ This document explains how to run the test suite, what each test category covers
 
 - [Test Layout](#test-layout)
 - [Running Tests](#running-tests)
+- [Running in CI](#running-in-ci)
 - [Integration Tests](#integration-tests)
   - [CLI Integration Tests](#cli-integration-tests)
   - [Auth / API Integration Tests](#auth--api-integration-tests)
@@ -130,6 +131,38 @@ cargo test -- --nocapture
 ```bash
 # Serial — useful when tests share state or you need ordered output
 cargo test -- --test-threads=1
+```
+
+---
+
+## Running in CI
+
+All test categories run automatically on GitHub Actions. The pipeline is layered and fail-fast — cheaper tests gate the expensive QEMU suites.
+
+| Trigger | Layers |
+| --- | --- |
+| Pull request | Lint → unit → integration → build → QEMU smoke (Layers 0-5) |
+| Push to `main` | Full suite including QEMU failover and uninstall (Layers 0-7) |
+| Nightly cron (03:00 UTC) | Same as push to main |
+| `workflow_dispatch` with `run_heavy_qemu=true` | Full suite from any branch |
+
+To reproduce a CI run locally, see [docs/CI.md](CI.md).
+
+To run the full pipeline natively (no Docker):
+
+```bash
+./scripts/run-tests.sh fast    # lint + unit + Rust integration
+./scripts/run-tests.sh smoke   # + .deb build + QEMU smoke
+./scripts/run-tests.sh full    # + QEMU failover + uninstall
+```
+
+To run through `act` (Docker-in-Docker, same YAML as CI):
+
+```bash
+./scripts/ci-local.sh lint
+./scripts/ci-local.sh fast
+./scripts/ci-local.sh smoke
+./scripts/ci-local.sh full
 ```
 
 ---

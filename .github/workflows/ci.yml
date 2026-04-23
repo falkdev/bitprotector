@@ -1,0 +1,305 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_heavy_qemu:
+        description: Also run QEMU failover and uninstall layers (normally main-only)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      run_heavy_qemu:
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Layer 0 — lint
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+
+      - name: npm install (for lint)
+        working-directory: frontend
+        run: npm ci
+
+      - name: npm lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: prettier check
+        working-directory: frontend
+        run: npx prettier --check "src/**/*.{ts,tsx,css}"
+
+  # ---------------------------------------------------------------------------
+  # Layer 1 — unit tests
+  # ---------------------------------------------------------------------------
+  unit:
+    name: Unit Tests
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: Rust unit tests
+        run: cargo test --lib
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend unit tests (vitest)
+        working-directory: frontend
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # Layer 2 — Rust integration tests (fast — all except scaling_100k)
+  # ---------------------------------------------------------------------------
+  rust-integration-fast:
+    name: Rust Integration (fast)
+    needs: unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+
+      - name: cli_drives
+        run: cargo test --test cli_drives
+      - name: cli_files
+        run: cargo test --test cli_files
+      - name: cli_integrity
+        run: cargo test --test cli_integrity
+      - name: cli_virtual_paths
+        run: cargo test --test cli_virtual_paths
+      - name: cli_folders
+        run: cargo test --test cli_folders
+      - name: cli_sync
+        run: cargo test --test cli_sync
+      - name: cli_logs
+        run: cargo test --test cli_logs
+      - name: cli_database
+        run: cargo test --test cli_database
+      - name: cli_auth
+        run: cargo test --test cli_auth
+      - name: cli_status
+        run: cargo test --test cli_status
+      - name: packaging
+        run: cargo test --test packaging
+      - name: api_routes
+        run: cargo test --test api_routes
+      - name: api_filesystem_browser
+        run: cargo test --test api_filesystem_browser
+      - name: core_mirror
+        run: cargo test --test core_mirror
+      - name: core_change_detection
+        run: cargo test --test core_change_detection
+      - name: core_scheduler
+        run: cargo test --test core_scheduler
+
+  # ---------------------------------------------------------------------------
+  # Layer 3 — Rust integration tests (heavy — scaling_100k with 3s budgets)
+  # ---------------------------------------------------------------------------
+  rust-integration-heavy:
+    name: Rust Integration (heavy)
+    needs: rust-integration-fast
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+
+      - name: scaling_100k
+        run: cargo test --test scaling_100k
+
+  # ---------------------------------------------------------------------------
+  # Layer 4 — build .deb artifact
+  # ---------------------------------------------------------------------------
+  build-artifacts:
+    name: Build Artifacts
+    needs: rust-integration-heavy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # needed for git describe to find the last tag
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install cargo-deb
+        run: |
+          if ! cargo deb --version &>/dev/null; then
+            cargo install cargo-deb
+          fi
+
+      - name: Compute dev version
+        run: |
+          # Use last tag as base; fall back to Cargo.toml version if no tags exist.
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [[ -n "${LAST_TAG}" ]]; then
+            CARGO_BASE="${LAST_TAG#v}"
+          else
+            CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          # Convert '-' to '~' for Debian pre-release ordering, append Ubuntu revision + git SHA.
+          DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
+          echo "Dev version: ${DEV_VERSION}"
+
+      - name: Build .deb
+        run: cargo deb --deb-version "${DEV_VERSION}"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/bitprotector_*.deb
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Layer 5 — QEMU smoke (PR + main + nightly)
+  # Matrix: ubuntu-24.04, ubuntu-26.04 (parallel, fail-fast)
+  # ---------------------------------------------------------------------------
+  qemu-smoke:
+    name: QEMU Smoke (${{ matrix.guest }})
+    needs: build-artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        guest: [ubuntu-24.04, ubuntu-26.04]
+    # ubuntu-26.04 image is provisional — treat failures as non-blocking until
+    # the image is stable on cloud-images.ubuntu.com. Remove continue-on-error
+    # once 26.04 LTS is fully published.
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: QEMU smoke test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          CI: '1'
+        run: ./tests/installation/qemu_test.sh
+
+  # ---------------------------------------------------------------------------
+  # Layer 6 — QEMU failover (main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-failover:
+    name: QEMU Failover (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        guest: [ubuntu-24.04, ubuntu-26.04]
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: QEMU failover test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          CI: '1'
+        run: ./tests/installation/qemu_failover_test.sh
+
+  # ---------------------------------------------------------------------------
+  # Layer 7 — QEMU uninstall (main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-uninstall:
+    name: QEMU Uninstall (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        guest: [ubuntu-24.04, ubuntu-26.04]
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: QEMU uninstall test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          CI: '1'
+        run: ./tests/installation/qemu_uninstall_test.sh

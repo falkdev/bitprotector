@@ -69,12 +69,7 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
     let mut page = 1i64;
     let per_page = 100i64;
 
-    let _ = event_logger::log_integrity_run_started(
-        repo,
-        run_id,
-        run.total_files,
-        &run.trigger,
-    );
+    let _ = event_logger::log_integrity_run_started(repo, run_id, run.total_files, &run.trigger);
 
     loop {
         let (files, total) =

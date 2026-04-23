@@ -15,74 +15,92 @@ vi.mock('@/api/filesystem', () => ({
 vi.mock('react-arborist', async () => {
   const React = await import('react')
 
-  const Tree = React.forwardRef(function MockTree({
-    data,
-    onSelect,
-    onToggle,
-    selection,
-    children: NodeRenderer,
-  }: {
-    data: Array<{
-      name: string
-      path: string
-      kind: 'directory' | 'file'
-      children?: unknown[]
-    }>
-    onSelect?: (nodes: Array<{ data: { name: string; path: string; kind: 'directory' | 'file' } }>) => void
-    onToggle?: (id: string) => void
-    selection?: string
-    children?: (props: {
-      node: {
-        id: string
-        data: { name: string; path: string; kind: 'directory' | 'file' }
-        isOpen: boolean
-        isSelected: boolean
-        handleClick: (...args: unknown[]) => void
-        toggle: () => void
-        open: () => void
-        close: () => void
-      }
-      style: Record<string, never>
-    }) => ReactNode
-  }, ref: React.ForwardedRef<{ open: (id: string) => void; isOpen: (id: string) => boolean }>) {
+  const Tree = React.forwardRef(function MockTree(
+    {
+      data,
+      onSelect,
+      onToggle,
+      selection,
+      children: NodeRenderer,
+    }: {
+      data: Array<{
+        name: string
+        path: string
+        kind: 'directory' | 'file'
+        children?: unknown[]
+      }>
+      onSelect?: (
+        nodes: Array<{ data: { name: string; path: string; kind: 'directory' | 'file' } }>
+      ) => void
+      onToggle?: (id: string) => void
+      selection?: string
+      children?: (props: {
+        node: {
+          id: string
+          data: { name: string; path: string; kind: 'directory' | 'file' }
+          isOpen: boolean
+          isSelected: boolean
+          handleClick: (...args: unknown[]) => void
+          toggle: () => void
+          open: () => void
+          close: () => void
+        }
+        style: Record<string, never>
+      }) => ReactNode
+    },
+    ref: React.ForwardedRef<{ open: (id: string) => void; isOpen: (id: string) => boolean }>
+  ) {
     const [openPaths, setOpenPaths] = React.useState<Set<string>>(() => new Set(['/']))
 
-    const open = React.useCallback((id: string) => {
-      setOpenPaths((current) => {
-        if (current.has(id)) {
-          return current
+    const open = React.useCallback(
+      (id: string) => {
+        setOpenPaths((current) => {
+          if (current.has(id)) {
+            return current
+          }
+          const next = new Set(current)
+          next.add(id)
+          return next
+        })
+        onToggle?.(id)
+      },
+      [onToggle]
+    )
+
+    const close = React.useCallback(
+      (id: string) => {
+        setOpenPaths((current) => {
+          if (!current.has(id)) {
+            return current
+          }
+          const next = new Set(current)
+          next.delete(id)
+          return next
+        })
+        onToggle?.(id)
+      },
+      [onToggle]
+    )
+
+    const toggle = React.useCallback(
+      (id: string) => {
+        if (openPaths.has(id)) {
+          close(id)
+        } else {
+          open(id)
         }
-        const next = new Set(current)
-        next.add(id)
-        return next
-      })
-      onToggle?.(id)
-    }, [onToggle])
+      },
+      [close, open, openPaths]
+    )
 
-    const close = React.useCallback((id: string) => {
-      setOpenPaths((current) => {
-        if (!current.has(id)) {
-          return current
-        }
-        const next = new Set(current)
-        next.delete(id)
-        return next
-      })
-      onToggle?.(id)
-    }, [onToggle])
-
-    const toggle = React.useCallback((id: string) => {
-      if (openPaths.has(id)) {
-        close(id)
-      } else {
-        open(id)
-      }
-    }, [close, open, openPaths])
-
-    React.useImperativeHandle(ref, () => ({
-      open,
-      isOpen: (id: string) => openPaths.has(id),
-    }), [open, openPaths])
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        open,
+        isOpen: (id: string) => openPaths.has(id),
+      }),
+      [open, openPaths]
+    )
 
     const renderNodes = (
       nodes: Array<{
@@ -126,7 +144,7 @@ vi.mock('react-arborist', async () => {
 })
 
 function makeEntry(path: string, kind: 'directory' | 'file') {
-  const name = path === '/' ? '/' : path.split('/').pop() ?? path
+  const name = path === '/' ? '/' : (path.split('/').pop() ?? path)
   return {
     name,
     path,

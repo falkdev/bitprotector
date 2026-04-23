@@ -384,9 +384,7 @@ export function DatabaseBackupsPage() {
               >
                 <div>
                   <p className="font-mono text-xs">{result.backup_path}</p>
-                  {result.error && (
-                    <p className="mt-1 text-xs text-destructive">{result.error}</p>
-                  )}
+                  {result.error && <p className="mt-1 text-xs text-destructive">{result.error}</p>}
                 </div>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${

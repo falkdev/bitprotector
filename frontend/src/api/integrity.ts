@@ -1,5 +1,9 @@
 import { apiClient } from './client'
-import type { IntegrityRun, IntegrityRunResultsResponse, SingleIntegrityResult } from '@/types/integrity'
+import type {
+  IntegrityRun,
+  IntegrityRunResultsResponse,
+  SingleIntegrityResult,
+} from '@/types/integrity'
 
 export const integrityApi = {
   checkFile(id: number, recover = true): Promise<SingleIntegrityResult> {
@@ -15,15 +19,11 @@ export const integrityApi = {
   },
 
   activeRun(): Promise<{ run: IntegrityRun | null }> {
-    return apiClient
-      .get<{ run: IntegrityRun | null }>('/integrity/runs/active')
-      .then((r) => r.data)
+    return apiClient.get<{ run: IntegrityRun | null }>('/integrity/runs/active').then((r) => r.data)
   },
 
   stopRun(id: number): Promise<IntegrityRun> {
-    return apiClient
-      .post<IntegrityRun>(`/integrity/runs/${id}/stop`)
-      .then((r) => r.data)
+    return apiClient.post<IntegrityRun>(`/integrity/runs/${id}/stop`).then((r) => r.data)
   },
 
   latestResults(options?: {

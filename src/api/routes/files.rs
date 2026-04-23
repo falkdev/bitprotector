@@ -158,7 +158,8 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
     }
     match repo.delete_tracked_file(id) {
         Ok(()) => {
-            let full_path = repo.get_drive_pair(file.drive_pair_id)
+            let full_path = repo
+                .get_drive_pair(file.drive_pair_id)
                 .map(|dp| format!("{}/{}", dp.primary_path, file.relative_path))
                 .unwrap_or_else(|_| file.relative_path.clone());
             let _ = event_logger::log_file_untracked(&repo, id, &full_path);

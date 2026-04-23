@@ -22,7 +22,10 @@ function deriveFileVirtualPath(file: TrackedFile, folders: TrackedFolder[]): str
         !!folder.virtual_path &&
         isPathInFolder(file.relative_path, folder.folder_path)
     )
-    .sort((a, b) => normalizeFolderPath(b.folder_path).length - normalizeFolderPath(a.folder_path).length)
+    .sort(
+      (a, b) =>
+        normalizeFolderPath(b.folder_path).length - normalizeFolderPath(a.folder_path).length
+    )
 
   const folder = matchingFolders[0]
   if (!folder?.virtual_path) return null
@@ -182,8 +185,8 @@ export const trackingApi = {
   async list(params?: TrackingListParams): Promise<TrackingListResponse> {
     try {
       return await apiClient
-      .get<TrackingListResponse>('/tracking/items', { params })
-      .then((response) => response.data)
+        .get<TrackingListResponse>('/tracking/items', { params })
+        .then((response) => response.data)
     } catch (error) {
       if (isAxiosError(error) && error.response?.status === 404) {
         return listFallback(params)

@@ -48,17 +48,29 @@ export function DriveCard({ drive, onEdit, onDelete, onManageReplacement }: Driv
           <span className="truncate">{drive.primary_path}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-16 flex-shrink-0 text-foreground font-sans font-medium">Secondary</span>
+          <span className="w-16 flex-shrink-0 text-foreground font-sans font-medium">
+            Secondary
+          </span>
           <span className="truncate">{drive.secondary_path}</span>
         </div>
       </div>
 
       {/* State badges */}
       <div className="flex gap-2">
-        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', stateColors[drive.primary_state])}>
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-xs font-medium',
+            stateColors[drive.primary_state]
+          )}
+        >
           P: {drive.primary_state}
         </span>
-        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', stateColors[drive.secondary_state])}>
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-xs font-medium',
+            stateColors[drive.secondary_state]
+          )}
+        >
           S: {drive.secondary_state}
         </span>
       </div>

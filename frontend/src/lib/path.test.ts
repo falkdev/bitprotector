@@ -39,8 +39,6 @@ describe('path helpers', () => {
   })
 
   it('returns the active drive path for the active role', () => {
-    expect(getActiveDrivePath('/mnt/primary', '/mnt/secondary', 'secondary')).toBe(
-      '/mnt/secondary'
-    )
+    expect(getActiveDrivePath('/mnt/primary', '/mnt/secondary', 'secondary')).toBe('/mnt/secondary')
   })
 })

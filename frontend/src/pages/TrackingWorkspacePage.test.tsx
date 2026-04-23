@@ -188,7 +188,9 @@ describe('TrackingWorkspacePage', () => {
     }> = []
 
     server.use(
-      api.get('/drives', () => HttpResponse.json([makeDrivePair(), makeDrivePair({ id: 2, name: 'Archive Mirror' })])),
+      api.get('/drives', () =>
+        HttpResponse.json([makeDrivePair(), makeDrivePair({ id: 2, name: 'Archive Mirror' })])
+      ),
       api.get('/tracking/items', ({ request }) => {
         const params = new URL(request.url).searchParams
         seenParams.push({
@@ -208,7 +210,8 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(seenParams.length).toBeGreaterThan(0)
     })
-    const [driveSelect, kindSelect, sourceSelect, virtualPathSelect] = screen.getAllByRole('combobox')
+    const [driveSelect, kindSelect, sourceSelect, virtualPathSelect] =
+      screen.getAllByRole('combobox')
 
     await user.selectOptions(driveSelect, '2')
     await user.selectOptions(kindSelect, 'folder')
@@ -351,7 +354,9 @@ describe('TrackingWorkspacePage', () => {
     await user.click(screen.getByTestId('select-row-file-11'))
     await user.click(screen.getByTestId('select-row-folder-21'))
     await user.click(screen.getByTestId('bulk-delete'))
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' })
+    )
 
     await waitFor(() => {
       expect(deletedFiles).toBe(1)
@@ -379,7 +384,9 @@ describe('TrackingWorkspacePage', () => {
         }
         if (listCalls === 2) {
           return HttpResponse.json(
-            makeTrackingListResponse([makeTrackingItem({ id: 12, kind: 'file', path: 'docs/b.txt' })])
+            makeTrackingListResponse([
+              makeTrackingItem({ id: 12, kind: 'file', path: 'docs/b.txt' }),
+            ])
           )
         }
         return HttpResponse.json(makeTrackingListResponse([]))
@@ -408,7 +415,9 @@ describe('TrackingWorkspacePage', () => {
 
     await user.click(screen.getByTestId('select-row-file-11'))
     await user.click(screen.getByTestId('bulk-delete'))
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' })
+    )
 
     await waitFor(() => {
       expect(within(screen.getByTestId('file-details')).getByText('docs/b.txt')).toBeInTheDocument()
@@ -416,7 +425,9 @@ describe('TrackingWorkspacePage', () => {
 
     await user.click(screen.getByTestId('select-row-file-12'))
     await user.click(screen.getByTestId('bulk-delete'))
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' })
+    )
 
     await waitFor(() => {
       expect(screen.queryByTestId('file-details')).not.toBeInTheDocument()
@@ -734,8 +745,12 @@ describe('TrackingWorkspacePage', () => {
 
     expect(await screen.findByText('Checksum (BLAKE3)')).toBeInTheDocument()
     expect(screen.getByText(checksum)).toBeInTheDocument()
-    expect(within(screen.getByTestId('file-details')).getByText('Primary Mirror')).toBeInTheDocument()
-    expect(within(screen.getByTestId('file-details')).getByText('Last integrity check')).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('file-details')).getByText('Primary Mirror')
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('file-details')).getByText('Last integrity check')
+    ).toBeInTheDocument()
   })
 
   it('keeps effective virtual path in file details when file endpoint returns null virtual_path', async () => {
@@ -776,7 +791,9 @@ describe('TrackingWorkspacePage', () => {
     await user.click(row)
 
     await waitFor(() => {
-      expect(within(screen.getByTestId('file-details')).getByText(effectiveVirtualPath)).toBeInTheDocument()
+      expect(
+        within(screen.getByTestId('file-details')).getByText(effectiveVirtualPath)
+      ).toBeInTheDocument()
     })
   })
 })

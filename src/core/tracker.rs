@@ -67,7 +67,11 @@ pub fn track_file(
         }
     }
 
-    let _ = event_logger::log_file_tracked(repo, tracked.id, &format!("{}/{}", drive_pair.primary_path, relative_path));
+    let _ = event_logger::log_file_tracked(
+        repo,
+        tracked.id,
+        &format!("{}/{}", drive_pair.primary_path, relative_path),
+    );
     repo.get_tracked_file(tracked.id)
 }
 

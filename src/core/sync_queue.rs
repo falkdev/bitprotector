@@ -53,7 +53,13 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
         Err(e) => {
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?;
-            let _ = event_logger::log_sync_failed(repo, file.id, &item.action, &e.to_string(), &full_path);
+            let _ = event_logger::log_sync_failed(
+                repo,
+                file.id,
+                &item.action,
+                &e.to_string(),
+                &full_path,
+            );
         }
     }
 
@@ -186,9 +192,8 @@ pub fn create_from_integrity_failure(
 
 /// Create a sync queue item to re-mirror a changed file.
 pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
-    Ok(repo
-        .create_sync_queue_item_dedup(file_id, "mirror")?
-        .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{}", file_id))?)
+    repo.create_sync_queue_item_dedup(file_id, "mirror")?
+        .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{}", file_id))
 }
 
 #[cfg(test)]
