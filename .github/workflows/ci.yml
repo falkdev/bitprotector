@@ -220,6 +220,7 @@ jobs:
     needs: qemu-smoke
     if: >
       github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
       inputs.run_heavy_qemu == true
     runs-on: ubuntu-24.04
@@ -256,6 +257,7 @@ jobs:
     needs: qemu-smoke
     if: >
       github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
       inputs.run_heavy_qemu == true
     runs-on: ubuntu-24.04
