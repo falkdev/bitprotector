@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "bitprotector"
-version = "0.1.0"
+version = "1.0.0-alpha2"
 dependencies = [
  "actix-cors",
  "actix-files",
