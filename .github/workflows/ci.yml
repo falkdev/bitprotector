@@ -28,7 +28,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-rust
 
@@ -60,7 +60,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-rust
 
@@ -85,7 +85,7 @@ jobs:
     needs: unit
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-rust
 
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-rust
 
@@ -146,7 +146,7 @@ jobs:
     needs: rust-integration-heavy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # needed for git describe to find the last tag
 
@@ -188,7 +188,7 @@ jobs:
         run: cargo deb --deb-version "${DEV_VERSION}"
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bitprotector-deb
           path: target/debian/bitprotector_*.deb
@@ -212,14 +212,14 @@ jobs:
     # once 26.04 LTS is fully published.
     continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-qemu
         with:
           guest: ${{ matrix.guest }}
 
       - name: Download .deb artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: bitprotector-deb
           path: target/debian/
@@ -249,14 +249,14 @@ jobs:
         guest: [ubuntu-24.04, ubuntu-26.04]
     continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-qemu
         with:
           guest: ${{ matrix.guest }}
 
       - name: Download .deb artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: bitprotector-deb
           path: target/debian/
@@ -286,14 +286,14 @@ jobs:
         guest: [ubuntu-24.04, ubuntu-26.04]
     continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-qemu
         with:
           guest: ${{ matrix.guest }}
 
       - name: Download .deb artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: bitprotector-deb
           path: target/debian/
