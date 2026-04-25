@@ -1589,6 +1589,19 @@ impl Repository {
         Ok(deleted as u64)
     }
 
+    pub fn requeue_in_progress_sync_queue(&self) -> anyhow::Result<u64> {
+        let conn = self.conn()?;
+        let affected = conn.execute(
+            "UPDATE sync_queue
+             SET status='pending',
+                 error_message=NULL,
+                 completed_at=NULL
+             WHERE status='in_progress'",
+            [],
+        )?;
+        Ok(affected as u64)
+    }
+
     pub fn update_sync_queue_status(
         &self,
         id: i64,

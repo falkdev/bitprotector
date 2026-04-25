@@ -25,12 +25,30 @@ bitprotector --db "${DB}" sync process
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 
 sudo dpkg -i "/mnt/debpkg/${CURRENT_DEB_NAME}"
-sudo systemctl restart bitprotector
-sleep 3
-systemctl is-active bitprotector | grep -q "^active$"
+if ! sudo systemctl restart bitprotector; then
+  sudo systemctl status bitprotector --no-pager -l || true
+  sudo journalctl -u bitprotector -n 80 --no-pager || true
+  exit 1
+fi
+for _ in $(seq 1 30); do
+  if systemctl is-active --quiet bitprotector; then
+    break
+  fi
+  sleep 1
+done
+if ! systemctl is-active --quiet bitprotector; then
+  sudo systemctl status bitprotector --no-pager -l || true
+  sudo journalctl -u bitprotector -n 80 --no-pager || true
+  exit 1
+fi
 
-count=$(bitprotector --db "${DB}" files list | grep -c "file-" || true)
-[[ "${count}" -ge 100 ]]
+files_output=$(bitprotector --db "${DB}" files list --per-page 100)
+count=$(printf "%s\n" "${files_output}" | grep -c "file-" || true)
+if [[ "${count}" -lt 100 ]]; then
+  printf "%s\n" "${files_output}" >&2
+  echo "Expected at least 100 tracked files after upgrade, got ${count}" >&2
+  exit 1
+fi
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 '
 }

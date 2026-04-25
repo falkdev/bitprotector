@@ -68,6 +68,7 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 
 /// Process all pending items in the sync queue.
 pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
+    repo.requeue_in_progress_sync_queue()?;
     let (items, _) = repo.list_sync_queue(Some("pending"), 1, 1000)?;
     let count = items
         .iter()
@@ -259,6 +260,41 @@ mod tests {
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
         assert!(secondary.path().join("f.txt").exists());
+    }
+
+    #[test]
+    fn test_process_all_pending_requeues_in_progress_items() {
+        let (primary, secondary, repo) = setup();
+        let content = b"requeue test content";
+        fs::write(primary.path().join("requeue.txt"), content).unwrap();
+        let checksum_str = checksum::checksum_bytes(content);
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(
+                pair.id,
+                "requeue.txt",
+                &checksum_str,
+                content.len() as i64,
+                None,
+            )
+            .unwrap();
+        let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        repo.update_sync_queue_status(item.id, "in_progress", None)
+            .unwrap();
+
+        let processed = process_all_pending(&repo).unwrap();
+
+        assert_eq!(processed, 1);
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        assert!(secondary.path().join("requeue.txt").exists());
     }
 
     #[test]

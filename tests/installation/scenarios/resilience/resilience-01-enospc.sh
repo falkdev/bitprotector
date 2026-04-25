@@ -15,7 +15,10 @@ fallocate -l 120M /mnt/primary/data/payload.bin
 bitprotector --db "${DB}" drives add r01 /mnt/primary /mnt/mirror --no-validate
 bitprotector --db "${DB}" files track 1 data/payload.bin
 
-fallocate -l 2800M /mnt/mirror/filler.bin
+if ! fallocate -l 2800M /mnt/mirror/filler.bin; then
+  rm -f /mnt/mirror/filler.bin
+  dd if=/dev/zero of=/mnt/mirror/filler.bin bs=16M status=none || true
+fi
 if bitprotector --db "${DB}" files mirror 1; then
   echo "mirror unexpectedly succeeded with ENOSPC setup" >&2
   exit 1

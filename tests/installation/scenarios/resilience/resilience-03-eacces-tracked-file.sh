@@ -18,7 +18,7 @@ bitprotector --db "${DB}" files mirror 1
 
 chmod 000 /mnt/primary/data/perm.txt
 out=$(bitprotector --db "${DB}" integrity check 1 2>&1 || true)
-echo "${out}" | grep -Eq "FAILED|MISSING|UNAVAILABLE|internal_error"
+echo "${out}" | grep -Eq "FAILED|MISSING|UNAVAILABLE|CORRUPTED|Permission denied|internal_error"
 
 chmod 644 /mnt/primary/data/perm.txt
 bitprotector --db "${DB}" integrity check 1 --recover
