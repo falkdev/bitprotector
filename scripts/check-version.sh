@@ -3,15 +3,16 @@
 # Verify that all version references are consistent with Cargo.toml.
 #
 # Usage:
-#   ./scripts/check-version.sh                          # format check only (no artifacts)
-#   ./scripts/check-version.sh --deb <path>             # also check .deb filename + metadata
-#   ./scripts/check-version.sh --binary <path>          # also check binary --version output
-#   ./scripts/check-version.sh --deb <path> --binary <path>
+#   ./scripts/check-version.sh                             # format check only (no artifacts)
+#   ./scripts/check-version.sh --deb <path>                # also check .deb filename + metadata
+#   ./scripts/check-version.sh --binary <path>             # also check binary --version output
+#   ./scripts/check-version.sh --ubuntu-version 26.04      # target Ubuntu 26.04 (default: 24.04)
+#   ./scripts/check-version.sh --deb <path> --binary <path> --ubuntu-version <ver>
 #
-# Expected Debian version: <upstream>-0ubuntu1~24.04.1
+# Expected Debian version: <upstream>-0ubuntu1~<ubuntu_version>.1
 #   where <upstream> is Cargo.toml version with the first '-' replaced by '~'
-#   e.g. Cargo.toml "1.0.0-alpha1"  → Debian "1.0.0~alpha1-0ubuntu1~24.04.1"
-#        Cargo.toml "1.0.0"         → Debian "1.0.0-0ubuntu1~24.04.1"
+#   e.g. Cargo.toml "1.0.0-alpha1" + ubuntu 24.04 → Debian "1.0.0~alpha1-0ubuntu1~24.04.1"
+#        Cargo.toml "1.0.0"        + ubuntu 26.04 → Debian "1.0.0-0ubuntu1~26.04.1"
 #
 # Exit codes: 0 = all checks passed, 1 = one or more mismatches
 
@@ -23,18 +24,25 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # --- argument parsing ---
 DEB_PATH=""
 BINARY_PATH=""
+UBUNTU_VERSION="24.04"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --deb)    DEB_PATH="$2";    shift 2 ;;
-        --binary) BINARY_PATH="$2"; shift 2 ;;
+        --deb)            DEB_PATH="$2";        shift 2 ;;
+        --binary)         BINARY_PATH="$2";     shift 2 ;;
+        --ubuntu-version) UBUNTU_VERSION="$2";  shift 2 ;;
         *)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 [--deb <path>] [--binary <path>]" >&2
+            echo "Usage: $0 [--deb <path>] [--binary <path>] [--ubuntu-version <24.04|26.04>]" >&2
             exit 1
             ;;
     esac
 done
+
+if ! [[ "${UBUNTU_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: --ubuntu-version must be in the form MAJOR.MINOR (e.g. 24.04 or 26.04)" >&2
+    exit 1
+fi
 
 ERRORS=0
 
@@ -54,11 +62,12 @@ echo "Cargo.toml version : ${CARGO_VERSION}"
 
 # --- Step 2: derive expected Debian version ---
 # Convert first '-' to '~' for Debian pre-release ordering, then append Ubuntu revision.
-# "1.0.0-alpha1" → "1.0.0~alpha1-0ubuntu1~24.04.1"
-# "1.0.0"        → "1.0.0-0ubuntu1~24.04.1"
+# "1.0.0-alpha1" + 24.04 → "1.0.0~alpha1-0ubuntu1~24.04.1"
+# "1.0.0"        + 26.04 → "1.0.0-0ubuntu1~26.04.1"
 DEB_UPSTREAM=$(echo "${CARGO_VERSION}" | sed 's/-/~/')
-EXPECTED_DEB_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1"
+EXPECTED_DEB_VERSION="${DEB_UPSTREAM}-0ubuntu1~${UBUNTU_VERSION}.1"
 EXPECTED_DEB_FILENAME="bitprotector_${EXPECTED_DEB_VERSION}_amd64.deb"
+echo "Ubuntu version     : ${UBUNTU_VERSION}"
 echo "Expected Debian ver: ${EXPECTED_DEB_VERSION}"
 
 # --- Step 3: auto-detect artifacts if not supplied ---

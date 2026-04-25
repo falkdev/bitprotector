@@ -13,9 +13,16 @@ jobs:
       run_heavy_qemu: true
 
   build-artifacts-nightly:
-    name: Build Artifacts (nightly scale)
+    name: Build Artifacts (nightly, ubuntu-${{ matrix.ubuntu }})
     needs: ci
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            deb_suffix: "24.04.1"
+          - ubuntu: "26.04"
+            deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -49,7 +56,7 @@ jobs:
           fi
           DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
           SHORT_SHA=$(git rev-parse --short HEAD)
-          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~${{ matrix.deb_suffix }}+git.${SHORT_SHA}"
           echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
 
       - name: Build .deb
@@ -58,7 +65,7 @@ jobs:
       - name: Upload nightly .deb artifact
         uses: actions/upload-artifact@v5
         with:
-          name: bitprotector-deb-nightly
+          name: bitprotector-deb-nightly-ubuntu-${{ matrix.ubuntu }}
           path: target/debian/bitprotector_*.deb
           retention-days: 7
 
@@ -74,10 +81,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2282
             api_port: 19043
+            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2283
             api_port: 19044
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -88,11 +96,10 @@ jobs:
       - name: Download nightly .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb-nightly
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU scale test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -123,10 +130,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2292
             api_port: 19143
+            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2293
             api_port: 19144
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -137,11 +145,10 @@ jobs:
       - name: Download nightly .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb-nightly
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU scale lowmem test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
