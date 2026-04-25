@@ -11,3 +11,151 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       run_heavy_qemu: true
+
+  build-artifacts-nightly:
+    name: Build Artifacts (nightly scale)
+    needs: ci
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install cargo-deb
+        run: |
+          if ! cargo deb --version &>/dev/null; then
+            cargo install cargo-deb
+          fi
+
+      - name: Compute nightly dev version
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [[ -n "${LAST_TAG}" ]]; then
+            CARGO_BASE="${LAST_TAG#v}"
+          else
+            CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build .deb
+        run: cargo deb --deb-version "${DEV_VERSION}"
+
+      - name: Upload nightly .deb artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: bitprotector-deb-nightly
+          path: target/debian/bitprotector_*.deb
+          retention-days: 7
+
+  qemu-scale:
+    name: QEMU Scale (nightly, ${{ matrix.guest }})
+    needs: build-artifacts-nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2282
+            api_port: 19043
+          - guest: ubuntu-26.04
+            ssh_port: 2283
+            api_port: 19044
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download nightly .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb-nightly
+          path: target/debian/
+
+      - name: QEMU scale test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/scale.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  qemu-scale-lowmem:
+    name: QEMU Scale Lowmem (nightly, ${{ matrix.guest }})
+    needs: build-artifacts-nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2292
+            api_port: 19143
+          - guest: ubuntu-26.04
+            ssh_port: 2293
+            api_port: 19144
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download nightly .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb-nightly
+          path: target/debian/
+
+      - name: QEMU scale lowmem test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/scale_lowmem.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn

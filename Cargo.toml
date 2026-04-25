@@ -38,6 +38,7 @@ cron = "0.12"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+proptest = "1"
 
 # Logging/tracing
 tracing = "0.1"
@@ -128,6 +129,42 @@ path = "tests/integration/packaging.rs"
 [[test]]
 name = "api_routes"
 path = "tests/integration/api_routes.rs"
+
+[[test]]
+name = "api_drives"
+path = "tests/integration/api_drives.rs"
+
+[[test]]
+name = "api_files"
+path = "tests/integration/api_files.rs"
+
+[[test]]
+name = "api_folders"
+path = "tests/integration/api_folders.rs"
+
+[[test]]
+name = "api_virtual_paths"
+path = "tests/integration/api_virtual_paths.rs"
+
+[[test]]
+name = "api_integrity"
+path = "tests/integration/api_integrity.rs"
+
+[[test]]
+name = "api_scheduler"
+path = "tests/integration/api_scheduler.rs"
+
+[[test]]
+name = "api_sync"
+path = "tests/integration/api_sync.rs"
+
+[[test]]
+name = "api_logs"
+path = "tests/integration/api_logs.rs"
+
+[[test]]
+name = "api_database"
+path = "tests/integration/api_database.rs"
 
 [[test]]
 name = "scaling_100k"

@@ -155,6 +155,16 @@ fn open_repo(db_path: &str) -> anyhow::Result<bitprotector_lib::db::repository::
     Ok(bitprotector_lib::db::repository::Repository::new(pool))
 }
 
+fn resolve_db_path(cli_db: &str, cli_default: &str, file_cfg_db: Option<&str>) -> String {
+    if cli_db != cli_default {
+        cli_db.to_string()
+    } else if let Some(path) = file_cfg_db {
+        path.to_string()
+    } else {
+        cli_db.to_string()
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -174,14 +184,11 @@ async fn main() -> anyhow::Result<()> {
     let file_cfg = load_app_config(config_path);
 
     // Resolve database path: CLI flag > config file > hardcoded default
-    let db_path = if cli.db != "/var/lib/bitprotector/bitprotector.db" {
-        // Explicitly set on CLI
-        cli.db.clone()
-    } else if let Some(ref p) = file_cfg.database.path {
-        p.clone()
-    } else {
-        cli.db.clone()
-    };
+    let db_path = resolve_db_path(
+        &cli.db,
+        "/var/lib/bitprotector/bitprotector.db",
+        file_cfg.database.path.as_deref(),
+    );
 
     match cli.command {
         Commands::Serve {
@@ -264,4 +271,39 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_db_path;
+
+    #[test]
+    fn resolve_db_path_prefers_explicit_cli_value() {
+        let resolved = resolve_db_path(
+            "/tmp/from-cli.db",
+            "/var/lib/bitprotector/bitprotector.db",
+            Some("/etc/from-config.db"),
+        );
+        assert_eq!(resolved, "/tmp/from-cli.db");
+    }
+
+    #[test]
+    fn resolve_db_path_falls_back_to_config_when_cli_uses_default() {
+        let resolved = resolve_db_path(
+            "/var/lib/bitprotector/bitprotector.db",
+            "/var/lib/bitprotector/bitprotector.db",
+            Some("/etc/from-config.db"),
+        );
+        assert_eq!(resolved, "/etc/from-config.db");
+    }
+
+    #[test]
+    fn resolve_db_path_returns_cli_default_when_no_config_value() {
+        let resolved = resolve_db_path(
+            "/var/lib/bitprotector/bitprotector.db",
+            "/var/lib/bitprotector/bitprotector.db",
+            None,
+        );
+        assert_eq!(resolved, "/var/lib/bitprotector/bitprotector.db");
+    }
 }

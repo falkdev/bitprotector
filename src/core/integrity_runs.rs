@@ -200,3 +200,159 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::tracker;
+    use crate::db::repository::{create_memory_pool, Repository};
+    use crate::db::schema::initialize_schema;
+    use std::fs;
+    use std::thread;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn make_repo() -> Repository {
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        Repository::new(pool)
+    }
+
+    fn setup_pair(repo: &Repository) -> (TempDir, TempDir, i64) {
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "integrity-runs",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        (primary, secondary, pair.id)
+    }
+
+    fn create_tracked_file(
+        repo: &Repository,
+        pair_id: i64,
+        primary: &TempDir,
+        secondary: &TempDir,
+        name: &str,
+        mirrored: bool,
+    ) -> i64 {
+        let content = format!("content-{name}");
+        fs::write(primary.path().join(name), content.as_bytes()).unwrap();
+        if mirrored {
+            fs::write(secondary.path().join(name), content.as_bytes()).unwrap();
+        }
+        let pair = repo.get_drive_pair(pair_id).unwrap();
+        let tracked = tracker::track_file(repo, &pair, name, None).unwrap();
+        if mirrored {
+            repo.update_tracked_file_mirror_status(tracked.id, true)
+                .unwrap();
+        }
+        tracked.id
+    }
+
+    #[test]
+    fn status_str_returns_expected_labels() {
+        assert_eq!(status_str(&IntegrityStatus::Ok), "ok");
+        assert_eq!(
+            status_str(&IntegrityStatus::MasterCorrupted),
+            "master_corrupted"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::MirrorCorrupted),
+            "mirror_corrupted"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::BothCorrupted),
+            "both_corrupted"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::MirrorMissing),
+            "mirror_missing"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::MasterMissing),
+            "master_missing"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::PrimaryDriveUnavailable),
+            "primary_drive_unavailable"
+        );
+        assert_eq!(
+            status_str(&IntegrityStatus::SecondaryDriveUnavailable),
+            "secondary_drive_unavailable"
+        );
+    }
+
+    #[test]
+    fn start_run_async_persists_run_row() {
+        let repo = make_repo();
+        let (primary, secondary, pair_id) = setup_pair(&repo);
+        create_tracked_file(&repo, pair_id, &primary, &secondary, "a.txt", true);
+
+        let run = start_run_async(&repo, Some(pair_id), false, "test").unwrap();
+        assert_eq!(run.status, RUN_STATUS_RUNNING);
+        assert_eq!(run.total_files, 1);
+
+        let mut final_state = repo.get_integrity_run(run.id).unwrap();
+        for _ in 0..100 {
+            final_state = repo.get_integrity_run(run.id).unwrap();
+            if final_state.status != RUN_STATUS_RUNNING && final_state.status != RUN_STATUS_STOPPING
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_ne!(final_state.status, RUN_STATUS_RUNNING);
+        assert!(repo.get_latest_integrity_run().unwrap().is_some());
+    }
+
+    #[test]
+    fn run_sync_processes_files_and_persists_results() {
+        let repo = make_repo();
+        let (primary, secondary, pair_id) = setup_pair(&repo);
+        create_tracked_file(&repo, pair_id, &primary, &secondary, "ok.txt", true);
+        create_tracked_file(&repo, pair_id, &primary, &secondary, "missing.txt", false);
+
+        let run = run_sync(&repo, Some(pair_id), false, "test").unwrap();
+        assert_eq!(run.status, RUN_STATUS_COMPLETED);
+        assert_eq!(run.total_files, 2);
+        assert_eq!(run.processed_files, 2);
+
+        let (results, total) = repo
+            .list_integrity_run_results(run.id, false, 1, 50)
+            .unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|result| result.status == "ok"));
+    }
+
+    #[test]
+    fn process_run_honors_stop_request_and_marks_stopped() {
+        let repo = make_repo();
+        let (primary, secondary, pair_id) = setup_pair(&repo);
+        for i in 0..20 {
+            create_tracked_file(
+                &repo,
+                pair_id,
+                &primary,
+                &secondary,
+                &format!("f{i}.txt"),
+                true,
+            );
+        }
+
+        let total = repo.count_tracked_files(Some(pair_id)).unwrap();
+        let run = repo
+            .create_integrity_run(Some(pair_id), false, "test", total)
+            .unwrap();
+        repo.request_integrity_run_stop(run.id).unwrap();
+
+        process_run(&repo, run.id).unwrap();
+        let stopped = repo.get_integrity_run(run.id).unwrap();
+        assert_eq!(stopped.status, RUN_STATUS_STOPPED);
+        assert!(stopped.stop_requested);
+    }
+}

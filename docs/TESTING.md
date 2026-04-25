@@ -1,6 +1,6 @@
 # Testing Guide
 
-This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the QEMU-based installation, failover, and uninstall suites.
+This document explains how to run the test suite, what each test category covers, how to write new unit tests, and how to run the QEMU bundle-based installation suites.
 
 ---
 
@@ -24,7 +24,16 @@ This document explains how to run the test suite, what each test category covers
 ```text
 tests/
 ├── integration/          # Integration tests (Rust — cargo test)
-│   ├── api_routes.rs         # REST API endpoint coverage (drives, files, auth, etc.)
+│   ├── api_drives.rs         # REST API drives endpoints
+│   ├── api_files.rs          # REST API files/tracking endpoints
+│   ├── api_folders.rs        # REST API folders endpoints
+│   ├── api_virtual_paths.rs  # REST API virtual-path endpoints
+│   ├── api_integrity.rs      # REST API integrity endpoints
+│   ├── api_scheduler.rs      # REST API scheduler endpoints
+│   ├── api_sync.rs           # REST API sync endpoints
+│   ├── api_logs.rs           # REST API logs endpoints
+│   ├── api_database.rs       # REST API database-backup endpoints
+│   ├── api_routes.rs         # Residual status/cross-route coverage
 │   ├── api_filesystem_browser.rs # Filesystem browse route coverage for the web path picker
 │   ├── cli_auth.rs           # JWT middleware, token lifecycle, logout
 │   ├── cli_drives.rs         # Drive pair CLI commands
@@ -42,9 +51,12 @@ tests/
 │   ├── scaling_100k.rs       # 100k-row tracking listing/filtering performance budgets
 │   └── packaging.rs          # Verifies packaging artifacts exist
 └── installation/
-    ├── qemu_test.sh          # Fast package/install smoke test on Ubuntu 24 via QEMU
-    ├── qemu_failover_test.sh # Extra-disk failover/replacement end-to-end test via QEMU
-    └── qemu_uninstall_test.sh # Full package purge/uninstall verification via QEMU
+    ├── bundles/              # Bundle entrypoints (smoke/failover/resilience/upgrade/etc.)
+    ├── scenarios/            # Per-scenario scripts grouped by bundle
+    ├── lib/                  # Shared helpers (`qemu-helpers.sh`, `scenarios.sh`, `snapshots.sh`)
+    ├── qemu_test.sh          # Back-compat wrapper -> bundles/smoke.sh
+    ├── qemu_failover_test.sh # Back-compat wrapper -> bundles/failover.sh
+    └── qemu_uninstall_test.sh # Back-compat wrapper -> bundles/uninstall.sh
 ```
 
 Inline unit tests (`#[cfg(test)]` blocks inside `src/`) are the primary home for unit-level testing.
@@ -141,9 +153,9 @@ All test categories run automatically on GitHub Actions. The pipeline is layered
 
 | Trigger | Layers |
 | --- | --- |
-| Pull request | Lint → unit → integration → build → QEMU smoke (Layers 0-5) |
-| Push to `main` | Full suite including QEMU failover and uninstall (Layers 0-7) |
-| Nightly cron (03:00 UTC) | Same as push to main |
+| Pull request | Lint → unit (+ coverage) → integration → build → QEMU bundles (smoke/failover/uninstall/resilience/upgrade/degraded-boot) |
+| Push to `main` | Same as pull request |
+| Nightly cron (03:00 UTC) | Full CI + nightly-only `scale` and `scale_lowmem` bundles |
 | `workflow_dispatch` with `run_heavy_qemu=true` | Full suite from any branch |
 
 To reproduce a CI run locally, see [docs/CI.md](CI.md).
@@ -153,7 +165,7 @@ To run the full pipeline natively (no Docker):
 ```bash
 ./scripts/run-tests.sh fast    # lint + unit + Rust integration
 ./scripts/run-tests.sh smoke   # + .deb build + QEMU smoke
-./scripts/run-tests.sh full    # + QEMU failover + uninstall
+./scripts/run-tests.sh full    # + failover + uninstall + resilience + upgrade + degraded-boot
 ```
 
 To run through `act` (Docker-in-Docker, same YAML as CI):
@@ -266,7 +278,7 @@ async fn test_auth_middleware_accepts_valid_token() {
 
 Note: these tests require `actix_rt` as a dev dependency. Annotate async test functions with `#[actix_rt::test]` instead of `#[tokio::test]`.
 
-The broader API route integration file (`tests/integration/api_routes.rs`) now also covers tracking-workspace-specific semantics:
+The API route integration suites (`tests/integration/api_*.rs`) cover tracking-workspace-specific semantics:
 
 - track-file queue-first behavior (no immediate mirror copy)
 - folder scan queue-first behavior (tracks + enqueues, no immediate mirror)
@@ -296,7 +308,7 @@ These tests cover the read-only filesystem route that powers the web UI path pic
 - invalid and unreadable path handling
 - directory-only filtering for directory pickers
 
-The tracked file/folder validation edge cases remain covered in `tests/integration/api_routes.rs`, where absolute-path submissions are accepted only when they resolve under the selected drive pair's active root.
+The tracked file/folder validation edge cases are covered in `tests/integration/api_files.rs` and `tests/integration/api_folders.rs`, where absolute-path submissions are accepted only when they resolve under the selected drive pair's active root.
 
 ### Tracking Scale Integration Test (100k rows)
 
@@ -315,7 +327,7 @@ The current budget enforced in the test is `3000 ms` per measured query path.
 
 File: `tests/integration/packaging.rs`
 
-These Rust tests use only `std::fs` — no binary invocations. They verify that all packaging artifacts (systemd service file, default config, `profile.d` hook, QEMU install/failover/uninstall scripts, and maintainer scripts) exist and contain the required sections. Run them with:
+These Rust tests use only `std::fs` — no binary invocations. They verify that all packaging artifacts (systemd service file, default config, `profile.d` hook, QEMU bundle/wrapper scripts, and maintainer scripts) exist and contain the required sections. Run them with:
 
 ```bash
 cargo test --test packaging
@@ -425,11 +437,18 @@ mod tests {
 
 ## QEMU Installation Tests
 
-There are three QEMU suites:
+The QEMU tests are bundle-based:
 
-- `tests/installation/qemu_test.sh` is the fast package/install smoke test.
-- `tests/installation/qemu_failover_test.sh` is the heavier end-to-end failover suite with extra virtio disks and QMP hot-remove.
-- `tests/installation/qemu_uninstall_test.sh` validates full package purge, including removal of package-owned config/DB/backup/log paths.
+- Backward-compatible wrappers:
+  - `tests/installation/qemu_test.sh` -> `tests/installation/bundles/smoke.sh`
+  - `tests/installation/qemu_failover_test.sh` -> `tests/installation/bundles/failover.sh`
+  - `tests/installation/qemu_uninstall_test.sh` -> `tests/installation/bundles/uninstall.sh`
+- Additional bundles:
+  - `tests/installation/bundles/resilience.sh`
+  - `tests/installation/bundles/upgrade.sh`
+  - `tests/installation/bundles/degraded_boot.sh`
+  - `tests/installation/bundles/scale.sh` (nightly-only)
+  - `tests/installation/bundles/scale_lowmem.sh` (nightly-only)
 
 ### Prerequisites
 
@@ -485,6 +504,11 @@ The package is written to `target/debian/bitprotector_*.deb`.
 # Full uninstall / purge suite
 ./tests/installation/qemu_uninstall_test.sh
 
+# Additional bundles
+./tests/installation/bundles/resilience.sh
+ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha1_amd64.deb ./tests/installation/bundles/upgrade.sh
+./tests/installation/bundles/degraded_boot.sh
+
 # Optional port/timeout overrides (useful when another VM is running)
 SSH_PORT=2224 API_PORT=18445 TIMEOUT=240 ./tests/installation/qemu_test.sh
 SSH_PORT=2225 API_PORT=18446 TIMEOUT=360 ./tests/installation/qemu_failover_test.sh
@@ -495,45 +519,60 @@ All scripts stream serial console lines to your terminal as the VM boots. They a
 
 ### What gets tested
 
+The scenario catalog lives under `tests/installation/scenarios/` and is grouped by bundle. Each bundle reuses a single VM and runs multiple scenario scripts through the shared runner in `tests/installation/lib/scenarios.sh`.
+
 ### Smoke test coverage
 
-| Test | Description |
-| --- | --- |
-| Package installed | `which bitprotector` and `bitprotector --version` succeed |
-| Service status | `systemctl is-active bitprotector` (NOTE: requires TLS certs to be present for full start) |
-| CLI smoke tests | `bitprotector --db /tmp/test.db drives list` and `status` succeed |
-| SSH login hook | `/etc/profile.d/bitprotector-status.sh` is present |
+`tests/installation/scenarios/smoke/` currently contains 12 ordered scenarios:
+
+- package install + service boot under TLS
+- CLI/profile smoke checks
+- journald integration
+- PAM login (`testauth` / `hunter2`)
+- JWT validity across service restart
+- TLS cert rotation
+- path traversal rejection checks
+- reboot persistence of service + tracked data
 
 ### Failover suite coverage
 
-| Test | Description |
-| --- | --- |
-| Planned failover | Marks the primary slot `quiescing`, confirms failure, and verifies `active_role` switches to `secondary` |
-| Virtual-path retargeting | Confirms symlinks move from `/mnt/primary/...` to `/mnt/mirror/...` during failover |
-| Degraded writes | Writes through the virtual path while secondary is active, then runs folder scan to update checksums and mirror metadata |
-| Replacement rebuild | Assigns `/mnt/replacement-primary`, runs `sync process`, and verifies files are rebuilt and virtual paths switch back |
-| Emergency failover | Uses a QMP control socket plus `device_del` to hot-remove the active disk, then verifies a follow-up BitProtector operation fails over future opens to the surviving mirror |
+`tests/installation/scenarios/failover/` currently contains 12 ordered scenarios, including:
+
+- planned and emergency failover
+- bit-flip corruption repair and unrecoverable both-corrupted handling
+- large-file streaming
+- integrity-triggered recovery
+- folder virtual-path retarget checks
+- unicode/whitespace/long-path handling
+- multi-pair and cross-filesystem matrix coverage (ext4/xfs)
+- QMP hot-insert and hot-remove disk paths
 
 ### Uninstall suite coverage
 
-| Test | Description |
-| --- | --- |
-| Package-owned data setup | Creates DB data at `/var/lib/bitprotector/bitprotector.db`, adds a backup destination under `/var/lib/bitprotector/backups/uninstall-test`, and runs a backup |
-| Full purge | Runs `apt-get purge -y bitprotector` |
-| Removal verification | Confirms package metadata, `/usr/bin/bitprotector`, `/etc/bitprotector`, `/var/lib/bitprotector`, and `/var/log/bitprotector` are removed |
+`tests/installation/scenarios/uninstall/` currently contains 4 ordered scenarios:
 
-### Smoke test exit codes (`qemu_test.sh`)
+- package install verification
+- package-owned data creation
+- full purge verification of package-owned assets
+- purge regression guard that user-drive data remains intact
 
-| Code | Meaning |
-| --- | --- |
-| `0` | All tests passed |
-| `1` | `.deb` build or installation failed |
-| `2` | systemd service failed to start |
-| `3` | CLI smoke tests failed |
-| `4` | API not accessible |
+### Additional bundle coverage
 
-The failover and uninstall suites currently exit non-zero on the first failed assertion and print the failing scenario step directly from script output.
+- `tests/installation/scenarios/resilience/` (8): ENOSPC, readonly mirror, permission errors, symlink loop, SIGTERM/SIGKILL/panic recovery, journal scrape.
+- `tests/installation/scenarios/upgrade/` (2): alpha1 -> current upgrade with live data and reinstall config preservation.
+- `tests/installation/scenarios/degraded-boot/` (2): missing/fake mount points at boot without service startup failure.
+- `tests/installation/scenarios/scale/` (2, nightly-only): 100k file scan and inotify saturation.
+- `tests/installation/scenarios/scale-lowmem/` (1, nightly-only): large dataset processing under 1 GB RAM.
 
-### TLS for full service startup
+All bundles fail fast on the first failed scenario and print the failing scenario name plus recent serial-log lines.
 
-During the QEMU tests the service may not start cleanly because no TLS certificate is provisioned. This is expected — the smoke and failover checks use CLI commands with an explicit `--db` path and do not require the daemon to be running. To test the full service (including the API), add a self-signed cert to the cloud-init `runcmd` block in the script. See [docs/CONFIGURATION.md](CONFIGURATION.md#generating-a-self-signed-certificate) for a suitable `openssl` command.
+### Coverage commands
+
+Run Rust and frontend coverage locally:
+
+```bash
+cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov
+cd frontend && npm run test:coverage
+```
+
+Coverage artifacts (`rust.lcov` and `frontend/coverage/`) are uploaded by the non-gating `coverage` CI job.

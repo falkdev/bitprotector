@@ -2035,6 +2035,8 @@ pub struct SystemStatus {
 mod tests {
     use super::*;
     use crate::db::schema::initialize_schema;
+    use std::thread;
+    use tempfile::NamedTempFile;
 
     fn make_repo() -> Repository {
         let pool = create_memory_pool().expect("Failed to create pool");
@@ -2222,6 +2224,177 @@ mod tests {
         assert!(items.iter().all(|item| item.status != "completed"));
         assert!(items.iter().any(|item| item.id == pending.id));
         assert!(items.iter().any(|item| item.id == failed.id));
+    }
+
+    #[test]
+    fn test_clear_completed_sync_queue_preserves_in_flight() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let file1 = repo
+            .create_tracked_file(pair.id, "f1.txt", "h1", 1, None)
+            .unwrap();
+        let file2 = repo
+            .create_tracked_file(pair.id, "f2.txt", "h2", 1, None)
+            .unwrap();
+        let file3 = repo
+            .create_tracked_file(pair.id, "f3.txt", "h3", 1, None)
+            .unwrap();
+
+        let completed = repo.create_sync_queue_item(file1.id, "mirror").unwrap();
+        repo.update_sync_queue_status(completed.id, "completed", None)
+            .unwrap();
+        let in_progress = repo.create_sync_queue_item(file2.id, "verify").unwrap();
+        repo.update_sync_queue_status(in_progress.id, "in_progress", None)
+            .unwrap();
+        let pending = repo
+            .create_sync_queue_item(file3.id, "restore_master")
+            .unwrap();
+
+        let deleted = repo.clear_completed_sync_queue().unwrap();
+        assert_eq!(deleted, 1);
+
+        let (remaining, total) = repo.list_sync_queue(None, 1, 50).unwrap();
+        assert_eq!(total, 2);
+        assert!(remaining.iter().any(|item| item.id == in_progress.id));
+        assert!(remaining.iter().any(|item| item.id == pending.id));
+        assert!(remaining.iter().all(|item| item.status != "completed"));
+    }
+
+    #[test]
+    fn test_list_tracking_items_filter_combinations() {
+        let repo = make_repo();
+        let pair_a = repo.create_drive_pair("pair-a", "/pa", "/sa").unwrap();
+        let pair_b = repo.create_drive_pair("pair-b", "/pb", "/sb").unwrap();
+
+        let direct_with_virtual = repo
+            .create_tracked_file_with_source(
+                pair_a.id,
+                "docs/direct.txt",
+                "hash-direct",
+                10,
+                Some("/virtual/docs/direct.txt"),
+                true,
+                false,
+            )
+            .unwrap();
+        repo.update_tracked_file_mirror_status(direct_with_virtual.id, true)
+            .unwrap();
+
+        let folder_based_no_virtual = repo
+            .create_tracked_file_with_source(
+                pair_a.id,
+                "docs/folder.txt",
+                "hash-folder",
+                20,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        let _folder = repo
+            .create_tracked_folder(pair_a.id, "docs", Some("/virtual/docs"))
+            .unwrap();
+
+        let _pair_b_file = repo
+            .create_tracked_file_with_source(
+                pair_b.id,
+                "other/ignore.txt",
+                "hash-b",
+                30,
+                Some("/virtual/other/ignore.txt"),
+                true,
+                false,
+            )
+            .unwrap();
+
+        let (filtered, total) = repo
+            .list_tracking_items(
+                Some(pair_a.id),
+                None,
+                Some("/virtual/docs"),
+                Some(true),
+                Some("file"),
+                Some("direct"),
+                1,
+                50,
+            )
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, direct_with_virtual.id);
+
+        let (folder_source_items, total_folder_source) = repo
+            .list_tracking_items(
+                Some(pair_a.id),
+                None,
+                None,
+                Some(true),
+                Some("file"),
+                Some("folder"),
+                1,
+                50,
+            )
+            .unwrap();
+        assert_eq!(total_folder_source, 1);
+        assert_eq!(folder_source_items[0].id, folder_based_no_virtual.id);
+
+        let (paged, total_paged) = repo
+            .list_tracking_items(
+                Some(pair_a.id),
+                None,
+                None,
+                None,
+                Some("all"),
+                Some("all"),
+                2,
+                1,
+            )
+            .unwrap();
+        assert_eq!(total_paged, 3);
+        assert_eq!(paged.len(), 1);
+    }
+
+    #[test]
+    fn test_transaction_rollback_on_fk_violation() {
+        let repo = make_repo();
+        let mut conn = repo.conn().unwrap();
+        let tx = conn.transaction().unwrap();
+        let result = tx.execute(
+            "INSERT INTO tracked_files (drive_pair_id, relative_path, checksum, file_size)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![9999i64, "ghost.txt", "hash", 1i64],
+        );
+        assert!(result.is_err());
+        tx.rollback().unwrap();
+        drop(conn);
+        assert_eq!(repo.count_tracked_files(None).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_connection_pool_behaviour_under_concurrent_use() {
+        let db_file = NamedTempFile::new().unwrap();
+        let pool = create_pool(db_file.path().to_str().unwrap()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            initialize_schema(&conn).unwrap();
+        }
+        let repo = Repository::new(pool);
+        repo.create_drive_pair("concurrency", "/p", "/s").unwrap();
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let repo_clone = repo.clone();
+            handles.push(thread::spawn(move || {
+                for _ in 0..50 {
+                    let _ = repo_clone.list_drive_pairs().unwrap();
+                    let _ = repo_clone.get_system_status().unwrap();
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 
     // ─── Event Log ────────────────────────────────────────────────────────────────
