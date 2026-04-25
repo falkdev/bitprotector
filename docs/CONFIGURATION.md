@@ -1,98 +1,57 @@
 # Configuration Reference
 
-BitProtector is configured via command-line flags passed to `bitprotector serve`. The file `/etc/bitprotector/config.toml` is installed as a reference template but **is not currently read by the binary** — all settings must be passed as CLI flags.
+BitProtector reads `/etc/bitprotector/config.toml` at startup. Settings are resolved in this order:
+
+1. CLI flag (highest priority)
+2. Config file value
+3. Hardcoded default
+
+Use the global `--config` flag to specify a custom config file path:
 
 ```bash
-bitprotector serve \
-  --host 0.0.0.0 \
-  --port 8443 \
-  --jwt-secret "$(openssl rand -hex 32)" \
-  --tls-cert /etc/bitprotector/tls/cert.pem \
-  --tls-key  /etc/bitprotector/tls/key.pem \
-  --rate-limit-rps 100
+bitprotector --config /path/to/custom.toml serve ...
 ```
 
-The database path is a global flag available to all subcommands:
-
-```bash
-bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
-```
+The file is optional — a missing or unreadable config silently falls back to defaults.
 
 ---
 
 ## Table of Contents
 
 - [Section: \[server\]](#section-server)
-- [Section: \[tls\]](#section-tls)
 - [Section: \[database\]](#section-database)
-- [Section: \[auth\]](#section-auth)
-- [Section: \[virtual\_paths\]](#section-virtual_paths)
-- [Section: \[logging\]](#section-logging)
-- [Section: \[scheduler\]](#section-scheduler)
+- [Logging](#logging)
+- [Scheduler](#scheduler)
+- [Virtual Paths](#virtual-paths)
 - [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate)
-- [CLI --db flag](#cli---db-flag)
+- [CLI global flags](#cli-global-flags)
 - [Example — complete serve invocation](#example--complete-serve-invocation)
 
 ---
 
 ## Section: [server]
 
-Controls the HTTP listener.
+Controls the HTTP listener, TLS, and authentication. All keys in this section are supported in the config file **and** as CLI flags to `bitprotector serve`.
 
 | Key / CLI flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. |
 | `port` / `--port` | integer | `8443` | TCP port for the HTTPS API. |
 | `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address. |
-
-```bash
-bitprotector serve --host 0.0.0.0 --port 8443 --rate-limit-rps 100
-```
-
----
-
-## Section: [tls]
-
-TLS certificate and private key for the HTTPS server. Both files must be present before the service can start.
-
-| Key / CLI flag | Type | Default | Description |
-| --- | --- | --- | --- |
+| `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
 | `tls_cert` / `--tls-cert` | string | *(none)* | Path to the PEM-encoded TLS certificate (or full chain). |
 | `tls_key` / `--tls-key` | string | *(none)* | Path to the PEM-encoded private key. |
 
-```bash
-bitprotector serve --tls-cert /etc/bitprotector/tls/cert.pem \
-                   --tls-key  /etc/bitprotector/tls/key.pem
-```
+Both files must be present before the service can start. See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate).
 
-See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate) below.
-
----
-
-## Section: [database]
-
-| Key / CLI flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `path` / `--db` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
-
-```bash
-bitprotector --db /var/lib/bitprotector/bitprotector.db serve ...
-```
-
----
-
-## Section: [auth]
-
-PAM is used for credential verification; no additional configuration is required for PAM itself.
-
-| Key / CLI flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
-
-The JWT token lifetime is fixed at **86400 seconds (24 hours)** and is not configurable.
-
-```bash
-bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
+```toml
+[server]
+host          = "0.0.0.0"
+port          = 8443
+rate_limit_rps = 100
+jwt_secret    = "replace-with-a-random-64-char-string"
+tls_cert      = "/etc/bitprotector/tls/cert.pem"
+tls_key       = "/etc/bitprotector/tls/key.pem"
 ```
 
 > **Security note:** The JWT secret must be kept confidential. Anyone with this value can forge valid tokens for any user. Generate a strong secret with:
@@ -101,6 +60,51 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 > openssl rand -hex 32
 > ```
 
+The JWT token lifetime is fixed at **86400 seconds (24 hours)** and is not configurable.
+
+---
+
+## Section: [database]
+
+Supported in the config file and overridden by the global `--db` flag.
+
+| Key / CLI flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` / `--db` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
+
+```toml
+[database]
+path = "/var/lib/bitprotector/bitprotector.db"
+```
+
+---
+
+## Logging
+
+Log level and output file are **not** currently read from the config file. Control them via environment variable:
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `RUST_LOG` | `info` | Minimum log level. One of: `trace`, `debug`, `info`, `warn`, `error`. |
+
+```bash
+RUST_LOG=debug bitprotector serve ...
+```
+
+Structured output goes to the journal when running under systemd.
+
+---
+
+## Scheduler
+
+Scheduled tasks (periodic sync and integrity checks) are managed via the API or CLI — not the config file.
+
+Use `bitprotector scheduler` subcommands or `POST /api/v1/scheduler/schedules` to create and manage schedules. See [API.md](API.md) and the scheduler CLI help:
+
+```bash
+bitprotector scheduler --help
+```
+
 ---
 
 ## Virtual Paths
@@ -108,29 +112,6 @@ bitprotector serve --jwt-secret "$(openssl rand -hex 32)"
 BitProtector no longer uses a global virtual root such as `symlink_base`. Each file or folder virtual path is the exact absolute filesystem path where BitProtector will create a symlink.
 
 Make sure the service user has permission to create parent directories and symlinks at whatever virtual paths you assign through the CLI, API, or web UI.
-
----
-
-## Section: [logging]
-
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `level` | string | `"info"` | Minimum log level for `tracing` output. One of: `trace`, `debug`, `info`, `warn`, `error`. |
-| `file` | string | `"/var/log/bitprotector/bitprotector.log"` | Path to the log file. The directory must be writable by the service user. |
-
-```toml
-[logging]
-level = "info"
-file  = "/var/log/bitprotector/bitprotector.log"
-```
-
-The `RUST_LOG` environment variable overrides `level` if set.
-
----
-
-## Section: [scheduler]
-
-The scheduler API is not yet implemented. Background tasks can be run on demand via the CLI (`bitprotector sync process`) or the API (`POST /sync/process`, `POST /sync/run/{task}`). The `schedule_config` table is reserved for future scheduled-task management.
 
 ---
 
@@ -151,17 +132,22 @@ sudo openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
 sudo chmod 600 /etc/bitprotector/tls/key.pem
 ```
 
-For production, use a certificate from a trusted CA (e.g., Let's Encrypt via `certbot`) and update `cert` and `key` paths accordingly.
+For production, use a certificate from a trusted CA (e.g., Let's Encrypt via `certbot`) and update `tls_cert` and `tls_key` accordingly.
 
 ---
 
-## CLI --db flag
+## CLI global flags
 
-The `--db` flag is a global flag available to all subcommands. It overrides the default database path without modifying any config file. This is primarily useful for testing or running ephemeral one-shot commands:
+These flags are available to all subcommands and override the corresponding config file values.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--db <path>` | `/var/lib/bitprotector/bitprotector.db` | Path to the SQLite database file. |
+| `--config <path>` | `/etc/bitprotector/config.toml` | Path to the TOML configuration file. |
 
 ```bash
 bitprotector --db /tmp/scratch.db drives list
-# uses /tmp/scratch.db instead of the configured database path
+bitprotector --config /etc/bitprotector/staging.toml serve ...
 ```
 
 ---
@@ -180,4 +166,4 @@ bitprotector \
   --rate-limit-rps 100
 ```
 
-When deployed via the systemd unit, these flags are set in the `ExecStart` line of the service file at `/lib/systemd/system/bitprotector.service`.
+When deployed via the systemd unit, these flags are set in the `ExecStart` line of the service file at `/lib/systemd/system/bitprotector.service`. Alternatively, set them in `/etc/bitprotector/config.toml` so the service file only needs `bitprotector serve`.

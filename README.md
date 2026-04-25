@@ -167,14 +167,25 @@ bitprotector <subcommand> --help
 
 ## Configuration
 
-The service is configured via CLI flags passed to `bitprotector serve`. The most important flags are:
+The service reads `/etc/bitprotector/config.toml` at startup. CLI flags override config file values, which override hardcoded defaults.
+
+```toml
+# /etc/bitprotector/config.toml
+[server]
+host       = "0.0.0.0"
+port       = 8443
+jwt_secret = "replace-with-a-random-64-char-string"  # MUST be changed
+tls_cert   = "/etc/bitprotector/tls/cert.pem"
+tls_key    = "/etc/bitprotector/tls/key.pem"
+
+[database]
+path = "/var/lib/bitprotector/bitprotector.db"
+```
+
+CLI flags can override any value at runtime, and `--config` selects a different config file:
 
 ```bash
-bitprotector serve \
-  --tls-cert /etc/bitprotector/tls/cert.pem \
-  --tls-key  /etc/bitprotector/tls/key.pem \
-  --jwt-secret "change-me-in-production"  # MUST be changed\
-  --port 8443
+bitprotector --config /etc/bitprotector/config.toml serve --port 9443
 ```
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for a full reference of every option.
