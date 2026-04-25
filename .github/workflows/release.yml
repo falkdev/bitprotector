@@ -5,6 +5,9 @@ on:
     tags:
       - 'v[0-9]*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ---------------------------------------------------------------------------
   # Validate that the tag format is correct and matches Cargo.toml version.
@@ -54,15 +57,22 @@ jobs:
           echo "Version match confirmed: ${TAG_VERSION}"
 
   # ---------------------------------------------------------------------------
-  # Build release .deb and verify its version is correct.
+  # Build release .deb for ubuntu-24.04 and ubuntu-26.04, and verify each.
   # Uses --deb-version to produce a proper Ubuntu-style version:
-  #   Cargo.toml "1.0.0-alpha1" → Debian "1.0.0~alpha1-0ubuntu1~24.04.1"
-  #   Cargo.toml "1.0.0"        → Debian "1.0.0-0ubuntu1~24.04.1"
+  #   Cargo.toml "1.0.0-alpha1" + 24.04 → Debian "1.0.0~alpha1-0ubuntu1~24.04.1"
+  #   Cargo.toml "1.0.0"        + 26.04 → Debian "1.0.0-0ubuntu1~26.04.1"
   # ---------------------------------------------------------------------------
   build-and-verify:
-    name: Build and Verify
+    name: Build and Verify (ubuntu-${{ matrix.ubuntu }})
     needs: validate-tag
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            deb_suffix: "24.04.1"
+          - ubuntu: "26.04"
+            deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
 
@@ -88,7 +98,7 @@ jobs:
         run: |
           CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
           DEB_UPSTREAM=$(echo "${CARGO_VERSION}" | sed 's/-/~/')
-          RELEASE_DEB_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1"
+          RELEASE_DEB_VERSION="${DEB_UPSTREAM}-0ubuntu1~${{ matrix.deb_suffix }}"
           echo "RELEASE_DEB_VERSION=${RELEASE_DEB_VERSION}" >> "$GITHUB_ENV"
           echo "Debian version: ${RELEASE_DEB_VERSION}"
 
@@ -102,12 +112,15 @@ jobs:
         run: |
           chmod +x scripts/check-version.sh
           DEB_PATH=$(ls target/debian/bitprotector_*.deb | head -1)
-          ./scripts/check-version.sh --deb "${DEB_PATH}" --binary target/release/bitprotector
+          ./scripts/check-version.sh \
+            --deb "${DEB_PATH}" \
+            --binary target/release/bitprotector \
+            --ubuntu-version ${{ matrix.ubuntu }}
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v5
         with:
-          name: bitprotector-deb-release
+          name: bitprotector-deb-release-ubuntu-${{ matrix.ubuntu }}
           path: target/debian/bitprotector_*.deb
           retention-days: 30
 
@@ -124,10 +137,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download .deb artifact
+      - name: Download ubuntu-24.04 .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb-release
+          name: bitprotector-deb-release-ubuntu-24.04
+          path: dist/
+
+      - name: Download ubuntu-26.04 .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb-release-ubuntu-26.04
           path: dist/
 
       - name: Create GitHub Release
@@ -136,13 +155,13 @@ jobs:
         run: |
           VERSION="${{ needs.validate-tag.outputs.version }}"
           IS_PRERELEASE="${{ needs.validate-tag.outputs.is_prerelease }}"
-          DEB_FILE=$(ls dist/bitprotector_*.deb | head -1)
           PRERELEASE_FLAG=()
           if [[ "${IS_PRERELEASE}" == "true" ]]; then
             PRERELEASE_FLAG=(--prerelease)
           fi
+          mapfile -t DEB_FILES < <(ls dist/bitprotector_*_amd64.deb)
           gh release create "v${VERSION}" \
             --title "bitprotector v${VERSION}" \
             --generate-notes \
             "${PRERELEASE_FLAG[@]}" \
-            "${DEB_FILE}"
+            "${DEB_FILES[@]}"

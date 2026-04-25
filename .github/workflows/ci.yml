@@ -16,6 +16,9 @@ on:
         type: boolean
         default: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -202,12 +205,19 @@ jobs:
         run: cargo test --test scaling_100k
 
   # ---------------------------------------------------------------------------
-  # Layer 4 — build .deb artifact
+  # Layer 4 — build .deb artifacts (ubuntu-24.04 and ubuntu-26.04)
   # ---------------------------------------------------------------------------
   build-artifacts:
-    name: Build Artifacts
+    name: Build Artifacts (ubuntu-${{ matrix.ubuntu }})
     needs: rust-integration-heavy
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            deb_suffix: "24.04.1"
+          - ubuntu: "26.04"
+            deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -243,7 +253,7 @@ jobs:
           # Convert '-' to '~' for Debian pre-release ordering, append Ubuntu revision + git SHA.
           DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
           SHORT_SHA=$(git rev-parse --short HEAD)
-          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
+          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~${{ matrix.deb_suffix }}+git.${SHORT_SHA}"
           echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
           echo "Dev version: ${DEV_VERSION}"
 
@@ -253,7 +263,7 @@ jobs:
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v5
         with:
-          name: bitprotector-deb
+          name: bitprotector-deb-ubuntu-${{ matrix.ubuntu }}
           path: target/debian/bitprotector_*.deb
           retention-days: 7
 
@@ -273,13 +283,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2222
             api_port: 18443
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2223
             api_port: 18444
-    # ubuntu-26.04 image is provisional — treat failures as non-blocking until
-    # the image is stable on cloud-images.ubuntu.com. Remove continue-on-error
-    # once 26.04 LTS is fully published.
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -290,11 +298,10 @@ jobs:
       - name: Download .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU smoke test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -333,10 +340,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2232
             api_port: 18543
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2233
             api_port: 18544
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -347,11 +355,10 @@ jobs:
       - name: Download .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU resilience test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -390,10 +397,13 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2242
             api_port: 18643
+            deb_artifact: bitprotector-deb-ubuntu-24.04
+            deb_suffix: "24.04.1"
           - guest: ubuntu-26.04
             ssh_port: 2243
             api_port: 18644
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
+            deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -410,7 +420,7 @@ jobs:
       - name: Download current .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: Build alpha1 .deb
@@ -427,7 +437,7 @@ jobs:
           if ! cargo deb --version &>/dev/null; then
             cargo install cargo-deb
           fi
-          cargo deb --deb-version "1.0.0~alpha1-0ubuntu1~24.04.1"
+          cargo deb --deb-version "1.0.0~alpha1-0ubuntu1~${{ matrix.deb_suffix }}"
           mkdir -p "${GITHUB_WORKSPACE}/target/debian/alpha1"
           cp target/debian/bitprotector_*.deb "${GITHUB_WORKSPACE}/target/debian/alpha1/"
           popd
@@ -435,7 +445,6 @@ jobs:
           echo "ALPHA1_DEB=$(ls -1 ${GITHUB_WORKSPACE}/target/debian/alpha1/bitprotector_*.deb | head -1)" >> "$GITHUB_ENV"
 
       - name: QEMU upgrade test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -475,10 +484,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2252
             api_port: 18743
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2253
             api_port: 18744
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -489,11 +499,10 @@ jobs:
       - name: Download .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU degraded-boot test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -532,10 +541,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2262
             api_port: 18843
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2263
             api_port: 18844
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -546,11 +556,10 @@ jobs:
       - name: Download .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU failover test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
@@ -589,10 +598,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2272
             api_port: 18943
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2273
             api_port: 18944
-    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -603,11 +613,10 @@ jobs:
       - name: Download .deb artifact
         uses: actions/download-artifact@v5
         with:
-          name: bitprotector-deb
+          name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
       - name: QEMU uninstall test
-        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
