@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.parse.outputs.version }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v5
 
@@ -29,6 +30,13 @@ jobs:
           fi
           VERSION="${TAG#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          if [[ "${VERSION}" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Prerelease: true"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Prerelease: false"
+          fi
           echo "Parsed version: ${VERSION}"
 
       - name: Check tag matches Cargo.toml version
@@ -127,8 +135,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ needs.validate-tag.outputs.version }}"
+          IS_PRERELEASE="${{ needs.validate-tag.outputs.is_prerelease }}"
           DEB_FILE=$(ls dist/bitprotector_*.deb | head -1)
+          PRERELEASE_FLAG=()
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            PRERELEASE_FLAG=(--prerelease)
+          fi
           gh release create "v${VERSION}" \
             --title "bitprotector v${VERSION}" \
             --generate-notes \
+            "${PRERELEASE_FLAG[@]}" \
             "${DEB_FILE}"
