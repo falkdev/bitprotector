@@ -10,7 +10,7 @@ export interface TrackedFolder {
 export interface CreateFolderRequest {
   drive_pair_id: number
   folder_path: string
-  virtual_path?: string
+  virtual_path?: string | null
 }
 
 export interface UpdateFolderRequest {

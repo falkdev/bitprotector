@@ -69,6 +69,7 @@ pub fn resolve_path_within_drive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::fs;
     use tempfile::TempDir;
 
@@ -119,5 +120,109 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("outside the active drive root"));
+    }
+
+    #[test]
+    fn resolves_absolute_path_inside_root() {
+        let root = TempDir::new().unwrap();
+        let file_path = root.path().join("inside.txt");
+        fs::write(&file_path, b"ok").unwrap();
+
+        let resolved = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            file_path.to_str().unwrap(),
+            PathTargetKind::File,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, "inside.txt");
+    }
+
+    #[test]
+    fn resolves_unicode_and_whitespace_path() {
+        let root = TempDir::new().unwrap();
+        let file_path = root.path().join("日本語  file.txt");
+        fs::write(&file_path, b"ok").unwrap();
+
+        let resolved = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            "  日本語  file.txt  ",
+            PathTargetKind::File,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, "日本語  file.txt");
+    }
+
+    #[test]
+    fn rejects_non_existent_path() {
+        let root = TempDir::new().unwrap();
+        let err = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            "missing.txt",
+            PathTargetKind::File,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn rejects_drive_root_selection() {
+        let root = TempDir::new().unwrap();
+        let err = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            root.path().to_str().unwrap(),
+            PathTargetKind::Directory,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("drive root itself"));
+    }
+
+    #[test]
+    fn rejects_path_target_kind_mismatch() {
+        let root = TempDir::new().unwrap();
+        fs::create_dir(root.path().join("docs")).unwrap();
+        fs::write(root.path().join("f.txt"), b"ok").unwrap();
+
+        let err_file_expected = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            "docs",
+            PathTargetKind::File,
+        )
+        .unwrap_err();
+        assert!(err_file_expected.to_string().contains("not a file"));
+
+        let err_dir_expected = resolve_path_within_drive_root(
+            root.path().to_str().unwrap(),
+            "f.txt",
+            PathTargetKind::Directory,
+        )
+        .unwrap_err();
+        assert!(err_dir_expected.to_string().contains("not a directory"));
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_resolved_paths_remain_within_root(input in ".{0,64}") {
+            let root = TempDir::new().unwrap();
+            fs::create_dir_all(root.path().join("docs")).unwrap();
+            fs::write(root.path().join("docs/ok.txt"), b"ok").unwrap();
+            fs::write(root.path().join("space name.txt"), b"ok").unwrap();
+            let canonical_root = root.path().canonicalize().unwrap();
+
+            let result = resolve_path_within_drive_root(
+                root.path().to_str().unwrap(),
+                &input,
+                PathTargetKind::File,
+            );
+
+            if let Ok(relative) = result {
+                let resolved = canonical_root.join(relative);
+                let canonical = resolved.canonicalize().unwrap();
+                prop_assert!(canonical.starts_with(&canonical_root));
+            }
+        }
     }
 }

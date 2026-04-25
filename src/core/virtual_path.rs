@@ -390,6 +390,7 @@ mod tests {
     use crate::core::tracker;
     use crate::db::repository::{create_memory_pool, Repository};
     use crate::db::schema::initialize_schema;
+    use proptest::prelude::*;
     use tempfile::TempDir;
 
     fn setup_repo() -> Repository {
@@ -590,5 +591,24 @@ mod tests {
             fs::read_link(&folder_virtual_path).unwrap(),
             secondary.path().join("docs")
         );
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_normalize_virtual_path_is_idempotent(input in ".{0,64}") {
+            if let Ok(normalized) = normalize_virtual_path(&input) {
+                let second = normalize_virtual_path(&normalized).unwrap();
+                prop_assert_eq!(second, normalized);
+            }
+        }
+
+        #[test]
+        fn proptest_normalized_virtual_paths_have_expected_shape(input in ".{0,64}") {
+            if let Ok(normalized) = normalize_virtual_path(&input) {
+                prop_assert!(normalized.starts_with('/'));
+                prop_assert!(!normalized.contains("/../"));
+                prop_assert!(!normalized.ends_with('/'));
+            }
+        }
     }
 }

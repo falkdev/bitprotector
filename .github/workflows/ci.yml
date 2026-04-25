@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       run_heavy_qemu:
-        description: Also run QEMU failover and uninstall layers (normally main-only)
+        description: Also run heavy QEMU layers (failover/uninstall/resilience/upgrade/degraded-boot) for manual runs
         type: boolean
         default: false
   workflow_call:
@@ -78,6 +78,51 @@ jobs:
         run: npm test
 
   # ---------------------------------------------------------------------------
+  # Coverage (non-gating)
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: Coverage
+    needs: unit
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: Install cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          if ! cargo llvm-cov --version &>/dev/null; then
+            cargo install cargo-llvm-cov --locked
+          fi
+
+      - name: Rust coverage
+        run: cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov
+
+      - name: Rust coverage summary
+        run: cargo llvm-cov report --summary-only
+
+      - name: Frontend coverage
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:coverage
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-reports
+          path: |
+            rust.lcov
+            frontend/coverage/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
   # Layer 2 — Rust integration tests (fast — all except scaling_100k)
   # ---------------------------------------------------------------------------
   rust-integration-fast:
@@ -111,6 +156,24 @@ jobs:
         run: cargo test --test cli_status
       - name: packaging
         run: cargo test --test packaging
+      - name: api_drives
+        run: cargo test --test api_drives
+      - name: api_files
+        run: cargo test --test api_files
+      - name: api_folders
+        run: cargo test --test api_folders
+      - name: api_virtual_paths
+        run: cargo test --test api_virtual_paths
+      - name: api_integrity
+        run: cargo test --test api_integrity
+      - name: api_scheduler
+        run: cargo test --test api_scheduler
+      - name: api_sync
+        run: cargo test --test api_sync
+      - name: api_logs
+        run: cargo test --test api_logs
+      - name: api_database
+        run: cargo test --test api_database
       - name: api_routes
         run: cargo test --test api_routes
       - name: api_filesystem_browser
@@ -206,7 +269,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        guest: [ubuntu-24.04, ubuntu-26.04]
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2222
+            api_port: 18443
+          - guest: ubuntu-26.04
+            ssh_port: 2223
+            api_port: 18444
     # ubuntu-26.04 image is provisional — treat failures as non-blocking until
     # the image is stable on cloud-images.ubuntu.com. Remove continue-on-error
     # once 26.04 LTS is fully published.
@@ -225,13 +294,226 @@ jobs:
           path: target/debian/
 
       - name: QEMU smoke test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
           CI: '1'
         run: ./tests/installation/qemu_test.sh
 
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------------------
-  # Layer 6 — QEMU failover (main + nightly + workflow_dispatch)
+  # Layer 6 — QEMU resilience (PR + main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-resilience:
+    name: QEMU Resilience (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2232
+            api_port: 18543
+          - guest: ubuntu-26.04
+            ssh_port: 2233
+            api_port: 18544
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: QEMU resilience test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/resilience.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 7 — QEMU upgrade (PR + main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-upgrade:
+    name: QEMU Upgrade (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2242
+            api_port: 18643
+          - guest: ubuntu-26.04
+            ssh_port: 2243
+            api_port: 18644
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: ./.github/actions/setup-frontend
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download current .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: Build alpha1 .deb
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          TMP_WORKTREE="$(mktemp -d)"
+          git worktree add "${TMP_WORKTREE}" v1.0.0-alpha1
+          pushd "${TMP_WORKTREE}"
+          pushd frontend
+          npm ci
+          npm run build
+          popd
+          if ! cargo deb --version &>/dev/null; then
+            cargo install cargo-deb
+          fi
+          cargo deb --deb-version "1.0.0~alpha1-0ubuntu1~24.04.1"
+          mkdir -p "${GITHUB_WORKSPACE}/target/debian/alpha1"
+          cp target/debian/bitprotector_*.deb "${GITHUB_WORKSPACE}/target/debian/alpha1/"
+          popd
+          git worktree remove "${TMP_WORKTREE}" --force
+          echo "ALPHA1_DEB=$(ls -1 ${GITHUB_WORKSPACE}/target/debian/alpha1/bitprotector_*.deb | head -1)" >> "$GITHUB_ENV"
+
+      - name: QEMU upgrade test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+          ALPHA1_DEB: ${{ env.ALPHA1_DEB }}
+        run: ./tests/installation/bundles/upgrade.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 8 — QEMU degraded-boot (PR + main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-degraded-boot:
+    name: QEMU Degraded Boot (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2252
+            api_port: 18743
+          - guest: ubuntu-26.04
+            ssh_port: 2253
+            api_port: 18744
+    continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bitprotector-deb
+          path: target/debian/
+
+      - name: QEMU degraded-boot test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/degraded_boot.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 9 — QEMU failover (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-failover:
     name: QEMU Failover (${{ matrix.guest }})
@@ -246,7 +528,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        guest: [ubuntu-24.04, ubuntu-26.04]
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2262
+            api_port: 18843
+          - guest: ubuntu-26.04
+            ssh_port: 2263
+            api_port: 18844
     continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@v5
@@ -262,13 +550,27 @@ jobs:
           path: target/debian/
 
       - name: QEMU failover test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
           CI: '1'
         run: ./tests/installation/qemu_failover_test.sh
 
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------------------
-  # Layer 7 — QEMU uninstall (main + nightly + workflow_dispatch)
+  # Layer 10 — QEMU uninstall (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-uninstall:
     name: QEMU Uninstall (${{ matrix.guest }})
@@ -283,7 +585,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        guest: [ubuntu-24.04, ubuntu-26.04]
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2272
+            api_port: 18943
+          - guest: ubuntu-26.04
+            ssh_port: 2273
+            api_port: 18944
     continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@v5
@@ -299,7 +607,21 @@ jobs:
           path: target/debian/
 
       - name: QEMU uninstall test
+        continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
           CI: '1'
         run: ./tests/installation/qemu_uninstall_test.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn

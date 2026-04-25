@@ -135,7 +135,12 @@ wait_for_vm() {
             fi
         fi
 
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 \
+        if timeout 6 ssh -o StrictHostKeyChecking=no \
+               -o BatchMode=yes \
+               -o ConnectionAttempts=1 \
+               -o ConnectTimeout=2 \
+               -o ServerAliveInterval=2 \
+               -o ServerAliveCountMax=1 \
                -p "${ssh_port}" testuser@localhost \
                "test -f /tmp/install-done" 2>/dev/null; then
             log INFO "VM ready after ${i}s"

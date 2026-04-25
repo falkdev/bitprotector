@@ -11,6 +11,24 @@ fn project_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
+fn read_existing_file(relative_path: &str) -> String {
+    let path = project_root().join(relative_path);
+    assert!(path.exists(), "File must exist at {relative_path}");
+    std::fs::read_to_string(path).unwrap()
+}
+
+fn assert_qemu_wrapper_delegates(wrapper_relative_path: &str, bundle_file_name: &str) {
+    let wrapper = read_existing_file(wrapper_relative_path);
+    assert!(
+        wrapper.contains("exec"),
+        "Wrapper script {wrapper_relative_path} must exec into a bundle"
+    );
+    assert!(
+        wrapper.contains(bundle_file_name),
+        "Wrapper script {wrapper_relative_path} must delegate to {bundle_file_name}"
+    );
+}
+
 #[test]
 fn test_systemd_service_file_exists() {
     let service = project_root().join("packaging/bitprotector.service");
@@ -79,63 +97,71 @@ fn test_profile_d_hook_exists() {
 
 #[test]
 fn test_qemu_install_script_exists() {
-    let script = project_root().join("tests/installation/qemu_test.sh");
+    assert_qemu_wrapper_delegates("tests/installation/qemu_test.sh", "bundles/smoke.sh");
+
+    let content = read_existing_file("tests/installation/bundles/smoke.sh");
     assert!(
-        script.exists(),
-        "QEMU test script must exist at tests/installation/qemu_test.sh"
-    );
-    let content = std::fs::read_to_string(&script).unwrap();
-    assert!(
-        content.contains("qemu-system"),
-        "Script must invoke qemu-system"
+        content.contains("qemu-system-x86_64"),
+        "Smoke bundle must invoke qemu-system-x86_64"
     );
     assert!(
-        content.contains("bitprotector.deb"),
-        "Script must install the .deb package"
+        content.contains("bitprotector*.deb"),
+        "Smoke bundle must install the .deb package"
     );
 }
 
 #[test]
 fn test_qemu_failover_script_exists() {
-    let script = project_root().join("tests/installation/qemu_failover_test.sh");
-    assert!(
-        script.exists(),
-        "QEMU failover test script must exist at tests/installation/qemu_failover_test.sh"
+    assert_qemu_wrapper_delegates(
+        "tests/installation/qemu_failover_test.sh",
+        "bundles/failover.sh",
     );
-    let content = std::fs::read_to_string(&script).unwrap();
+
+    let content = read_existing_file("tests/installation/bundles/failover.sh");
     assert!(
         content.contains("qmp"),
-        "Failover script must use a QMP control socket"
+        "Failover bundle must use a QMP control socket"
+    );
+
+    let planned =
+        read_existing_file("tests/installation/scenarios/failover/failover-01-planned.sh");
+    assert!(
+        planned.contains("drives replace confirm"),
+        "Failover planned scenario must exercise the replacement workflow"
+    );
+
+    let emergency = read_existing_file(
+        "tests/installation/scenarios/failover/failover-12-qmp-hot-remove-secondary.sh",
     );
     assert!(
-        content.contains("drives replace confirm"),
-        "Failover script must exercise the replacement workflow"
-    );
-    assert!(
-        content.contains("device_del"),
-        "Failover script must hot-remove a disk for emergency failover coverage"
+        emergency.contains("qmp_device_del"),
+        "Failover emergency scenario must hot-remove a disk for coverage"
     );
 }
 
 #[test]
 fn test_qemu_uninstall_script_exists() {
-    let script = project_root().join("tests/installation/qemu_uninstall_test.sh");
-    assert!(
-        script.exists(),
-        "QEMU uninstall test script must exist at tests/installation/qemu_uninstall_test.sh"
+    assert_qemu_wrapper_delegates(
+        "tests/installation/qemu_uninstall_test.sh",
+        "bundles/uninstall.sh",
     );
-    let content = std::fs::read_to_string(&script).unwrap();
+
+    let purge_scenario =
+        read_existing_file("tests/installation/scenarios/uninstall/uninstall-03-purge.sh");
     assert!(
-        content.contains("apt-get purge -y bitprotector"),
-        "Uninstall script must purge the package"
-    );
-    assert!(
-        content.contains("/var/lib/bitprotector"),
-        "Uninstall script must assert package-owned data removal"
+        purge_scenario.contains("apt-get purge -y bitprotector"),
+        "Uninstall purge scenario must purge the package"
     );
     assert!(
-        content.contains("database run"),
-        "Uninstall script must create a real backup artifact before purge"
+        purge_scenario.contains("/var/lib/bitprotector"),
+        "Uninstall purge scenario must assert package-owned data removal"
+    );
+
+    let create_data_scenario =
+        read_existing_file("tests/installation/scenarios/uninstall/uninstall-02-create-data.sh");
+    assert!(
+        create_data_scenario.contains("database run"),
+        "Uninstall create-data scenario must create a real backup artifact before purge"
     );
 }
 
