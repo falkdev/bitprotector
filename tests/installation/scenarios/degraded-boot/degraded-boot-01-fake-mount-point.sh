@@ -8,7 +8,9 @@ set -euo pipefail
 DB=/tmp/degraded-01.db
 
 rm -f "${DB}"
-mkdir -p /mnt/fake-primary/docs /tmp/degraded-secondary
+sudo rm -rf /mnt/fake-primary
+sudo install -d -m 0755 -o testuser -g testuser /mnt/fake-primary /mnt/fake-primary/docs
+mkdir -p /tmp/degraded-secondary
 printf "fake mount content\n" > /mnt/fake-primary/docs/fake.txt
 
 bitprotector --db "${DB}" drives add d01 /mnt/fake-primary /tmp/degraded-secondary --no-validate

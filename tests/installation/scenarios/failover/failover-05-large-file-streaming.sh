@@ -19,9 +19,9 @@ bitprotector --db "${DB}" files track 1 large/blob.bin
 bitprotector --db "${DB}" files mirror 1
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 
-pid=$(pidof bitprotector | awk '{print $1}')
+pid=$(pidof bitprotector | awk "{print \$1}")
 if [[ -n "${pid}" ]]; then
-  rss_kb=$(awk '/VmRSS/ { print $2 }' "/proc/${pid}/status")
+  rss_kb=$(awk "/VmRSS/ { print \$2 }" "/proc/${pid}/status")
   test -n "${rss_kb}"
   # Bound is intentionally lenient in VM CI environments.
   [[ "${rss_kb}" -lt 350000 ]]

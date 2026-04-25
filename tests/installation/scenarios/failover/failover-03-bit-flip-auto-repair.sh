@@ -16,15 +16,7 @@ bitprotector --db "${DB}" drives add f03 /mnt/primary /mnt/mirror --no-validate
 bitprotector --db "${DB}" files track 1 docs/flip.txt
 bitprotector --db "${DB}" files mirror 1
 
-python3 - <<'\''PY'\''
-from pathlib import Path
-p = Path('/mnt/mirror/docs/flip.txt')
-with p.open('r+b') as f:
-    f.seek(0)
-    b = f.read(1)
-    f.seek(0)
-    f.write(bytes([b[0] ^ 0xFF]))
-PY
+python3 -c "p=\"/mnt/mirror/docs/flip.txt\"; f=open(p,\"r+b\"); b=f.read(1); f.seek(0); f.write(bytes([b[0] ^ 0xFF])); f.close()"
 
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 bitprotector --db "${DB}" sync process

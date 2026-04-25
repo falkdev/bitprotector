@@ -24,9 +24,9 @@ bitprotector --db "${DB}" sync process
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 
 ! dmesg | grep -q "Killed process"
-pid=$(pidof bitprotector | awk '{print $1}')
+pid=$(pidof bitprotector | awk "{print \$1}")
 if [[ -n "${pid}" ]]; then
-  rss_kb=$(awk '/VmRSS/ { print $2 }' "/proc/${pid}/status")
+  rss_kb=$(awk "/VmRSS/ { print \$2 }" "/proc/${pid}/status")
   [[ "${rss_kb}" -lt 300000 ]]
 fi
 '

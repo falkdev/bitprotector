@@ -206,6 +206,9 @@ export QMP_SOCKET
 # shellcheck source=tests/installation/scenarios/failover/failover-02-emergency-qmp.sh
 source "${SCENARIOS_DIR}/failover-02-emergency-qmp.sh"
 run_scenario "failover-02-emergency-qmp" failover_02_emergency_qmp
+qmp_device_add '{"driver":"virtio-blk-pci","drive":"drive-replacement-primary","id":"dev-replacement-primary","serial":"bpreplprimary"}'
+sleep 3
+ssh_vm 'sudo umount -f /mnt/replacement-primary >/dev/null 2>&1 || true; sudo mount -a; sudo chown -R testuser:testuser /mnt/replacement-primary'
 
 # shellcheck source=tests/installation/scenarios/failover/failover-03-bit-flip-auto-repair.sh
 source "${SCENARIOS_DIR}/failover-03-bit-flip-auto-repair.sh"

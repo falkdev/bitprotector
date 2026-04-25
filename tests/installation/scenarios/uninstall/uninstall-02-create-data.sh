@@ -27,7 +27,7 @@ backup_count=$(sudo find "${BACKUP_DIR}" -maxdepth 1 -type f -name "bitprotector
 test "${backup_count}" -ge 1
 
 # User-owned drive-like data (must survive purge).
-mkdir -p /mnt/primary/docs
+sudo install -d -m 0755 -o testuser -g testuser /mnt/primary/docs
 printf "keep-me-after-purge\n" > /mnt/primary/docs/keeper.txt
 test -f /mnt/primary/docs/keeper.txt
 '

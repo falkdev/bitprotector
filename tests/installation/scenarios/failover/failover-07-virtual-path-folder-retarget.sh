@@ -10,7 +10,7 @@ VROOT=/tmp/bitprotector-virtual/f07
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/* /mnt/replacement-primary/* /tmp/bitprotector-virtual/f07
-mkdir -p /mnt/primary/docs "${VROOT}"
+mkdir -p /mnt/primary/docs /tmp/bitprotector-virtual
 
 for i in $(seq 1 10); do
   printf "doc-%s\n" "${i}" > "/mnt/primary/docs/file-${i}.txt"
