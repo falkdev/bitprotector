@@ -62,17 +62,17 @@ write_files:
       #!/bin/bash
       set -euo pipefail
       dev=/dev/disk/by-id/virtio-bpscale
-      for _ in $(seq 1 30); do
-        [[ -b "${dev}" ]] && break
+      for _ in \$(seq 1 30); do
+        [[ -b "\${dev}" ]] && break
         sleep 1
       done
-      [[ -b "${dev}" ]]
+      [[ -b "\${dev}" ]]
       mkdir -p /mnt/scale /mnt/scale-mirror
-      if ! blkid "${dev}" >/dev/null 2>&1; then
-        mkfs.ext4 -F "${dev}"
+      if ! blkid "\${dev}" >/dev/null 2>&1; then
+        mkfs.ext4 -F "\${dev}"
       fi
-      uuid=$(blkid -s UUID -o value "${dev}")
-      grep -q "${uuid}" /etc/fstab || echo "UUID=${uuid} /mnt/scale ext4 defaults,nofail 0 2" >> /etc/fstab
+      uuid=\$(blkid -s UUID -o value "\${dev}")
+      grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} /mnt/scale ext4 defaults,nofail 0 2" >> /etc/fstab
       mount -a
       mkdir -p /mnt/scale-mirror
       chown -R testuser:testuser /mnt/scale /mnt/scale-mirror

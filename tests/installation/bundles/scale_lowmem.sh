@@ -63,20 +63,20 @@ write_files:
       #!/bin/bash
       set -euo pipefail
       setup_disk() {
-        local serial="$1"
-        local mount_point="$2"
-        local dev="/dev/disk/by-id/virtio-${serial}"
-        for _ in $(seq 1 30); do
-          [[ -b "${dev}" ]] && break
+        local serial="\$1"
+        local mount_point="\$2"
+        local dev="/dev/disk/by-id/virtio-\${serial}"
+        for _ in \$(seq 1 30); do
+          [[ -b "\${dev}" ]] && break
           sleep 1
         done
-        [[ -b "${dev}" ]]
-        mkdir -p "${mount_point}"
-        if ! blkid "${dev}" >/dev/null 2>&1; then
-          mkfs.ext4 -F "${dev}"
+        [[ -b "\${dev}" ]]
+        mkdir -p "\${mount_point}"
+        if ! blkid "\${dev}" >/dev/null 2>&1; then
+          mkfs.ext4 -F "\${dev}"
         fi
-        uuid=$(blkid -s UUID -o value "${dev}")
-        grep -q "${uuid}" /etc/fstab || echo "UUID=${uuid} ${mount_point} ext4 defaults,nofail 0 2" >> /etc/fstab
+        uuid=\$(blkid -s UUID -o value "\${dev}")
+        grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} \${mount_point} ext4 defaults,nofail 0 2" >> /etc/fstab
       }
       setup_disk bplowprimary /mnt/primary
       setup_disk bplowmirror /mnt/mirror
