@@ -110,7 +110,7 @@ function ScheduleFormModal({
     setError(null)
     setSaving(false)
     setMaxDurationValue(
-      schedule?.max_duration_seconds != null ? String(schedule.max_duration_seconds) : '',
+      schedule?.max_duration_seconds != null ? String(schedule.max_duration_seconds) : ''
     )
 
     if (schedule?.cron_expr) {
@@ -545,9 +545,7 @@ export function SchedulerPage() {
             key: 'max_duration',
             header: 'Max Duration',
             cell: (schedule) =>
-              schedule.max_duration_seconds != null
-                ? `${schedule.max_duration_seconds}s`
-                : '—',
+              schedule.max_duration_seconds != null ? `${schedule.max_duration_seconds}s` : '—',
           },
           {
             key: 'enabled',

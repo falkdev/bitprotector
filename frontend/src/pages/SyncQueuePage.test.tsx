@@ -117,7 +117,9 @@ describe('SyncQueuePage', () => {
 
   it('disables clear completed button when there are no completed items', async () => {
     server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 12, status: 'pending' })]))
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 12, status: 'pending' })])
+      )
     )
 
     renderWithApp(<SyncQueuePage />)
@@ -193,9 +195,7 @@ describe('SyncQueuePage', () => {
   })
 
   it('shows paused banner when queue is paused', async () => {
-    server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 40 })], true))
-    )
+    server.use(api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 40 })], true)))
 
     renderWithApp(<SyncQueuePage />)
 
@@ -205,9 +205,7 @@ describe('SyncQueuePage', () => {
   })
 
   it('hides paused banner and shows pause button when queue is not paused', async () => {
-    server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 41 })], false))
-    )
+    server.use(api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 41 })], false)))
 
     renderWithApp(<SyncQueuePage />)
 
@@ -260,4 +258,3 @@ describe('SyncQueuePage', () => {
     })
   })
 })
-
