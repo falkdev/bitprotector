@@ -122,6 +122,7 @@ QEMU_PID=$!
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
 
 BUNDLE_START_TIME="$(date -Iseconds)"
+SSH_VM_TIMEOUT=900
 
 # shellcheck source=tests/installation/scenarios/scale-lowmem/scale-lowmem-01-4gb-dataset.sh
 source "${SCENARIOS_DIR}/scale-lowmem-01-4gb-dataset.sh"
