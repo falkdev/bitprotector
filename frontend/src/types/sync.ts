@@ -35,3 +35,15 @@ export interface ProcessQueueResult {
 export interface ClearCompletedQueueResult {
   deleted: number
 }
+
+export interface QueuePausedResult {
+  queue_paused: boolean
+}
+
+export interface SyncQueueListResponse {
+  queue: SyncQueueItem[]
+  total: number
+  page: number
+  per_page: number
+  queue_paused: boolean
+}

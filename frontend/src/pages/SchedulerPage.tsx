@@ -99,6 +99,7 @@ function ScheduleFormModal({
   const [cronExpr, setCronExpr] = useState('')
   const [cronMode, setCronMode] = useState<'preset' | 'custom'>('preset')
   const [selectedPreset, setSelectedPreset] = useState('')
+  const [maxDurationValue, setMaxDurationValue] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -108,6 +109,9 @@ function ScheduleFormModal({
     setEnabled(schedule?.enabled ?? true)
     setError(null)
     setSaving(false)
+    setMaxDurationValue(
+      schedule?.max_duration_seconds != null ? String(schedule.max_duration_seconds) : '',
+    )
 
     if (schedule?.cron_expr) {
       setTimingMethod('cron')
@@ -175,12 +179,25 @@ function ScheduleFormModal({
     setSaving(true)
     setError(null)
 
+    // Parse optional max duration
+    const maxDurationTrimmed = maxDurationValue.trim()
+    let maxDurationSeconds: number | null | undefined = undefined
+    if (maxDurationTrimmed !== '') {
+      const parsed = Number(maxDurationTrimmed)
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        setError('Max duration must be a non-negative whole number of seconds.')
+        return
+      }
+      maxDurationSeconds = parsed > 0 ? parsed : null
+    }
+
     try {
       if (schedule) {
         await onSave({
           cron_expr: finalCron,
           interval_seconds: finalInterval,
           enabled,
+          max_duration_seconds: maxDurationSeconds,
         })
       } else {
         await onSave({
@@ -188,6 +205,7 @@ function ScheduleFormModal({
           cron_expr: finalCron ?? undefined,
           interval_seconds: finalInterval ?? undefined,
           enabled,
+          max_duration_seconds: maxDurationSeconds ?? undefined,
         })
       }
     } finally {
@@ -349,7 +367,32 @@ function ScheduleFormModal({
             )}
           </fieldset>
 
-          {/* ── Section 3: Options ─────────────────────────────────── */}
+          {/* ── Section 3: Max duration ────────────────────────────── */}
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium">
+              Maximum run duration{' '}
+              <span className="font-normal text-muted-foreground">(optional)</span>
+            </legend>
+            <div className="flex items-center gap-2">
+              <input
+                aria-label="Max duration in seconds"
+                type="number"
+                min={0}
+                step={1}
+                value={maxDurationValue}
+                onChange={(e) => setMaxDurationValue(e.target.value)}
+                placeholder="Unlimited"
+                className="w-36 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              />
+              <span className="text-sm text-muted-foreground">seconds</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The job stops gracefully after this duration; remaining items resume at the next
+              interval. Leave blank for unlimited.
+            </p>
+          </fieldset>
+
+          {/* ── Section 4: Options ─────────────────────────────────── */}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -497,6 +540,14 @@ export function SchedulerPage() {
             key: 'schedule',
             header: 'Schedule',
             cell: (schedule) => describeSchedule(schedule),
+          },
+          {
+            key: 'max_duration',
+            header: 'Max Duration',
+            cell: (schedule) =>
+              schedule.max_duration_seconds != null
+                ? `${schedule.max_duration_seconds}s`
+                : '—',
           },
           {
             key: 'enabled',

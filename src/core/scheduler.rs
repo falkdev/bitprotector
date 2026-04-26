@@ -24,11 +24,20 @@ impl TaskType {
 }
 
 /// Run a task immediately against the repository. Returns the number of items processed.
-pub fn run_task(task: &TaskType, repo: &Repository) -> anyhow::Result<u32> {
+///
+/// `stop_by` is an optional deadline: processing stops gracefully when reached.
+/// Pass `None` for ad-hoc runs (API, CLI) that have no time limit.
+pub fn run_task(
+    task: &TaskType,
+    repo: &Repository,
+    stop_by: Option<std::time::Instant>,
+) -> anyhow::Result<u32> {
     match task {
-        TaskType::Sync => sync_queue::process_all_pending(repo),
-        TaskType::IntegrityCheck => integrity_runs::run_sync(repo, None, false, "scheduler")
-            .map(|run| run.attention_files as u32),
+        TaskType::Sync => sync_queue::process_all_pending(repo, stop_by),
+        TaskType::IntegrityCheck => {
+            integrity_runs::run_sync(repo, None, false, "scheduler", stop_by)
+                .map(|run| run.attention_files as u32)
+        }
     }
 }
 
@@ -121,6 +130,7 @@ impl Scheduler {
         };
         let cron_expr = config.cron_expr.clone();
         let interval_secs = config.interval_seconds;
+        let max_duration_secs = config.max_duration_seconds;
 
         let handle = thread::spawn(move || loop {
             // ── Determine how long to sleep until next run ──────────────────
@@ -147,7 +157,12 @@ impl Scheduler {
                 return;
             }
 
-            if let Err(e) = run_task(&task_type, &repo) {
+            // ── Compute optional deadline from max_duration_seconds ─────────
+            let stop_by = max_duration_secs.map(|s| {
+                std::time::Instant::now() + std::time::Duration::from_secs(s as u64)
+            });
+
+            if let Err(e) = run_task(&task_type, &repo, stop_by) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
             }
         });
@@ -194,7 +209,7 @@ mod tests {
             .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        let processed = run_task(&TaskType::Sync, &repo).unwrap();
+        let processed = run_task(&TaskType::Sync, &repo, None).unwrap();
         assert_eq!(processed, 1, "Should process one pending item");
         assert!(
             secondary.path().join("sched.txt").exists(),
@@ -220,7 +235,7 @@ mod tests {
         repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None)
             .unwrap();
 
-        let attention = run_task(&TaskType::IntegrityCheck, &repo).unwrap();
+        let attention = run_task(&TaskType::IntegrityCheck, &repo, None).unwrap();
         assert_eq!(attention, 1, "Should persist one integrity attention row");
 
         let latest = repo
@@ -254,7 +269,7 @@ mod tests {
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
         // Create a schedule with a very short interval (1 second) in the DB
-        repo.create_schedule_config("sync", None, Some(1), true)
+        repo.create_schedule_config("sync", None, Some(1), true, None)
             .unwrap();
 
         let repo_arc = Arc::new(repo);
@@ -276,7 +291,7 @@ mod tests {
     fn test_reload_stops_disabled_schedule() {
         let (primary, secondary, repo) = setup();
         let cfg = repo
-            .create_schedule_config("sync", None, Some(3600), true)
+            .create_schedule_config("sync", None, Some(3600), true, None)
             .unwrap();
 
         let repo_arc = Arc::new(repo.clone());
@@ -285,7 +300,7 @@ mod tests {
         assert_eq!(scheduler.threads.len(), 1);
 
         // Disable the schedule in DB then reload
-        repo.update_schedule_config(cfg.id, None, None, Some(false))
+        repo.update_schedule_config(cfg.id, None, None, Some(false), None)
             .unwrap();
         scheduler.reload().unwrap();
         assert_eq!(

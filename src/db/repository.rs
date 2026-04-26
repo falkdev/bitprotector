@@ -161,6 +161,7 @@ pub struct ScheduleConfig {
     pub task_type: String,
     pub cron_expr: Option<String>,
     pub interval_seconds: Option<i64>,
+    pub max_duration_seconds: Option<i64>,
     pub enabled: bool,
     pub last_run: Option<String>,
     pub next_run: Option<String>,
@@ -1803,13 +1804,14 @@ impl Repository {
         cron_expr: Option<&str>,
         interval_seconds: Option<i64>,
         enabled: bool,
+        max_duration_seconds: Option<i64>,
     ) -> anyhow::Result<ScheduleConfig> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO schedule_config (task_type, cron_expr, interval_seconds, enabled)
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![task_type, cron_expr, interval_seconds, enabled as i64],
+                "INSERT INTO schedule_config (task_type, cron_expr, interval_seconds, enabled, max_duration_seconds)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![task_type, cron_expr, interval_seconds, enabled as i64, max_duration_seconds],
             )?;
             conn.last_insert_rowid()
         };
@@ -1819,7 +1821,7 @@ impl Repository {
     pub fn get_schedule_config(&self, id: i64) -> anyhow::Result<ScheduleConfig> {
         let conn = self.conn()?;
         let cfg = conn.query_row(
-            "SELECT id, task_type, cron_expr, interval_seconds, enabled, last_run, next_run, created_at, updated_at
+            "SELECT id, task_type, cron_expr, interval_seconds, max_duration_seconds, enabled, last_run, next_run, created_at, updated_at
              FROM schedule_config WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -1828,11 +1830,12 @@ impl Repository {
                     task_type: row.get(1)?,
                     cron_expr: row.get(2)?,
                     interval_seconds: row.get(3)?,
-                    enabled: row.get::<_, i64>(4)? != 0,
-                    last_run: row.get(5)?,
-                    next_run: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    max_duration_seconds: row.get(4)?,
+                    enabled: row.get::<_, i64>(5)? != 0,
+                    last_run: row.get(6)?,
+                    next_run: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )?;
@@ -1842,7 +1845,7 @@ impl Repository {
     pub fn list_schedule_configs(&self) -> anyhow::Result<Vec<ScheduleConfig>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, task_type, cron_expr, interval_seconds, enabled, last_run, next_run, created_at, updated_at
+            "SELECT id, task_type, cron_expr, interval_seconds, max_duration_seconds, enabled, last_run, next_run, created_at, updated_at
              FROM schedule_config ORDER BY id",
         )?;
         let cfgs = stmt
@@ -1852,11 +1855,12 @@ impl Repository {
                     task_type: row.get(1)?,
                     cron_expr: row.get(2)?,
                     interval_seconds: row.get(3)?,
-                    enabled: row.get::<_, i64>(4)? != 0,
-                    last_run: row.get(5)?,
-                    next_run: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    max_duration_seconds: row.get(4)?,
+                    enabled: row.get::<_, i64>(5)? != 0,
+                    last_run: row.get(6)?,
+                    next_run: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1869,6 +1873,7 @@ impl Repository {
         cron_expr: Option<Option<&str>>,
         interval_seconds: Option<Option<i64>>,
         enabled: Option<bool>,
+        max_duration_seconds: Option<Option<i64>>,
     ) -> anyhow::Result<ScheduleConfig> {
         {
             let conn = self.conn()?;
@@ -1884,6 +1889,12 @@ impl Repository {
                     rusqlite::params![en as i64, id],
                 )?;
             }
+            if let Some(mds) = max_duration_seconds {
+                conn.execute(
+                    "UPDATE schedule_config SET max_duration_seconds=?1, updated_at=datetime('now') WHERE id=?2",
+                    rusqlite::params![mds, id],
+                )?;
+            }
         }
         self.get_schedule_config(id)
     }
@@ -1895,6 +1906,92 @@ impl Repository {
             rusqlite::params![id],
         )?;
         Ok(())
+    }
+
+    // ─── Sync Settings ────────────────────────────────────────────────────────────
+
+    /// Returns `true` when the sync queue processing is globally paused.
+    pub fn get_sync_queue_paused(&self) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+        let paused: i64 = conn.query_row(
+            "SELECT queue_paused FROM sync_settings WHERE id=1",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(paused != 0)
+    }
+
+    /// Set the global sync queue pause flag.
+    pub fn set_sync_queue_paused(&self, paused: bool) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE sync_settings SET queue_paused=?1 WHERE id=1",
+            rusqlite::params![paused as i64],
+        )?;
+        Ok(())
+    }
+
+    // ─── Tracked Files (oldest-integrity-first) ───────────────────────────────────
+
+    /// Paginate tracked files ordered by `last_integrity_check_at ASC`.
+    ///
+    /// Files with `NULL` timestamps sort first (never-checked files take
+    /// priority), so successive partial integrity runs cover the full file
+    /// set over time.
+    pub fn list_tracked_files_oldest_integrity_first(
+        &self,
+        drive_pair_id: Option<i64>,
+        page: i64,
+        per_page: i64,
+    ) -> anyhow::Result<(Vec<TrackedFile>, i64)> {
+        use rusqlite::types::Value;
+        let conn = self.conn()?;
+        let offset = (page - 1) * per_page;
+
+        let mut params: Vec<Value> = Vec::new();
+        let where_clause = if let Some(id) = drive_pair_id {
+            params.push(Value::Integer(id));
+            "WHERE drive_pair_id = ?1".to_string()
+        } else {
+            String::new()
+        };
+
+        let query = format!(
+            "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_integrity_check_at, created_at, updated_at
+             FROM tracked_files {where_clause}
+             ORDER BY last_integrity_check_at ASC
+             LIMIT {per_page} OFFSET {offset}"
+        );
+        let count_query = format!("SELECT COUNT(*) FROM tracked_files {where_clause}");
+
+        let files = conn
+            .prepare(&query)?
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                Ok(TrackedFile {
+                    id: row.get(0)?,
+                    drive_pair_id: row.get(1)?,
+                    relative_path: row.get(2)?,
+                    checksum: row.get(3)?,
+                    file_size: row.get(4)?,
+                    virtual_path: row.get(5)?,
+                    is_mirrored: row.get::<_, i64>(6)? != 0,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_integrity_check_at: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let total: i64 = conn.query_row(
+            &count_query,
+            rusqlite::params_from_iter(params.iter()),
+            |r| r.get(0),
+        )?;
+        Ok((files, total))
     }
 
     // ─── DB Backup Config ─────────────────────────────────────────────────────────
@@ -2432,16 +2529,18 @@ mod tests {
     fn test_schedule_config_crud() {
         let repo = make_repo();
         let cfg = repo
-            .create_schedule_config("sync", Some("0 2 * * *"), None, true)
+            .create_schedule_config("sync", Some("0 2 * * *"), None, true, None)
             .unwrap();
         assert_eq!(cfg.task_type, "sync");
         assert_eq!(cfg.cron_expr, Some("0 2 * * *".to_string()));
+        assert_eq!(cfg.max_duration_seconds, None);
 
         let updated = repo
-            .update_schedule_config(cfg.id, None, Some(Some(3600)), Some(false))
+            .update_schedule_config(cfg.id, None, Some(Some(3600)), Some(false), Some(Some(7200)))
             .unwrap();
         assert!(!updated.enabled);
         assert_eq!(updated.interval_seconds, Some(3600));
+        assert_eq!(updated.max_duration_seconds, Some(7200));
 
         repo.delete_schedule_config(cfg.id).unwrap();
         assert!(repo.get_schedule_config(cfg.id).is_err());

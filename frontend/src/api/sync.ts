@@ -5,20 +5,13 @@ import type {
   ResolveQueueItemRequest,
   ProcessQueueResult,
   ClearCompletedQueueResult,
+  QueuePausedResult,
+  SyncQueueListResponse,
 } from '@/types/sync'
 
-interface SyncQueueListResponse {
-  queue: SyncQueueItem[]
-  total: number
-  page: number
-  per_page: number
-}
-
 export const syncApi = {
-  listQueue(): Promise<SyncQueueItem[]> {
-    return apiClient
-      .get<SyncQueueItem[] | SyncQueueListResponse>('/sync/queue')
-      .then((r) => (Array.isArray(r.data) ? r.data : r.data.queue))
+  listQueue(): Promise<SyncQueueListResponse> {
+    return apiClient.get<SyncQueueListResponse>('/sync/queue').then((r) => r.data)
   },
 
   addQueueItem(data: AddQueueItemRequest): Promise<SyncQueueItem> {
@@ -39,5 +32,13 @@ export const syncApi = {
 
   clearCompletedQueue(): Promise<ClearCompletedQueueResult> {
     return apiClient.delete<ClearCompletedQueueResult>('/sync/queue/completed').then((r) => r.data)
+  },
+
+  pauseQueue(): Promise<QueuePausedResult> {
+    return apiClient.post<QueuePausedResult>('/sync/pause').then((r) => r.data)
+  },
+
+  resumeQueue(): Promise<QueuePausedResult> {
+    return apiClient.post<QueuePausedResult>('/sync/resume').then((r) => r.data)
   },
 }

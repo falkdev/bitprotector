@@ -6,11 +6,11 @@ import { api, apiError } from '@/test/msw/http'
 import { makeSyncQueueItem } from '@/test/factories'
 
 describe('syncApi', () => {
-  it('queue/list/get/resolve/process/clear endpoints return payloads', async () => {
+  it('queue/list/get/resolve/process/clear/pause/resume endpoints return payloads', async () => {
     const item = makeSyncQueueItem({ id: 8 })
     server.use(
       api.get('/sync/queue', () =>
-        HttpResponse.json({ queue: [item], total: 1, page: 1, per_page: 50 })
+        HttpResponse.json({ queue: [item], total: 1, page: 1, per_page: 50, queue_paused: false })
       ),
       api.post('/sync/queue', () => HttpResponse.json(item, { status: 201 })),
       api.get('/sync/queue/:id', () => HttpResponse.json(item)),
@@ -18,10 +18,14 @@ describe('syncApi', () => {
         HttpResponse.json({ ...item, status: 'completed' })
       ),
       api.post('/sync/process', () => HttpResponse.json({ processed: 3 })),
-      api.delete('/sync/queue/completed', () => HttpResponse.json({ deleted: 2 }))
+      api.delete('/sync/queue/completed', () => HttpResponse.json({ deleted: 2 })),
+      api.post('/sync/pause', () => HttpResponse.json({ queue_paused: true })),
+      api.post('/sync/resume', () => HttpResponse.json({ queue_paused: false }))
     )
 
-    await expect(syncApi.listQueue()).resolves.toHaveLength(1)
+    const listResult = await syncApi.listQueue()
+    expect(listResult.queue).toHaveLength(1)
+    expect(listResult.queue_paused).toBe(false)
     await expect(
       syncApi.addQueueItem({ tracked_file_id: 1, action: 'mirror' })
     ).resolves.toMatchObject({ id: 8 })
@@ -33,6 +37,8 @@ describe('syncApi', () => {
     )
     await expect(syncApi.processQueue()).resolves.toMatchObject({ processed: 3 })
     await expect(syncApi.clearCompletedQueue()).resolves.toMatchObject({ deleted: 2 })
+    await expect(syncApi.pauseQueue()).resolves.toMatchObject({ queue_paused: true })
+    await expect(syncApi.resumeQueue()).resolves.toMatchObject({ queue_paused: false })
   })
 
   it('addQueueItem propagates backend errors', async () => {

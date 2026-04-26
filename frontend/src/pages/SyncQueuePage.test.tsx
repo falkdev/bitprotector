@@ -8,6 +8,15 @@ import { server } from '@/test/msw/server'
 import { makeDrivePair, makeSyncQueueItem } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
+const queueResponse = (items: ReturnType<typeof makeSyncQueueItem>[], paused = false) =>
+  HttpResponse.json({
+    queue: items,
+    total: items.length,
+    page: 1,
+    per_page: 50,
+    queue_paused: paused,
+  })
+
 describe('SyncQueuePage', () => {
   beforeEach(() => {
     server.use(api.get('/drives', () => HttpResponse.json([makeDrivePair()])))
@@ -24,14 +33,7 @@ describe('SyncQueuePage', () => {
     let resolutionBody: unknown = null
 
     server.use(
-      api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [item],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
-      ),
+      api.get('/sync/queue', () => queueResponse([item])),
       api.post('/sync/queue/7/resolve', async ({ request }) => {
         resolutionBody = await request.json()
         item = { ...item, status: 'completed' }
@@ -59,12 +61,7 @@ describe('SyncQueuePage', () => {
     server.use(
       api.get('/sync/queue', () => {
         listCalls += 1
-        return HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 9 })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
+        return queueResponse([makeSyncQueueItem({ id: 9 })])
       })
     )
 
@@ -82,38 +79,21 @@ describe('SyncQueuePage', () => {
   })
 
   it('renders the empty state when no queue items are returned', async () => {
-    server.use(
-      api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [],
-          total: 0,
-          page: 1,
-          per_page: 50,
-        })
-      )
-    )
+    server.use(api.get('/sync/queue', () => queueResponse([])))
 
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByText('No queue items')).toBeInTheDocument()
   })
 
-  it('shows process queue action and does not render sync/integrity task buttons', async () => {
-    server.use(
-      api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 11 })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
-      )
-    )
+  it('shows process queue and pause queue buttons', async () => {
+    server.use(api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 11 })])))
 
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByRole('button', { name: 'Process Queue' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Pause Queue' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Sync Task' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Integrity Task' })).not.toBeInTheDocument()
   })
@@ -122,12 +102,7 @@ describe('SyncQueuePage', () => {
     server.use(
       api.get('/drives', () => HttpResponse.json([])),
       api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 15, status: 'completed' })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
+        queueResponse([makeSyncQueueItem({ id: 15, status: 'completed' })])
       )
     )
 
@@ -142,14 +117,7 @@ describe('SyncQueuePage', () => {
 
   it('disables clear completed button when there are no completed items', async () => {
     server.use(
-      api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 12, status: 'pending' })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
-      )
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 12, status: 'pending' })]))
     )
 
     renderWithApp(<SyncQueuePage />)
@@ -161,12 +129,7 @@ describe('SyncQueuePage', () => {
   it('enables clear completed button when completed items exist', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 13, status: 'completed' })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
+        queueResponse([makeSyncQueueItem({ id: 13, status: 'completed' })])
       )
     )
 
@@ -185,14 +148,7 @@ describe('SyncQueuePage', () => {
     let clearCalls = 0
 
     server.use(
-      api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue,
-          total: queue.length,
-          page: 1,
-          per_page: 50,
-        })
-      ),
+      api.get('/sync/queue', () => queueResponse(queue)),
       api.delete('/sync/queue/completed', () => {
         clearCalls += 1
         queue = queue.filter((item) => item.status !== 'completed')
@@ -220,12 +176,7 @@ describe('SyncQueuePage', () => {
 
     server.use(
       api.get('/sync/queue', () =>
-        HttpResponse.json({
-          queue: [makeSyncQueueItem({ id: 31, status: 'completed' })],
-          total: 1,
-          page: 1,
-          per_page: 50,
-        })
+        queueResponse([makeSyncQueueItem({ id: 31, status: 'completed' })])
       ),
       api.delete('/sync/queue/completed', () =>
         HttpResponse.json({ error: 'failed' }, { status: 500 })
@@ -240,4 +191,73 @@ describe('SyncQueuePage', () => {
     expect(await screen.findByText('Failed to clear completed queue items')).toBeInTheDocument()
     expect(screen.getByTestId('sync-queue-row-31')).toBeInTheDocument()
   })
+
+  it('shows paused banner when queue is paused', async () => {
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 40 })], true))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('queue-paused-banner')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resume Queue' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pause Queue' })).not.toBeInTheDocument()
+  })
+
+  it('hides paused banner and shows pause button when queue is not paused', async () => {
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 41 })], false))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByTestId('sync-queue-row-41')
+    expect(screen.queryByTestId('queue-paused-banner')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Pause Queue' })).toBeInTheDocument()
+  })
+
+  it('pauses the queue when pause button is clicked', async () => {
+    const user = userEvent.setup()
+    let paused = false
+
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 42 })], paused)),
+      api.post('/sync/pause', () => {
+        paused = true
+        return HttpResponse.json({ queue_paused: true })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByRole('button', { name: 'Pause Queue' })
+    await user.click(screen.getByRole('button', { name: 'Pause Queue' }))
+
+    expect(await screen.findByText('Sync queue processing paused')).toBeInTheDocument()
+    expect(await screen.findByTestId('queue-paused-banner')).toBeInTheDocument()
+  })
+
+  it('resumes the queue when resume button is clicked', async () => {
+    const user = userEvent.setup()
+    let paused = true
+
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 43 })], paused)),
+      api.post('/sync/resume', () => {
+        paused = false
+        return HttpResponse.json({ queue_paused: false })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByRole('button', { name: 'Resume Queue' })
+    await user.click(screen.getByRole('button', { name: 'Resume Queue' }))
+
+    expect(await screen.findByText('Sync queue processing resumed')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('queue-paused-banner')).not.toBeInTheDocument()
+    })
+  })
 })
+

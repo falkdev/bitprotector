@@ -39,16 +39,23 @@ struct TaskResult {
     count: u32,
 }
 
+#[derive(Serialize)]
+struct QueuePausedResult {
+    queue_paused: bool,
+}
+
 /// GET /sync/queue
 async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -> HttpResponse {
     let page = query.page.unwrap_or(1);
     let per_page = query.per_page.unwrap_or(50);
+    let queue_paused = repo.get_sync_queue_paused().unwrap_or(false);
     match repo.list_sync_queue(query.status.as_deref(), page, per_page) {
         Ok((items, total)) => HttpResponse::Ok().json(serde_json::json!({
             "queue": items,
             "total": total,
             "page": page,
             "per_page": per_page,
+            "queue_paused": queue_paused,
         })),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
@@ -113,7 +120,7 @@ async fn resolve_queue_item(
 
 /// POST /sync/process
 async fn process_queue(repo: web::Data<Repository>) -> HttpResponse {
-    match sync_queue::process_all_pending(&repo) {
+    match sync_queue::process_all_pending(&repo, None) {
         Ok(processed) => HttpResponse::Ok().json(ProcessResult { processed }),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
@@ -135,11 +142,27 @@ async fn run_task(repo: web::Data<Repository>, path: web::Path<String>) -> HttpR
         "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
         other => return HttpResponse::BadRequest().body(format!("Unknown task: {}", other)),
     };
-    match scheduler::run_task(&task, &repo) {
+    match scheduler::run_task(&task, &repo, None) {
         Ok(count) => HttpResponse::Ok().json(TaskResult {
             task: task.as_str().to_string(),
             count,
         }),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+/// POST /sync/pause — pause all automatic sync queue processing
+async fn pause_queue(repo: web::Data<Repository>) -> HttpResponse {
+    match repo.set_sync_queue_paused(true) {
+        Ok(()) => HttpResponse::Ok().json(QueuePausedResult { queue_paused: true }),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
+/// POST /sync/resume — resume automatic sync queue processing
+async fn resume_queue(repo: web::Data<Repository>) -> HttpResponse {
+    match repo.set_sync_queue_paused(false) {
+        Ok(()) => HttpResponse::Ok().json(QueuePausedResult { queue_paused: false }),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -153,6 +176,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/queue/{id}", web::get().to(get_queue_item))
             .route("/queue/{id}/resolve", web::post().to(resolve_queue_item))
             .route("/process", web::post().to(process_queue))
+            .route("/pause", web::post().to(pause_queue))
+            .route("/resume", web::post().to(resume_queue))
             .route("/run/{task}", web::post().to(run_task)),
     );
 }

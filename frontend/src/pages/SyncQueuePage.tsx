@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Play } from 'lucide-react'
+import { Pause, Play } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
 import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
@@ -137,6 +137,7 @@ function ResolveDialog({
 
 export function SyncQueuePage() {
   const items = useSyncStore((state) => state.items)
+  const queuePaused = useSyncStore((state) => state.queuePaused)
   const loading = useSyncStore((state) => state.loading)
   const filter = useSyncStore((state) => state.filter)
   const fetch = useSyncStore((state) => state.fetch)
@@ -145,6 +146,7 @@ export function SyncQueuePage() {
   const [resolveTarget, setResolveTarget] = useState<SyncQueueItem | null>(null)
   const [processingQueue, setProcessingQueue] = useState(false)
   const [clearingCompleted, setClearingCompleted] = useState(false)
+  const [togglingPause, setTogglingPause] = useState(false)
   const [hasDrivePairs, setHasDrivePairs] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -224,22 +226,72 @@ export function SyncQueuePage() {
     }
   }
 
+  const togglePause = async () => {
+    setTogglingPause(true)
+    try {
+      if (queuePaused) {
+        await syncApi.resumeQueue()
+        toast.success('Sync queue processing resumed')
+      } else {
+        await syncApi.pauseQueue()
+        toast.success('Sync queue processing paused')
+      }
+      await fetch()
+    } catch {
+      toast.error('Failed to toggle queue pause state')
+    } finally {
+      setTogglingPause(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageIntro
         title="Sync Queue"
         subtitle="Review pending sync actions, process the queue, and resolve conflicts."
         actions={
-          <button
-            onClick={() => void processQueue()}
-            disabled={processingQueue || disableProcessQueue}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Play className="h-4 w-4" />
-            {processingQueue ? 'Processing…' : 'Process Queue'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void togglePause()}
+              disabled={togglingPause}
+              data-testid="toggle-pause-button"
+              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {queuePaused ? (
+                <>
+                  <Play className="h-4 w-4" />
+                  {togglingPause ? 'Resuming…' : 'Resume Queue'}
+                </>
+              ) : (
+                <>
+                  <Pause className="h-4 w-4" />
+                  {togglingPause ? 'Pausing…' : 'Pause Queue'}
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => void processQueue()}
+              disabled={processingQueue || disableProcessQueue}
+              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {processingQueue ? 'Processing…' : 'Process Queue'}
+            </button>
+          </div>
         }
       />
+      {queuePaused && (
+        <div
+          data-testid="queue-paused-banner"
+          className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800"
+        >
+          <Pause className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>Queue paused.</strong> Automatic processing is suspended. Existing items will
+            not be processed until you resume the queue.
+          </span>
+        </div>
+      )}
       {disableProcessQueue ? (
         <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
           Add a drive pair first to process the sync queue.

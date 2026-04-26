@@ -5,6 +5,7 @@ export interface ScheduleConfig {
   task_type: ScheduleTaskType
   cron_expr: string | null
   interval_seconds: number | null
+  max_duration_seconds: number | null
   enabled: boolean
   last_run: string | null
   next_run: string | null
@@ -20,11 +21,13 @@ export interface CreateScheduleRequest {
   task_type: ScheduleTaskType
   cron_expr?: string
   interval_seconds?: number
+  max_duration_seconds?: number | null
   enabled?: boolean
 }
 
 export interface UpdateScheduleRequest {
   cron_expr?: string | null
   interval_seconds?: number | null
+  max_duration_seconds?: number | null
   enabled?: boolean
 }

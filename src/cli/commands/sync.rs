@@ -12,6 +12,10 @@ pub enum SyncCommand {
     Add(AddArgs),
     /// Process all pending sync queue items immediately
     Process,
+    /// Pause automatic sync queue processing
+    Pause,
+    /// Resume automatic sync queue processing
+    Resume,
     /// Run a scheduled task once (sync or integrity-check)
     Run(RunArgs),
 }
@@ -46,6 +50,10 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
         SyncCommand::List(args) => {
             let (items, total) =
                 repo.list_sync_queue(args.status.as_deref(), args.page, args.per_page)?;
+            let paused = repo.get_sync_queue_paused().unwrap_or(false);
+            if paused {
+                println!("[PAUSED] Sync queue processing is suspended.");
+            }
             println!(
                 "{:<6} {:<10} {:<16} {:<12} Created",
                 "ID", "File", "Action", "Status"
@@ -81,8 +89,16 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             );
         }
         SyncCommand::Process => {
-            let count = sync_queue::process_all_pending(repo)?;
+            let count = sync_queue::process_all_pending(repo, None)?;
             println!("Processed {} pending sync queue item(s)", count);
+        }
+        SyncCommand::Pause => {
+            repo.set_sync_queue_paused(true)?;
+            println!("Sync queue processing paused. Run 'sync resume' to resume.");
+        }
+        SyncCommand::Resume => {
+            repo.set_sync_queue_paused(false)?;
+            println!("Sync queue processing resumed.");
         }
         SyncCommand::Run(args) => {
             let task = match args.task.as_str() {
@@ -93,7 +109,7 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
                     other
                 ),
             };
-            let count = scheduler::run_task(&task, repo)?;
+            let count = scheduler::run_task(&task, repo, None)?;
             println!(
                 "Task '{}' completed: {} items processed",
                 task.as_str(),

@@ -2,21 +2,38 @@ use crate::api::models::ApiError;
 use crate::core::scheduler::Scheduler;
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::{Arc, Mutex};
+
+/// Deserializer helper for `Option<Option<T>>` that distinguishes between:
+/// - field absent  → `None`           (don't update this field)
+/// - field `null`  → `Some(None)`     (explicitly clear the value)
+/// - field value   → `Some(Some(v))`  (set to a new value)
+fn double_option<'de, T, D>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(d)?))
+}
 
 #[derive(Deserialize)]
 pub struct CreateScheduleRequest {
     pub task_type: String,
     pub cron_expr: Option<String>,
     pub interval_seconds: Option<i64>,
+    pub max_duration_seconds: Option<i64>,
     pub enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateScheduleRequest {
+    #[serde(default, deserialize_with = "double_option")]
     pub cron_expr: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub interval_seconds: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub max_duration_seconds: Option<Option<i64>>,
     pub enabled: Option<bool>,
 }
 
@@ -77,6 +94,7 @@ async fn create_schedule(
         body.cron_expr.as_deref(),
         body.interval_seconds,
         body.enabled.unwrap_or(true),
+        body.max_duration_seconds,
     ) {
         Ok(cfg) => {
             reload_scheduler(&scheduler);
@@ -104,7 +122,7 @@ async fn update_schedule(
     let id = path.into_inner();
     let cron_expr: Option<Option<&str>> = body.cron_expr.as_ref().map(|opt| opt.as_deref());
 
-    match repo.update_schedule_config(id, cron_expr, body.interval_seconds, body.enabled) {
+    match repo.update_schedule_config(id, cron_expr, body.interval_seconds, body.enabled, body.max_duration_seconds) {
         Ok(cfg) => {
             reload_scheduler(&scheduler);
             HttpResponse::Ok().json(cfg)

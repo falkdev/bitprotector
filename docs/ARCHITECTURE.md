@@ -64,11 +64,11 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `drive.rs` | Drive-role state machine and path resolution helpers. Owns planned quiesce/failover, emergency failover, replacement assignment, rebuild completion, and virtual-path retargeting. |
 | `mirror.rs` | Copy a file from the primary path to the secondary path, verifying the copy with a post-write checksum. Also responsible for restoring a corrupted copy from its healthy counterpart. |
 | `integrity.rs` | Orchestrate integrity checks: re-hash the current active and standby copies, compare against the stored baseline, classify the result (ok / master\_corrupted / mirror\_corrupted / both\_corrupted / drive\_unavailable), and trigger automatic recovery only when a healthy counterpart exists. |
-| `integrity_runs.rs` | Shared full-run service used by API, CLI, and scheduler. Persists run metadata + per-file outcomes, enforces single active run, supports cooperative stop, and processes tracked files in paged batches. |
-| `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. |
+| `integrity_runs.rs` | Shared full-run service used by API, CLI, and scheduler. Persists run metadata + per-file outcomes, enforces single active run, supports cooperative stop, and processes tracked files in paged batches. Accepts an optional `deadline: Option<Instant>`; when set, processing stops after the deadline is reached and remaining files are left for the next run. Files are always processed in oldest-`last_integrity_check_at`-first order so that every file gets eventual coverage. |
+| `sync_queue.rs` | Manage the queue of files awaiting a sync or verify action. Provides logic to process the queue, update item status, and surface failures. `process_all_pending` accepts an optional `stop_by: Option<Instant>` deadline; before processing each item it checks both the deadline and the global `sync_settings.queue_paused` flag — if the queue is paused, processing stops immediately and the item is not consumed. |
 | `virtual_path.rs` | Map tracked files and folders to literal virtual paths. Creates and removes symlinks exactly at those absolute paths and refreshes them whenever `active_role` changes. |
 | `tracker.rs` | Track or untrack individual files and folders. On track/scan: compute initial checksum, store metadata, enqueue mirror work by default, and operate on the pair's current active side rather than assuming primary is always live. |
-| `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. Integrity task execution persists run/result records via `integrity_runs.rs`. |
+| `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. When a schedule has `max_duration_seconds` set, the thread computes an `Instant` deadline before calling `run_task`, which passes it through to the underlying `process_all_pending` or `start_run_async` call. Integrity task execution persists run/result records via `integrity_runs.rs`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
 
 ### src/api/
@@ -319,3 +319,13 @@ Even though SQLite serialises writes, using a pool with `r2d2_sqlite` allows rea
 ### Background task scheduling via OS threads
 
 Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement. Scheduled integrity executions are persisted through the same run-service path as API/CLI starts.
+
+When a schedule has `max_duration_seconds` configured, the scheduler thread computes a deadline (`Instant::now() + Duration::from_secs(max_duration_seconds)`) before invoking the task. This deadline is passed as `Option<Instant>` through `run_task` → `process_all_pending` / `process_run`. Each function checks the deadline before processing the next item and exits early if time has elapsed, leaving remaining work for the next scheduled run. Setting `max_duration_seconds` to `null` disables the cap.
+
+### Sync queue pause/resume
+
+The `sync_settings` database table holds a single-row `queue_paused` flag (integer 0/1, default 0). When the queue is paused, `process_all_pending` returns immediately after checking the flag — no items are dequeued and the queue state is unchanged. This check is per-item, so an in-flight item already being processed is not interrupted. The flag is toggled via `POST /sync/pause` and `POST /sync/resume` (API) or `bitprotector sync pause` / `bitprotector sync resume` (CLI).
+
+### Integrity run file ordering
+
+`integrity_runs.rs` always retrieves tracked files ordered by `last_integrity_check_at ASC NULLS FIRST`. Files that have never been checked are prioritised, followed by files checked longest ago. This ensures every file receives periodic coverage even when runs are cut short by a `max_duration_seconds` deadline or a cooperative stop request.
