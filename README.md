@@ -1,8 +1,6 @@
 # BitProtector
 
-[![CI](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml/badge.svg)](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml)
-
-[![Nightly](https://github.com/falkdev/bitprotector/actions/workflows/nightly.yml/badge.svg)](https://github.com/falkdev/bitprotector/actions/workflows/nightly.yml)
+[![CI](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml/badge.svg)](https://github.com/falkdev/bitprotector/actions/workflows/ci.yml) [![Nightly](https://github.com/falkdev/bitprotector/actions/workflows/nightly.yml/badge.svg)](https://github.com/falkdev/bitprotector/actions/workflows/nightly.yml)
 
 ## Distributed File Mirror and Integrity Protection System
 
