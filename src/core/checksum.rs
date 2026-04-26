@@ -21,12 +21,11 @@ fn fadvise_dontneed(file: &File) {
 /// Compute BLAKE3 checksum of a file at the given path, returning lowercase hex.
 /// After reading, advises the OS to release the file's pages from the page cache.
 pub fn checksum_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
-    let file = File::open(path)?;
+    let mut file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buf = [0u8; 65536];
-    let mut reader = &file;
     loop {
-        let n = reader.read(&mut buf)?;
+        let n = file.read(&mut buf)?;
         if n == 0 {
             break;
         }
@@ -43,13 +42,12 @@ pub fn checksum_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
 /// This is more efficient than calling `fs::copy` and `checksum_file` separately
 /// because the source file is read only once instead of twice.
 pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q) -> io::Result<String> {
-    let src_file = File::open(src)?;
+    let mut src_file = File::open(src)?;
     let mut dst_file = File::create(dst)?;
     let mut hasher = blake3::Hasher::new();
     let mut buf = [0u8; 65536];
-    let mut reader = &src_file;
     loop {
-        let n = reader.read(&mut buf)?;
+        let n = src_file.read(&mut buf)?;
         if n == 0 {
             break;
         }
@@ -74,14 +72,13 @@ pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
     dst: Q,
     expected_checksum: &str,
 ) -> io::Result<()> {
-    let src_file = File::open(&src)?;
+    let mut src_file = File::open(&src)?;
     let dst_path = dst.as_ref();
     let mut dst_file = File::create(dst_path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buf = [0u8; 65536];
-    let mut reader = &src_file;
     loop {
-        let n = reader.read(&mut buf)?;
+        let n = src_file.read(&mut buf)?;
         if n == 0 {
             break;
         }
