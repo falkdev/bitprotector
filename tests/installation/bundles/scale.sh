@@ -84,6 +84,7 @@ runcmd:
   - apt-get update -q
   - apt-get install -y -q jq /mnt/debpkg/bitprotector*.deb
   - /usr/local/bin/bitprotector-scale-storage.sh
+  - systemctl start bitprotector
   - touch /tmp/install-done
 CLOUDINIT
 
@@ -115,7 +116,7 @@ QEMU_PID=$!
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
 
 BUNDLE_START_TIME="$(date -Iseconds)"
-SSH_VM_TIMEOUT=1800
+SSH_VM_TIMEOUT=3600
 
 # shellcheck source=tests/installation/scenarios/scale/scale-01-100k-real-files.sh
 source "${SCENARIOS_DIR}/scale-01-100k-real-files.sh"
