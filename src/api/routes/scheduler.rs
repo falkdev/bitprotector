@@ -122,7 +122,13 @@ async fn update_schedule(
     let id = path.into_inner();
     let cron_expr: Option<Option<&str>> = body.cron_expr.as_ref().map(|opt| opt.as_deref());
 
-    match repo.update_schedule_config(id, cron_expr, body.interval_seconds, body.enabled, body.max_duration_seconds) {
+    match repo.update_schedule_config(
+        id,
+        cron_expr,
+        body.interval_seconds,
+        body.enabled,
+        body.max_duration_seconds,
+    ) {
         Ok(cfg) => {
             reload_scheduler(&scheduler);
             HttpResponse::Ok().json(cfg)

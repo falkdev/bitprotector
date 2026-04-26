@@ -2536,7 +2536,13 @@ mod tests {
         assert_eq!(cfg.max_duration_seconds, None);
 
         let updated = repo
-            .update_schedule_config(cfg.id, None, Some(Some(3600)), Some(false), Some(Some(7200)))
+            .update_schedule_config(
+                cfg.id,
+                None,
+                Some(Some(3600)),
+                Some(false),
+                Some(Some(7200)),
+            )
             .unwrap();
         assert!(!updated.enabled);
         assert_eq!(updated.interval_seconds, Some(3600));

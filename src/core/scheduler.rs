@@ -158,9 +158,8 @@ impl Scheduler {
             }
 
             // ── Compute optional deadline from max_duration_seconds ─────────
-            let stop_by = max_duration_secs.map(|s| {
-                std::time::Instant::now() + std::time::Duration::from_secs(s as u64)
-            });
+            let stop_by = max_duration_secs
+                .map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s as u64));
 
             if let Err(e) = run_task(&task_type, &repo, stop_by) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);

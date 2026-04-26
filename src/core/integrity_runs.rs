@@ -64,7 +64,11 @@ pub fn run_sync(
     repo.get_integrity_run(run.id)
 }
 
-pub fn process_run(repo: &Repository, run_id: i64, deadline: Option<std::time::Instant>) -> anyhow::Result<()> {
+pub fn process_run(
+    repo: &Repository,
+    run_id: i64,
+    deadline: Option<std::time::Instant>,
+) -> anyhow::Result<()> {
     let run = repo.get_integrity_run(run_id)?;
     let recover = run.recover;
     let scope_drive_pair_id = run.scope_drive_pair_id;

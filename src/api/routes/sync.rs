@@ -162,7 +162,9 @@ async fn pause_queue(repo: web::Data<Repository>) -> HttpResponse {
 /// POST /sync/resume — resume automatic sync queue processing
 async fn resume_queue(repo: web::Data<Repository>) -> HttpResponse {
     match repo.set_sync_queue_paused(false) {
-        Ok(()) => HttpResponse::Ok().json(QueuePausedResult { queue_paused: false }),
+        Ok(()) => HttpResponse::Ok().json(QueuePausedResult {
+            queue_paused: false,
+        }),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
