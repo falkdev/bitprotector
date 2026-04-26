@@ -67,15 +67,16 @@ write_files:
         sleep 1
       done
       [[ -b "\${dev}" ]]
-      mkdir -p /mnt/scale /mnt/scale-mirror
+      mkdir -p /mnt/scale
       if ! blkid "\${dev}" >/dev/null 2>&1; then
         mkfs.ext4 -F "\${dev}"
       fi
       uuid=\$(blkid -s UUID -o value "\${dev}")
       grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} /mnt/scale ext4 defaults,nofail 0 2" >> /etc/fstab
       mount -a
-      mkdir -p /mnt/scale-mirror
-      chown -R testuser:testuser /mnt/scale /mnt/scale-mirror
+      mkdir -p /mnt/scale/mirror
+      ln -sfn /mnt/scale/mirror /mnt/scale-mirror
+      chown -R testuser:testuser /mnt/scale
 
 runcmd:
   - mkdir -p /mnt/debpkg

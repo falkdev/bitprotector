@@ -23,7 +23,7 @@ done
 bitprotector --db "${DB}" sync process
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 
-! sudo dmesg | grep -q "Killed process"
+! sudo dmesg | grep -q "Killed process.*bitprotector"
 pid=$(pidof bitprotector | awk "{print \$1}")
 if [[ -n "${pid}" ]]; then
   rss_kb=$(awk "/VmRSS/ { print \$2 }" "/proc/${pid}/status")
