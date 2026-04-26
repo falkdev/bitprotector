@@ -272,6 +272,9 @@ mod tests {
 
         let result = copy_and_verify_checksum(src_file.path(), &dst_path, &wrong_checksum);
         assert!(result.is_err(), "Should fail on checksum mismatch");
-        assert!(!dst_path.exists(), "Destination should be removed on mismatch");
+        assert!(
+            !dst_path.exists(),
+            "Destination should be removed on mismatch"
+        );
     }
 }

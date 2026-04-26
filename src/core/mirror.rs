@@ -73,8 +73,8 @@ pub fn mirror_file(drive_pair: &DrivePair, relative_path: &str) -> anyhow::Resul
     // Copy and compute source checksum in a single streaming pass, then verify
     // the destination matches. This halves the number of source-file reads compared
     // to fs::copy followed by two separate checksum_file calls.
-    let src_checksum = checksum::copy_with_checksum(&src, &dst)
-        .context("Failed to copy file to mirror")?;
+    let src_checksum =
+        checksum::copy_with_checksum(&src, &dst).context("Failed to copy file to mirror")?;
     let dst_checksum = checksum::checksum_file(&dst)?;
 
     if src_checksum != dst_checksum {
