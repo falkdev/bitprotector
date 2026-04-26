@@ -70,10 +70,11 @@ pub fn mirror_file(drive_pair: &DrivePair, relative_path: &str) -> anyhow::Resul
         fs::create_dir_all(parent).context("Failed to create mirror directory")?;
     }
 
-    fs::copy(&src, &dst).context("Failed to copy file to mirror")?;
-
-    // Verify the copy is byte-identical
-    let src_checksum = checksum::checksum_file(&src)?;
+    // Copy and compute source checksum in a single streaming pass, then verify
+    // the destination matches. This halves the number of source-file reads compared
+    // to fs::copy followed by two separate checksum_file calls.
+    let src_checksum = checksum::copy_with_checksum(&src, &dst)
+        .context("Failed to copy file to mirror")?;
     let dst_checksum = checksum::checksum_file(&dst)?;
 
     if src_checksum != dst_checksum {
@@ -107,20 +108,19 @@ pub fn restore_from_mirror(
         anyhow::bail!("Mirror file does not exist: {}", src.display());
     }
 
-    let mirror_checksum = checksum::checksum_file(&src)?;
-    if mirror_checksum != expected_checksum {
-        anyhow::bail!(
-            "Mirror file checksum mismatch: stored={} actual={}",
-            expected_checksum,
-            mirror_checksum
-        );
-    }
-
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
     drive::ensure_drive_root_marker(&drive_pair.primary_path)?;
-    fs::copy(&src, &dst)?;
+
+    // Copy and verify checksum in a single streaming pass to halve source reads.
+    checksum::copy_and_verify_checksum(&src, &dst, expected_checksum).map_err(|e| {
+        anyhow::anyhow!(
+            "Mirror file checksum mismatch: stored={} ({})",
+            expected_checksum,
+            e
+        )
+    })?;
     Ok(())
 }
 
@@ -144,20 +144,19 @@ pub fn restore_mirror_from_master(
         anyhow::bail!("Primary file does not exist: {}", src.display());
     }
 
-    let master_checksum = checksum::checksum_file(&src)?;
-    if master_checksum != expected_checksum {
-        anyhow::bail!(
-            "Master file checksum mismatch: stored={} actual={}",
-            expected_checksum,
-            master_checksum
-        );
-    }
-
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
     drive::ensure_drive_root_marker(&drive_pair.secondary_path)?;
-    fs::copy(&src, &dst)?;
+
+    // Copy and verify checksum in a single streaming pass to halve source reads.
+    checksum::copy_and_verify_checksum(&src, &dst, expected_checksum).map_err(|e| {
+        anyhow::anyhow!(
+            "Master file checksum mismatch: stored={} ({})",
+            expected_checksum,
+            e
+        )
+    })?;
     Ok(())
 }
 

@@ -36,16 +36,28 @@ pub fn scan_all_changes(
     repo: &Repository,
     drive_pair: &DrivePair,
 ) -> anyhow::Result<Vec<(TrackedFile, String)>> {
-    let (files, _) = repo.list_tracked_files(Some(drive_pair.id), None, None, 1, i64::MAX)?;
     let mut changes = Vec::new();
-    for file in files {
-        if let Some(new_hash) = detect_change(
-            drive_pair.active_path(),
-            &file.relative_path,
-            &file.checksum,
-        )? {
-            changes.push((file, new_hash));
+    let per_page = 200i64;
+    let mut page = 1i64;
+    loop {
+        let (files, total) =
+            repo.list_tracked_files(Some(drive_pair.id), None, None, page, per_page)?;
+        if files.is_empty() {
+            break;
         }
+        for file in files {
+            if let Some(new_hash) = detect_change(
+                drive_pair.active_path(),
+                &file.relative_path,
+                &file.checksum,
+            )? {
+                changes.push((file, new_hash));
+            }
+        }
+        if (page * per_page) >= total {
+            break;
+        }
+        page += 1;
     }
     Ok(changes)
 }
