@@ -38,7 +38,18 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-scale-$$"
 mkdir -p "${WORKDIR}"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+_cleanup() {
+    local _exit=$?
+    if [[ $_exit -ne 0 ]] && [[ -n "${RUNNER_TEMP:-}" ]]; then
+        local _art="${RUNNER_TEMP}/qemu-scale-artifacts-$$"
+        mkdir -p "${_art}"
+        cp "${WORKDIR}/serial.log" "${_art}/" 2>/dev/null || true
+        cp "${WORKDIR}/qemu.log"   "${_art}/" 2>/dev/null || true
+    fi
+    rm -rf "${WORKDIR}"
+    if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi
+}
+trap _cleanup EXIT
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/vm.qcow2"
@@ -116,7 +127,7 @@ QEMU_PID=$!
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
 
 BUNDLE_START_TIME="$(date -Iseconds)"
-SSH_VM_TIMEOUT=3600
+SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-6600}"
 
 # shellcheck source=tests/installation/scenarios/scale/scale-01-100k-real-files.sh
 source "${SCENARIOS_DIR}/scale-01-100k-real-files.sh"
