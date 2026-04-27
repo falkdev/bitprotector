@@ -82,9 +82,7 @@ pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
             .iter()
             .filter(|i| i.action != "user_action_required")
             .count() as u32;
-        let all_skipped = items
-            .iter()
-            .all(|i| i.action == "user_action_required");
+        let all_skipped = items.iter().all(|i| i.action == "user_action_required");
         for item in &items {
             if item.action == "user_action_required" {
                 continue;
