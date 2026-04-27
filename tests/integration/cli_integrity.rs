@@ -184,4 +184,10 @@ fn test_integrity_check_all_clean() {
         .assert()
         .success()
         .stdout(predicate::str::contains("2 checked"));
+
+    cmd(db.path().to_str().unwrap())
+        .args(["logs", "list", "--event-type", "integrity_pass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total: 0"));
 }

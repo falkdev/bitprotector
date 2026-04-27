@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 /// Compute BLAKE3 checksum of the given byte slice, returning lowercase hex.
@@ -7,7 +7,19 @@ pub fn checksum_bytes(data: &[u8]) -> String {
     blake3::hash(data).to_hex().to_string()
 }
 
+/// Advise the OS that the file's pages are no longer needed in the page cache.
+/// This reduces memory pressure when processing large files on constrained systems.
+#[cfg(unix)]
+fn fadvise_dontneed(file: &File) {
+    use std::os::unix::io::AsRawFd;
+    // POSIX_FADV_DONTNEED = 4
+    unsafe {
+        libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+}
+
 /// Compute BLAKE3 checksum of a file at the given path, returning lowercase hex.
+/// After reading, advises the OS to release the file's pages from the page cache.
 pub fn checksum_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
     let mut file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
@@ -19,7 +31,76 @@ pub fn checksum_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
+    #[cfg(unix)]
+    fadvise_dontneed(&file);
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Copy a file from `src` to `dst` while computing the BLAKE3 checksum of the
+/// source in a single streaming pass. Returns the source checksum as lowercase hex.
+///
+/// This is more efficient than calling `fs::copy` and `checksum_file` separately
+/// because the source file is read only once instead of twice.
+pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q) -> io::Result<String> {
+    let mut src_file = File::open(src)?;
+    let mut dst_file = File::create(dst)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = src_file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        dst_file.write_all(&buf[..n])?;
+    }
+    dst_file.flush()?;
+    #[cfg(unix)]
+    fadvise_dontneed(&src_file);
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Copy a file from `src` to `dst` while verifying it matches `expected_checksum`
+/// in a single streaming pass.
+///
+/// If the computed checksum does not match `expected_checksum`, the destination
+/// file is removed and an error is returned. This is more efficient than calling
+/// `checksum_file` to verify and then `fs::copy` separately because the source
+/// file is read only once instead of twice.
+pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
+    src: P,
+    dst: Q,
+    expected_checksum: &str,
+) -> io::Result<()> {
+    let mut src_file = File::open(&src)?;
+    let dst_path = dst.as_ref();
+    let mut dst_file = File::create(dst_path)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = src_file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        dst_file.write_all(&buf[..n])?;
+    }
+    dst_file.flush()?;
+    #[cfg(unix)]
+    fadvise_dontneed(&src_file);
+    let actual = hasher.finalize().to_hex().to_string();
+    if actual != expected_checksum {
+        drop(dst_file);
+        let _ = std::fs::remove_file(dst_path);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "checksum mismatch: expected={} actual={}",
+                expected_checksum, actual
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Verify that a file's current checksum matches the expected checksum.
@@ -130,5 +211,70 @@ mod tests {
     fn test_checksum_hex_is_lowercase() {
         let hash = checksum_bytes(b"case check");
         assert_eq!(hash, hash.to_lowercase());
+    }
+
+    #[test]
+    fn test_copy_with_checksum_creates_copy() {
+        let mut src_file = NamedTempFile::new().unwrap();
+        let dst_file = NamedTempFile::new().unwrap();
+        let data = b"copy with checksum test data";
+        src_file.write_all(data).unwrap();
+        src_file.flush().unwrap();
+
+        let checksum = copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
+
+        let expected = checksum_bytes(data);
+        assert_eq!(checksum, expected);
+        let dst_contents = std::fs::read(dst_file.path()).unwrap();
+        assert_eq!(dst_contents, data);
+    }
+
+    #[test]
+    fn test_copy_with_checksum_returns_source_checksum() {
+        let mut src_file = NamedTempFile::new().unwrap();
+        let dst_file = NamedTempFile::new().unwrap();
+        let data = b"source checksum data";
+        src_file.write_all(data).unwrap();
+        src_file.flush().unwrap();
+
+        let result = copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
+        let direct = checksum_file(src_file.path()).unwrap();
+
+        assert_eq!(result, direct);
+    }
+
+    #[test]
+    fn test_copy_and_verify_checksum_happy_path() {
+        let mut src_file = NamedTempFile::new().unwrap();
+        let dst_file = NamedTempFile::new().unwrap();
+        let data = b"verify checksum content";
+        src_file.write_all(data).unwrap();
+        src_file.flush().unwrap();
+
+        let expected = checksum_bytes(data);
+        copy_and_verify_checksum(src_file.path(), dst_file.path(), &expected).unwrap();
+
+        let dst_contents = std::fs::read(dst_file.path()).unwrap();
+        assert_eq!(dst_contents, data);
+    }
+
+    #[test]
+    fn test_copy_and_verify_checksum_wrong_expected_returns_err_and_removes_dst() {
+        let mut src_file = NamedTempFile::new().unwrap();
+        let dst_file = NamedTempFile::new().unwrap();
+        src_file.write_all(b"actual content").unwrap();
+        src_file.flush().unwrap();
+
+        let wrong_checksum = checksum_bytes(b"different content");
+        let dst_path = dst_file.path().to_path_buf();
+        // Release the NamedTempFile so copy_and_verify_checksum can remove it
+        let _ = dst_file.keep().unwrap();
+
+        let result = copy_and_verify_checksum(src_file.path(), &dst_path, &wrong_checksum);
+        assert!(result.is_err(), "Should fail on checksum mismatch");
+        assert!(
+            !dst_path.exists(),
+            "Destination should be removed on mismatch"
+        );
     }
 }

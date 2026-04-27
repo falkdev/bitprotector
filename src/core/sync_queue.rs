@@ -69,17 +69,33 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 /// Process all pending items in the sync queue.
 pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
     repo.requeue_in_progress_sync_queue()?;
-    let (items, _) = repo.list_sync_queue(Some("pending"), 1, 1000)?;
-    let count = items
-        .iter()
-        .filter(|i| i.action != "user_action_required")
-        .count() as u32;
-    for item in &items {
-        if item.action == "user_action_required" {
-            continue;
+    let page_size: i64 = 1000;
+    let mut count: u32 = 0;
+    loop {
+        // Always fetch page 1: processed items are no longer "pending" so the
+        // window slides forward naturally without needing an explicit offset.
+        let (items, _) = repo.list_sync_queue(Some("pending"), 1, page_size)?;
+        if items.is_empty() {
+            break;
         }
-        if let Err(e) = process_item(repo, item) {
-            tracing::error!("Error processing sync queue item {}: {}", item.id, e);
+        count += items
+            .iter()
+            .filter(|i| i.action != "user_action_required")
+            .count() as u32;
+        let all_skipped = items.iter().all(|i| i.action == "user_action_required");
+        for item in &items {
+            if item.action == "user_action_required" {
+                continue;
+            }
+            if let Err(e) = process_item(repo, item) {
+                tracing::error!("Error processing sync queue item {}: {}", item.id, e);
+            }
+        }
+        // Guard against an infinite loop if every remaining item is
+        // user_action_required (those items are never processed, so the pending
+        // list would never shrink).
+        if all_skipped {
+            break;
         }
     }
     Ok(count)
@@ -435,5 +451,44 @@ mod tests {
             secondary.path().join("cyc.txt").exists(),
             "Mirror should be restored"
         );
+    }
+
+    /// Verifies that process_all_pending drains a queue larger than the internal
+    /// page size (1000), so that no items are silently left behind.
+    #[test]
+    fn test_process_all_pending_drains_queue_beyond_page_size() {
+        let (primary, secondary, repo) = setup();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+
+        // Create 1002 distinct files and enqueue a mirror action for each.
+        let n: usize = 1002;
+        for i in 0..n {
+            let name = format!("bulk-{i}.txt");
+            let content = format!("content-{i}");
+            fs::write(primary.path().join(&name), &content).unwrap();
+            let hash = checksum::checksum_bytes(content.as_bytes());
+            let file = repo
+                .create_tracked_file(pair.id, &name, &hash, content.len() as i64, None)
+                .unwrap();
+            repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        }
+
+        let processed = process_all_pending(&repo).unwrap();
+        assert_eq!(processed as usize, n, "All {n} items should be processed");
+
+        // Every mirror file must exist on the secondary side.
+        for i in 0..n {
+            let name = format!("bulk-{i}.txt");
+            assert!(
+                secondary.path().join(&name).exists(),
+                "Mirror file {name} should exist after process_all_pending"
+            );
+        }
     }
 }

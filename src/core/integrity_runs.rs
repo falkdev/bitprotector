@@ -131,9 +131,7 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
             // Log per-file integrity result to event log.
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             match &result.status {
-                IntegrityStatus::Ok => {
-                    let _ = event_logger::log_integrity_pass(repo, file.id, &full_path);
-                }
+                IntegrityStatus::Ok => {}
                 IntegrityStatus::BothCorrupted => {
                     let _ = event_logger::log_both_corrupted(
                         repo,
