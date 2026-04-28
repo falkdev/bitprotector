@@ -22,6 +22,14 @@ pub enum SchedulerCommand {
         /// Schedule ID to disable
         id: i64,
     },
+    /// Set or clear the max run duration for a schedule
+    SetMaxDuration {
+        /// Schedule ID
+        id: i64,
+        /// Maximum run duration in seconds (0 or omit to remove the limit)
+        #[arg(long)]
+        seconds: Option<i64>,
+    },
     /// Show details of a specific schedule
     Show {
         /// Schedule ID
@@ -41,6 +49,11 @@ pub struct AddArgs {
     /// Interval in seconds (used when no cron expression is given)
     #[arg(long)]
     pub interval: Option<i64>,
+    /// Maximum run duration in seconds. The job stops gracefully after this
+    /// many seconds; remaining items are processed at the next interval.
+    /// Omit (or 0) for unlimited.
+    #[arg(long)]
+    pub max_duration: Option<i64>,
     /// Start enabled (default: true)
     #[arg(long, default_value_t = true)]
     pub enabled: bool,
@@ -55,18 +68,21 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
                 return Ok(());
             }
             println!(
-                "{:<6} {:<16} {:<25} {:<18} {:<8}",
-                "ID", "Task", "Cron", "Interval (s)", "Enabled"
+                "{:<6} {:<16} {:<25} {:<18} {:<14} {:<8}",
+                "ID", "Task", "Cron", "Interval (s)", "Max Duration", "Enabled"
             );
-            println!("{}", "-".repeat(78));
+            println!("{}", "-".repeat(93));
             for cfg in &configs {
                 println!(
-                    "{:<6} {:<16} {:<25} {:<18} {:<8}",
+                    "{:<6} {:<16} {:<25} {:<18} {:<14} {:<8}",
                     cfg.id,
                     cfg.task_type,
                     cfg.cron_expr.as_deref().unwrap_or("-"),
                     cfg.interval_seconds
                         .map(|i| i.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    cfg.max_duration_seconds
+                        .map(|s| format!("{}s", s))
                         .unwrap_or_else(|| "-".to_string()),
                     if cfg.enabled { "yes" } else { "no" },
                 );
@@ -80,11 +96,14 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
             if args.task_type != "sync" && args.task_type != "integrity_check" {
                 anyhow::bail!("task_type must be 'sync' or 'integrity_check'");
             }
+            // Treat 0 as "no limit".
+            let max_duration = args.max_duration.filter(|&s| s > 0);
             let cfg = repo.create_schedule_config(
                 &args.task_type,
                 args.cron.as_deref(),
                 args.interval,
                 args.enabled,
+                max_duration,
             )?;
             println!("Created schedule #{}: {} ({})", cfg.id, cfg.task_type, {
                 if let Some(ref expr) = cfg.cron_expr {
@@ -101,13 +120,23 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
         }
 
         SchedulerCommand::Enable { id } => {
-            repo.update_schedule_config(id, None, None, Some(true))?;
+            repo.update_schedule_config(id, None, None, Some(true), None)?;
             println!("Enabled schedule #{}", id);
         }
 
         SchedulerCommand::Disable { id } => {
-            repo.update_schedule_config(id, None, None, Some(false))?;
+            repo.update_schedule_config(id, None, None, Some(false), None)?;
             println!("Disabled schedule #{}", id);
+        }
+
+        SchedulerCommand::SetMaxDuration { id, seconds } => {
+            // None or 0 means remove the limit.
+            let value: Option<Option<i64>> = Some(seconds.filter(|&s| s > 0));
+            repo.update_schedule_config(id, None, None, None, value)?;
+            match seconds.filter(|&s| s > 0) {
+                Some(s) => println!("Set max duration for schedule #{} to {}s", id, s),
+                None => println!("Cleared max duration for schedule #{}", id),
+            }
         }
 
         SchedulerCommand::Show { id } => {
@@ -123,6 +152,12 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
                 cfg.interval_seconds
                     .map(|i| i.to_string())
                     .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
+                "  Max duration (s): {}",
+                cfg.max_duration_seconds
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unlimited".to_string())
             );
             println!("  Enabled:          {}", cfg.enabled);
             println!(

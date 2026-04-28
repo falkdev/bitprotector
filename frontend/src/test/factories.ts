@@ -246,6 +246,7 @@ export function makeSchedule(overrides: Partial<ScheduleConfig> = {}): ScheduleC
     task_type: 'sync',
     cron_expr: '0 2 * * *',
     interval_seconds: null,
+    max_duration_seconds: null,
     enabled: true,
     last_run: DEFAULT_DATE,
     next_run: '2026-01-02T00:00:00Z',

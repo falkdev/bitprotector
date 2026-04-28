@@ -79,7 +79,7 @@ async fn test_scheduler_create_invalid_task_type_returns_400() {
 async fn test_scheduler_update() {
     let repo = make_repo();
     let cfg = repo
-        .create_schedule_config("sync", None, Some(300), true)
+        .create_schedule_config("sync", None, Some(300), true, None)
         .unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::put()
@@ -97,7 +97,7 @@ async fn test_scheduler_update() {
 async fn test_scheduler_delete() {
     let repo = make_repo();
     let cfg = repo
-        .create_schedule_config("integrity_check", None, Some(600), false)
+        .create_schedule_config("integrity_check", None, Some(600), false, None)
         .unwrap();
     let app = make_app!(repo).await;
     let req = test::TestRequest::delete()
@@ -117,4 +117,60 @@ async fn test_scheduler_get_not_found() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 404);
+}
+
+#[actix_rt::test]
+async fn test_scheduler_create_with_max_duration() {
+    let app = make_app!(make_repo()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/scheduler/schedules")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "task_type": "sync",
+            "interval_seconds": 3600,
+            "enabled": false,
+            "max_duration_seconds": 1800
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(
+        body["max_duration_seconds"], 1800,
+        "max_duration_seconds should be returned in the response"
+    );
+}
+
+#[actix_rt::test]
+async fn test_scheduler_update_max_duration() {
+    let repo = make_repo();
+    let cfg = repo
+        .create_schedule_config("integrity_check", None, Some(3600), false, None)
+        .unwrap();
+    let app = make_app!(repo).await;
+
+    // Set a max duration
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/v1/scheduler/schedules/{}", cfg.id))
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({ "max_duration_seconds": 900 }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["max_duration_seconds"], 900);
+
+    // Clear the max duration
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/v1/scheduler/schedules/{}", cfg.id))
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({ "max_duration_seconds": null }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(
+        body["max_duration_seconds"].is_null(),
+        "max_duration_seconds should be null after clearing"
+    );
 }

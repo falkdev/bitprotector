@@ -330,3 +330,88 @@ async fn test_sync_run_unknown_task_returns_400() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 400);
 }
+
+// ── Pause / Resume ────────────────────────────────────────────────────────
+
+#[actix_rt::test]
+async fn test_sync_queue_list_includes_queue_paused_field() {
+    let app = make_app!(make_repo()).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(
+        body["queue_paused"], false,
+        "queue_paused should default to false"
+    );
+}
+
+#[actix_rt::test]
+async fn test_sync_pause_and_resume() {
+    let app = make_app!(make_repo()).await;
+
+    // Pause
+    let req = test::TestRequest::post()
+        .uri("/api/v1/sync/pause")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["queue_paused"], true);
+
+    // Verify list reflects paused state
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["queue_paused"], true);
+
+    // Resume
+    let req = test::TestRequest::post()
+        .uri("/api/v1/sync/resume")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["queue_paused"], false);
+
+    // Verify list reflects resumed state
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["queue_paused"], false);
+}
+
+#[actix_rt::test]
+async fn test_sync_process_is_noop_when_paused() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("paused_pair", "/p", "/s").unwrap();
+    let file = repo
+        .create_tracked_file(pair.id, "paused.txt", "h1", 1, None)
+        .unwrap();
+    repo.create_sync_queue_item(file.id, "mirror").unwrap();
+    repo.set_sync_queue_paused(true).unwrap();
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/sync/process")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(
+        body["processed"], 0,
+        "No items should be processed while queue is paused"
+    );
+}

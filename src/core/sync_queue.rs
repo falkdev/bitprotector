@@ -67,10 +67,18 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 }
 
 /// Process all pending items in the sync queue.
-pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
+///
+/// - If `stop_by` is `Some(instant)` and the deadline has passed, processing
+///   stops early; remaining items stay `pending` for the next run.
+/// - If the queue is globally paused (see `repo.set_sync_queue_paused`),
+///   processing stops immediately and pending items are left untouched.
+pub fn process_all_pending(
+    repo: &Repository,
+    stop_by: Option<std::time::Instant>,
+) -> anyhow::Result<u32> {
     repo.requeue_in_progress_sync_queue()?;
     let page_size: i64 = 1000;
-    let mut count: u32 = 0;
+    let mut processed = 0u32;
     loop {
         // Always fetch page 1: processed items are no longer "pending" so the
         // window slides forward naturally without needing an explicit offset.
@@ -78,18 +86,25 @@ pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
         if items.is_empty() {
             break;
         }
-        count += items
-            .iter()
-            .filter(|i| i.action != "user_action_required")
-            .count() as u32;
         let all_skipped = items.iter().all(|i| i.action == "user_action_required");
         for item in &items {
             if item.action == "user_action_required" {
                 continue;
             }
+            // Check global pause flag.
+            if repo.get_sync_queue_paused()? {
+                return Ok(processed);
+            }
+            // Honour scheduler time window.
+            if let Some(dl) = stop_by {
+                if std::time::Instant::now() >= dl {
+                    return Ok(processed);
+                }
+            }
             if let Err(e) = process_item(repo, item) {
                 tracing::error!("Error processing sync queue item {}: {}", item.id, e);
             }
+            processed += 1;
         }
         // Guard against an infinite loop if every remaining item is
         // user_action_required (those items are never processed, so the pending
@@ -98,7 +113,7 @@ pub fn process_all_pending(repo: &Repository) -> anyhow::Result<u32> {
             break;
         }
     }
-    Ok(count)
+    Ok(processed)
 }
 
 /// Resolve a `user_action_required` sync queue item.
@@ -305,7 +320,7 @@ mod tests {
         repo.update_sync_queue_status(item.id, "in_progress", None)
             .unwrap();
 
-        let processed = process_all_pending(&repo).unwrap();
+        let processed = process_all_pending(&repo, None).unwrap();
 
         assert_eq!(processed, 1);
         let updated = repo.get_sync_queue_item(item.id).unwrap();
@@ -479,7 +494,7 @@ mod tests {
             repo.create_sync_queue_item(file.id, "mirror").unwrap();
         }
 
-        let processed = process_all_pending(&repo).unwrap();
+        let processed = process_all_pending(&repo, None).unwrap();
         assert_eq!(processed as usize, n, "All {n} items should be processed");
 
         // Every mirror file must exist on the secondary side.
@@ -490,5 +505,73 @@ mod tests {
                 "Mirror file {name} should exist after process_all_pending"
             );
         }
+    }
+
+    #[test]
+    fn test_process_all_pending_stops_when_paused() {
+        let (primary, secondary, repo) = setup();
+        let content = b"pause test";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("p1.txt"), content).unwrap();
+        fs::write(primary.path().join("p2.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let f1 = repo
+            .create_tracked_file(pair.id, "p1.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        let f2 = repo
+            .create_tracked_file(pair.id, "p2.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(f1.id, "mirror").unwrap();
+        repo.create_sync_queue_item(f2.id, "mirror").unwrap();
+
+        // Pause the queue before processing
+        repo.set_sync_queue_paused(true).unwrap();
+        let processed = process_all_pending(&repo, None).unwrap();
+
+        assert_eq!(processed, 0, "No items should be processed while paused");
+
+        // Resume and process
+        repo.set_sync_queue_paused(false).unwrap();
+        let processed = process_all_pending(&repo, None).unwrap();
+        assert_eq!(processed, 2, "Both items should be processed after resume");
+    }
+
+    #[test]
+    fn test_process_all_pending_stops_at_deadline() {
+        use std::time::{Duration, Instant};
+
+        let (primary, _secondary, repo) = setup();
+        let content = b"deadline test";
+        let hash = checksum::checksum_bytes(content);
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                _secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+
+        // Enqueue many items
+        for i in 0..20 {
+            let fname = format!("dl{}.txt", i);
+            fs::write(primary.path().join(&fname), content).unwrap();
+            let f = repo
+                .create_tracked_file(pair.id, &fname, &hash, content.len() as i64, None)
+                .unwrap();
+            repo.create_sync_queue_item(f.id, "mirror").unwrap();
+        }
+
+        // Deadline already in the past — nothing should be processed
+        let past = Instant::now() - Duration::from_secs(1);
+        let processed = process_all_pending(&repo, Some(past)).unwrap();
+        assert_eq!(processed, 0, "Expired deadline should prevent processing");
     }
 }

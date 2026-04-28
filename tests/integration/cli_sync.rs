@@ -326,7 +326,7 @@ fn test_process_all_pending_skips_user_action_required_items() {
         .unwrap();
 
     // process_all_pending should skip user_action_required and return 0 processed
-    let processed = process_all_pending(&repo).unwrap();
+    let processed = process_all_pending(&repo, None).unwrap();
     assert_eq!(
         processed, 0,
         "user_action_required items must be skipped by process_all_pending"

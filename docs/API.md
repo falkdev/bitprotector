@@ -981,9 +981,12 @@ Get paged results for a specific run.
     ],
     "total": 42,
     "page": 1,
-    "per_page": 50
+    "per_page": 50,
+    "queue_paused": false
 }
 ```
+
+`queue_paused` is `true` when automatic queue processing has been suspended via `POST /sync/pause`. The queue contents are unchanged; no new items will be processed until `POST /sync/resume` is called.
 
 ---
 
@@ -1066,12 +1069,36 @@ Delete all sync queue rows with status `completed`.
 
 ### POST `/sync/process`
 
-Process all pending sync queue items immediately (synchronous).
+Process all pending sync queue items immediately (synchronous). If the queue is paused (`queue_paused: true`), this call returns `{ "processed": 0 }` without touching any items.
 
 **Response `200`:**
 
 ```json
 { "processed": 10 }
+```
+
+---
+
+### POST `/sync/pause`
+
+Suspend automatic sync queue processing. Items already in progress are not interrupted, but no new items will be picked up by the scheduler or `POST /sync/process` until the queue is resumed.
+
+**Response `200`:**
+
+```json
+{ "queue_paused": true }
+```
+
+---
+
+### POST `/sync/resume`
+
+Resume automatic sync queue processing after a pause.
+
+**Response `200`:**
+
+```json
+{ "queue_paused": false }
 ```
 
 ---
@@ -1111,6 +1138,7 @@ List all configured schedules.
         "task_type": "sync",
         "cron_expr": null,
         "interval_seconds": 3600,
+        "max_duration_seconds": null,
         "enabled": true,
         "last_run": "2026-03-29T02:00:00Z",
         "next_run": "2026-03-29T03:00:00Z",
@@ -1121,6 +1149,8 @@ List all configured schedules.
 ```
 
 `task_type` is `sync` or `integrity_check`.
+
+`max_duration_seconds` is an optional integer. When set, the scheduler will stop processing after that many seconds and resume remaining items on the next scheduled run. `null` means no limit.
 
 ---
 
@@ -1134,9 +1164,12 @@ Create a new schedule. At least one of `cron_expr` or `interval_seconds` must be
 {
     "task_type": "integrity_check",
     "interval_seconds": 86400,
+    "max_duration_seconds": 3600,
     "enabled": true
 }
 ```
+
+`max_duration_seconds` is optional. Omit or set to `null` for unlimited duration.
 
 **Response `201`:** Created schedule object.  
 **Errors:** `400 Bad Request`
@@ -1159,9 +1192,12 @@ Update an existing schedule. All fields are optional.
 ```json
 {
     "interval_seconds": 43200,
+    "max_duration_seconds": 1800,
     "enabled": false
 }
 ```
+
+To clear `max_duration_seconds` (set to unlimited), send `"max_duration_seconds": null` explicitly. Omitting the field leaves the existing value unchanged.
 
 **Response `200`:** Updated schedule object.  
 **Errors:** `404 Not Found`

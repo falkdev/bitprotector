@@ -27,6 +27,7 @@ pub fn start_run_async(
     scope_drive_pair_id: Option<i64>,
     recover: bool,
     trigger: &str,
+    deadline: Option<std::time::Instant>,
 ) -> anyhow::Result<IntegrityRun> {
     if repo.get_active_integrity_run()?.is_some() {
         anyhow::bail!("Another integrity run is already active");
@@ -38,7 +39,7 @@ pub fn start_run_async(
     let repo_clone = repo.clone();
 
     std::thread::spawn(move || {
-        if let Err(error) = process_run(&repo_clone, run_id) {
+        if let Err(error) = process_run(&repo_clone, run_id, deadline) {
             let message = error.to_string();
             let _ = repo_clone.finish_integrity_run(run_id, RUN_STATUS_FAILED, Some(&message));
         }
@@ -52,17 +53,22 @@ pub fn run_sync(
     scope_drive_pair_id: Option<i64>,
     recover: bool,
     trigger: &str,
+    deadline: Option<std::time::Instant>,
 ) -> anyhow::Result<IntegrityRun> {
     if repo.get_active_integrity_run()?.is_some() {
         anyhow::bail!("Another integrity run is already active");
     }
     let total_files = repo.count_tracked_files(scope_drive_pair_id)?;
     let run = repo.create_integrity_run(scope_drive_pair_id, recover, trigger, total_files)?;
-    process_run(repo, run.id)?;
+    process_run(repo, run.id, deadline)?;
     repo.get_integrity_run(run.id)
 }
 
-pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
+pub fn process_run(
+    repo: &Repository,
+    run_id: i64,
+    deadline: Option<std::time::Instant>,
+) -> anyhow::Result<()> {
     let run = repo.get_integrity_run(run_id)?;
     let recover = run.recover;
     let scope_drive_pair_id = run.scope_drive_pair_id;
@@ -73,7 +79,7 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
 
     loop {
         let (files, total) =
-            repo.list_tracked_files(scope_drive_pair_id, None, None, page, per_page)?;
+            repo.list_tracked_files_oldest_integrity_first(scope_drive_pair_id, page, per_page)?;
         if files.is_empty() {
             break;
         }
@@ -83,6 +89,14 @@ pub fn process_run(repo: &Repository, run_id: i64) -> anyhow::Result<()> {
             if current.stop_requested {
                 repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
                 return Ok(());
+            }
+
+            // Honour scheduler time window: stop gracefully at the deadline.
+            if let Some(dl) = deadline {
+                if std::time::Instant::now() >= dl {
+                    repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
+                    return Ok(());
+                }
             }
 
             let pair = match drive::load_operational_pair(repo, file.drive_pair_id) {
@@ -290,7 +304,7 @@ mod tests {
         let (primary, secondary, pair_id) = setup_pair(&repo);
         create_tracked_file(&repo, pair_id, &primary, &secondary, "a.txt", true);
 
-        let run = start_run_async(&repo, Some(pair_id), false, "test").unwrap();
+        let run = start_run_async(&repo, Some(pair_id), false, "test", None).unwrap();
         assert_eq!(run.status, RUN_STATUS_RUNNING);
         assert_eq!(run.total_files, 1);
 
@@ -314,7 +328,7 @@ mod tests {
         create_tracked_file(&repo, pair_id, &primary, &secondary, "ok.txt", true);
         create_tracked_file(&repo, pair_id, &primary, &secondary, "missing.txt", false);
 
-        let run = run_sync(&repo, Some(pair_id), false, "test").unwrap();
+        let run = run_sync(&repo, Some(pair_id), false, "test", None).unwrap();
         assert_eq!(run.status, RUN_STATUS_COMPLETED);
         assert_eq!(run.total_files, 2);
         assert_eq!(run.processed_files, 2);
@@ -348,9 +362,38 @@ mod tests {
             .unwrap();
         repo.request_integrity_run_stop(run.id).unwrap();
 
-        process_run(&repo, run.id).unwrap();
+        process_run(&repo, run.id, None).unwrap();
         let stopped = repo.get_integrity_run(run.id).unwrap();
         assert_eq!(stopped.status, RUN_STATUS_STOPPED);
         assert!(stopped.stop_requested);
+    }
+
+    #[test]
+    fn run_sync_stops_at_deadline() {
+        use std::time::{Duration, Instant};
+
+        let repo = make_repo();
+        let (primary, secondary, pair_id) = setup_pair(&repo);
+        // Create several files to check
+        for i in 0..10 {
+            create_tracked_file(
+                &repo,
+                pair_id,
+                &primary,
+                &secondary,
+                &format!("dl{}.txt", i),
+                true,
+            );
+        }
+
+        // Deadline already in the past — the run should stop immediately
+        let past_deadline = Instant::now() - Duration::from_secs(1);
+        let run = run_sync(&repo, Some(pair_id), false, "test", Some(past_deadline)).unwrap();
+
+        // The run must be stopped, not completed, since the deadline has passed
+        assert_eq!(
+            run.status, RUN_STATUS_STOPPED,
+            "Run should be STOPPED when deadline is in the past"
+        );
     }
 }

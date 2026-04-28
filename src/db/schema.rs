@@ -137,17 +137,37 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schedule_config (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_type        TEXT NOT NULL CHECK(task_type IN ('sync', 'integrity_check')),
-            cron_expr        TEXT,
-            interval_seconds INTEGER,
-            enabled          INTEGER NOT NULL DEFAULT 1,
-            last_run         TEXT,
-            next_run         TEXT,
-            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_type            TEXT NOT NULL CHECK(task_type IN ('sync', 'integrity_check')),
+            cron_expr            TEXT,
+            interval_seconds     INTEGER,
+            max_duration_seconds INTEGER,
+            enabled              INTEGER NOT NULL DEFAULT 1,
+            last_run             TEXT,
+            next_run             TEXT,
+            created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_settings (
+            id           INTEGER PRIMARY KEY CHECK(id = 1),
+            queue_paused INTEGER NOT NULL DEFAULT 0
+        );
+         INSERT OR IGNORE INTO sync_settings (id, queue_paused) VALUES (1, 0);",
+    )?;
+
+    // Idempotent migrations for existing databases.
+    // These will fail silently if the column/index already exists.
+    let _ = conn.execute(
+        "ALTER TABLE schedule_config ADD COLUMN max_duration_seconds INTEGER",
+        [],
+    );
+    let _ = conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tracked_files_integrity_check
+         ON tracked_files(last_integrity_check_at);",
+    );
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_backup_config (
@@ -200,6 +220,7 @@ mod tests {
             "event_log",
             "schedule_config",
             "db_backup_config",
+            "sync_settings",
         ];
 
         for table in &tables {
