@@ -13,9 +13,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   User,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
+import { useTheme } from '@/lib/use-theme'
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'bitprotector.sidebar.collapsed'
 
@@ -42,6 +45,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(loadInitialCollapsedState)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
+  const { theme, toggle } = useTheme()
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0')
@@ -163,6 +167,17 @@ export function Sidebar() {
                 collapsed ? 'bottom-0 left-full ml-2' : 'bottom-full left-0 mb-2'
               )}
             >
+              <button
+                type="button"
+                onClick={() => toggle()}
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-popover-foreground transition-colors hover:bg-accent"
+                data-testid="user-menu-theme-toggle"
+                role="menuitem"
+                aria-pressed={theme === 'dark'}
+              >
+                {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+              </button>
               <button
                 type="button"
                 onClick={handleLogout}

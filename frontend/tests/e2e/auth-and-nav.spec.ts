@@ -41,3 +41,20 @@ test('logs in through the live backend, visits protected pages, and logs out', a
   await page.goto('/dashboard')
   await expect(page).toHaveURL(/\/login$/)
 })
+
+test('dark-mode toggle persists across reload', async ({ page }) => {
+  await loginThroughUi(page)
+  await expect(page).toHaveURL(/\/dashboard$/)
+
+  // Open user menu and click the theme toggle
+  await page.getByTestId('user-menu-trigger').click()
+  await page.getByTestId('user-menu-theme-toggle').click()
+
+  // html element should now have the dark class
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
+  // Open again and toggle back to light
+  await page.getByTestId('user-menu-trigger').click()
+  await page.getByTestId('user-menu-theme-toggle').click()
+  await expect(page.locator('html')).not.toHaveClass(/dark/)
+})

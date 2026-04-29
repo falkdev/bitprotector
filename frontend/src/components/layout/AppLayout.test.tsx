@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './AppLayout'
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from './Sidebar'
 import { useAuthStore } from '@/stores/auth-store'
+import { useThemeStore } from '@/stores/theme-store'
 
 function renderLayout(initialRoute = '/dashboard') {
   return (
@@ -76,5 +77,25 @@ describe('AppLayout', () => {
 
     expect(screen.getByTestId('app-sidebar')).toHaveClass('w-16')
     expect(screen.getByTestId('nav-dashboard')).toHaveAttribute('title', 'Dashboard')
+  })
+
+  it('toggles dark mode via the user menu theme toggle', async () => {
+    const user = userEvent.setup()
+    render(renderLayout())
+
+    await user.click(screen.getByTestId('user-menu-trigger'))
+    const toggleBtn = screen.getByTestId('user-menu-theme-toggle')
+    expect(toggleBtn).toBeInTheDocument()
+
+    // First click → dark (menu stays open)
+    await user.click(toggleBtn)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+
+    // Click again without re-opening (menu is still open) → light
+    await user.click(screen.getByTestId('user-menu-theme-toggle'))
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+
+    // Cleanup
+    useThemeStore.setState({ override: null })
   })
 })

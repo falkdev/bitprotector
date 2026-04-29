@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BitProtector</title>
+    <script>
+      try {
+        var stored = localStorage.getItem('bitprotector-theme')
+        if (stored) {
+          var parsed = JSON.parse(stored)
+          var override = parsed && parsed.state && parsed.state.override
+          if (override === 'dark') {
+            document.documentElement.classList.add('dark')
+          }
+        } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.classList.add('dark')
+        }
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
