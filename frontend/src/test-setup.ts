@@ -7,6 +7,21 @@ import { useDrivesStore } from '@/stores/drives-store'
 import { useLogsStore } from '@/stores/logs-store'
 import { useStatusStore } from '@/stores/status-store'
 import { useSyncStore } from '@/stores/sync-store'
+import { useThemeStore } from '@/stores/theme-store'
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }),
+})
 
 function resetStores() {
   useAuthStore.setState({
@@ -37,6 +52,8 @@ function resetStores() {
     error: null,
     filter: 'all',
   })
+  useThemeStore.setState({ override: null })
+  document.documentElement.classList.remove('dark')
 }
 
 beforeAll(() => {

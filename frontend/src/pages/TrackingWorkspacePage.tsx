@@ -111,7 +111,9 @@ function toTrackedFile(item: TrackingItem): TrackedFile {
 function SourceBadge({ source }: { source: TrackingItem['source'] }) {
   const label = source === 'folder' ? 'Folder' : 'Direct'
   const className =
-    source === 'folder' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+    source === 'folder'
+      ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+      : 'bg-blue-100 text-blue-700 dark:bg-primary/20 dark:text-primary'
 
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{label}</span>
@@ -145,14 +147,14 @@ function FolderStatusBadge({
         : ` (${total}/${total})`
   const className =
     status === 'not_scanned'
-      ? 'bg-gray-100 text-gray-600'
+      ? 'bg-muted text-muted-foreground'
       : status === 'mirrored'
-        ? 'bg-green-100 text-green-700'
+        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
         : status === 'tracked'
-          ? 'bg-slate-100 text-slate-700'
+          ? 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300'
           : status === 'partial'
-            ? 'bg-amber-100 text-amber-700'
-            : 'bg-gray-100 text-gray-600'
+            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+            : 'bg-muted text-muted-foreground'
 
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
@@ -190,7 +192,7 @@ function SelectAllCheckbox({
       onChange={(event) => onChange(event.target.checked)}
       aria-label="Select all rows"
       data-testid="select-all-rows"
-      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
+      className="h-4 w-4 rounded border-input text-primary focus:ring-ring disabled:opacity-60"
     />
   )
 }
@@ -234,13 +236,13 @@ function FolderVirtualPathModal({
   return (
     <>
       <ModalLayer>
-        <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-xl">
           <h2 className="mb-1 text-lg font-semibold">Set Folder Virtual Path</h2>
-          <p className="mb-4 truncate font-mono text-sm text-gray-500">{folder.folder_path}</p>
+          <p className="mb-4 truncate font-mono text-sm text-muted-foreground">{folder.folder_path}</p>
           <div className="space-y-3">
             <label
               htmlFor="folder-virtual-path"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              className="mb-1 block text-sm font-medium text-foreground"
             >
               Virtual Path
             </label>
@@ -250,23 +252,23 @@ function FolderVirtualPathModal({
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
                 placeholder="/docs"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-foreground"
               />
               <button
                 type="button"
                 onClick={() => setShowPicker(true)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+                className="rounded-md border border-input px-3 py-2 text-sm hover:bg-accent"
               >
                 Browse
               </button>
             </div>
-            <p className="text-xs text-gray-500">Leave empty to clear the folder virtual path.</p>
+            <p className="text-xs text-muted-foreground">Leave empty to clear the folder virtual path.</p>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+              className="rounded-md border border-input px-4 py-2 text-sm hover:bg-accent"
             >
               Cancel
             </button>
@@ -274,7 +276,7 @@ function FolderVirtualPathModal({
               type="button"
               onClick={() => void submit()}
               disabled={saving}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -342,8 +344,8 @@ function VirtualPathTree({
     return (
       <div key={node.path}>
         <button
-          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-gray-100 ${
-            selected === node.path ? 'bg-blue-50 text-blue-700 font-medium' : ''
+          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-accent ${
+            selected === node.path ? 'bg-primary/10 text-primary font-medium' : ''
           }`}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
           onClick={() => {
@@ -358,7 +360,7 @@ function VirtualPathTree({
           data-testid={`tree-node-${node.path}`}
         >
           <span className="truncate">{node.name}</span>
-          <span className="ml-auto text-xs text-gray-400">{node.item_count}</span>
+          <span className="ml-auto text-xs text-muted-foreground">{node.item_count}</span>
         </button>
         {isOpen && node.children && node.children.length > 0 ? (
           <div>{node.children.map((child) => renderNode(child, depth + 1))}</div>
@@ -370,15 +372,15 @@ function VirtualPathTree({
   return (
     <div className="space-y-0.5 p-2" data-testid="file-tree">
       <button
-        className={`flex w-full items-center gap-1 rounded px-2 py-1 text-sm font-medium hover:bg-gray-100 ${
-          selected === '' ? 'bg-blue-50 text-blue-700' : ''
+        className={`flex w-full items-center gap-1 rounded px-2 py-1 text-sm font-medium hover:bg-accent ${
+          selected === '' ? 'bg-primary/10 text-primary' : ''
         }`}
         onClick={() => onSelect('')}
       >
         All virtual paths
       </button>
       {nodes.length === 0 ? (
-        <div className="px-2 py-2 text-xs text-gray-500">No virtual paths assigned</div>
+        <div className="px-2 py-2 text-xs text-muted-foreground">No virtual paths assigned</div>
       ) : (
         nodes.map((node) => renderNode(node, 0))
       )}
@@ -749,13 +751,13 @@ export function TrackingWorkspacePage() {
 
       <div className="flex min-h-0 flex-1 gap-0">
         <aside
-          className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-in-out`}
+          className={`${virtualPaneCollapsed ? 'w-12 overflow-y-hidden' : 'w-64 overflow-y-auto'} shrink-0 overflow-x-hidden border-r border-border bg-background transition-[width] duration-200 ease-in-out`}
         >
           <div
             className={`${virtualPaneCollapsed ? 'flex items-center justify-center border-b px-1 py-2.5' : 'flex items-center justify-between border-b p-3'}`}
           >
             {!virtualPaneCollapsed ? (
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Virtual paths
               </h2>
             ) : null}
@@ -777,7 +779,7 @@ export function TrackingWorkspacePage() {
           </div>
           {virtualPaneCollapsed ? (
             <div className="flex h-[calc(100%-44px)] items-center justify-center">
-              <span className="select-none text-sm font-semibold uppercase tracking-[0.14em] text-gray-400 [writing-mode:vertical-lr]">
+              <span className="select-none text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground [writing-mode:vertical-lr]">
                 Virtual Paths
               </span>
             </div>
@@ -791,7 +793,7 @@ export function TrackingWorkspacePage() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b bg-white px-4 py-3">
+          <div className="border-b border-border bg-background px-4 py-3">
             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <BreadcrumbNav
                 path={virtualPrefix}
@@ -799,7 +801,7 @@ export function TrackingWorkspacePage() {
               />
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => {
                     if (!hasDrivePairs) {
                       return
@@ -812,7 +814,7 @@ export function TrackingWorkspacePage() {
                   <FolderPlus className="h-4 w-4" /> Add Folder
                 </button>
                 <button
-                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => {
                     if (!hasDrivePairs) {
                       return
@@ -840,7 +842,7 @@ export function TrackingWorkspacePage() {
                 value={params.q ?? ''}
                 onChange={(event) => updateParams({ q: event.target.value || undefined })}
                 placeholder="Search by path"
-                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
               />
               <select
                 value={params.drive_id ?? ''}
@@ -849,7 +851,7 @@ export function TrackingWorkspacePage() {
                     drive_id: event.target.value ? Number(event.target.value) : undefined,
                   })
                 }
-                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
               >
                 <option value="">All drives</option>
                 {drives.map((drive) => (
@@ -863,7 +865,7 @@ export function TrackingWorkspacePage() {
                 onChange={(event) =>
                   updateParams({ item_kind: event.target.value as TrackingListParams['item_kind'] })
                 }
-                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
               >
                 <option value="all">All items</option>
                 <option value="file">Files</option>
@@ -874,7 +876,7 @@ export function TrackingWorkspacePage() {
                 onChange={(event) =>
                   updateParams({ source: event.target.value as TrackingListParams['source'] })
                 }
-                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
               >
                 <option value="all">All sources</option>
                 <option value="direct">Direct</option>
@@ -890,7 +892,7 @@ export function TrackingWorkspacePage() {
                     has_virtual_path: value === 'all' ? undefined : value === 'yes',
                   })
                 }}
-                className="w-full min-w-0 max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
               >
                 <option value="all">With + Without Virtual Path</option>
                 <option value="yes">With Virtual Path</option>
@@ -928,7 +930,7 @@ export function TrackingWorkspacePage() {
                           onChange={(event) => toggleRowSelection(item, event.target.checked)}
                           aria-label={`Select ${item.kind} ${item.path}`}
                           data-testid={`select-row-${trackingRowKey(item)}`}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-input text-primary focus:ring-ring"
                         />
                       ),
                     },
@@ -937,11 +939,11 @@ export function TrackingWorkspacePage() {
                       header: 'Kind',
                       cell: (item) =>
                         item.kind === 'file' ? (
-                          <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                          <span className="rounded bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
                             File
                           </span>
                         ) : (
-                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                             Folder
                           </span>
                         ),
@@ -963,7 +965,7 @@ export function TrackingWorkspacePage() {
                         item.virtual_path ? (
                           <span className="font-mono text-xs">{item.virtual_path}</span>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-muted-foreground">—</span>
                         ),
                     },
                     {
@@ -977,11 +979,11 @@ export function TrackingWorkspacePage() {
                       cell: (item) => {
                         if (item.kind === 'file') {
                           return item.is_mirrored ? (
-                            <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
+                            <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
                               Mirrored
                             </span>
                           ) : (
-                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
+                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-700/40 dark:text-slate-300">
                               Tracked
                             </span>
                           )
@@ -1021,7 +1023,7 @@ export function TrackingWorkspacePage() {
                                 const folder = folderItems.find((entry) => entry.id === item.id)
                                 if (folder) setFolderPathModal(folder)
                               }}
-                              className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+                              className="rounded-md border border-input px-2 py-1 text-xs hover:bg-accent"
                             >
                               Set Path
                             </button>
@@ -1037,7 +1039,7 @@ export function TrackingWorkspacePage() {
                                 }
                                 void handleScanFolder(folder)
                               }}
-                              className="rounded-md border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+                              className="rounded-md border border-input px-2 py-1 text-xs hover:bg-accent"
                               data-testid={`folder-action-${item.id}`}
                             >
                               {item.folder_status === 'tracked' || item.folder_status === 'partial'
@@ -1049,7 +1051,7 @@ export function TrackingWorkspacePage() {
                                 event.stopPropagation()
                                 setDeleteTarget(item)
                               }}
-                              className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              className="rounded-md border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
                               data-testid={`delete-folder-${item.id}`}
                             >
                               Delete
@@ -1089,18 +1091,18 @@ export function TrackingWorkspacePage() {
           </div>
           {selectedItems.length > 0 ? (
             <div
-              className="border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur"
+              className="border-t border-border bg-background/95 px-4 py-3 backdrop-blur"
               data-testid="tracking-bulk-actions"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-gray-600" data-testid="selected-count">
+                <p className="text-sm text-muted-foreground" data-testid="selected-count">
                   {selectedItems.length} selected
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setSelectedRowKeys(new Set())}
-                    className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                    className="shrink-0 whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent"
                     data-testid="bulk-deselect"
                   >
                     Deselect all
@@ -1109,7 +1111,7 @@ export function TrackingWorkspacePage() {
                     type="button"
                     onClick={() => void handleMirrorSelected()}
                     disabled={bulkMirroring || bulkDeleting}
-                    className="shrink-0 whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="shrink-0 whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
                     data-testid="bulk-mirror"
                   >
                     {bulkMirroring ? 'Mirroring...' : 'Mirror selected'}
@@ -1118,7 +1120,7 @@ export function TrackingWorkspacePage() {
                     type="button"
                     onClick={() => setConfirmBulkDeleteOpen(true)}
                     disabled={bulkDeleting || bulkMirroring}
-                    className="shrink-0 whitespace-nowrap rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="shrink-0 whitespace-nowrap rounded-md border border-destructive/40 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                     data-testid="bulk-delete"
                   >
                     Delete selected
@@ -1130,7 +1132,7 @@ export function TrackingWorkspacePage() {
         </div>
 
         {selectedFile ? (
-          <aside className="w-80 shrink-0 overflow-auto border-l border-gray-200 bg-white">
+          <aside className="w-80 shrink-0 overflow-auto border-l border-border bg-background">
             <FileDetails
               file={selectedFile}
               drivePairName={driveName(selectedFile.drive_pair_id)}
