@@ -41,6 +41,8 @@ type DetailPostDeleteAction =
       type: 'close'
     }
 
+const EMPTY_TRACKING_ITEMS: TrackingItem[] = []
+
 function trackingRowKey(item: TrackingItem): string {
   return `${item.kind}-${item.id}`
 }
@@ -466,7 +468,7 @@ export function TrackingWorkspacePage() {
     }))
   }
 
-  const items = response?.items ?? []
+  const items = response?.items ?? EMPTY_TRACKING_ITEMS
   const folderItems = useMemo(
     () =>
       items
