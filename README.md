@@ -240,6 +240,14 @@ bitprotector --db /tmp/test.db drives list
 
 ---
 
+## AI assistance
+
+Parts of this project were developed with assistance from AI tools
+(GitHub Copilot, Claude). All AI-generated code has been reviewed,
+tested, and modified by the maintainer before publication.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
