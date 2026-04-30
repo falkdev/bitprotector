@@ -240,7 +240,9 @@ function FolderVirtualPathModal({
       <ModalLayer>
         <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-xl">
           <h2 className="mb-1 text-lg font-semibold">Set Folder Virtual Path</h2>
-          <p className="mb-4 truncate font-mono text-sm text-muted-foreground">{folder.folder_path}</p>
+          <p className="mb-4 truncate font-mono text-sm text-muted-foreground">
+            {folder.folder_path}
+          </p>
           <div className="space-y-3">
             <label
               htmlFor="folder-virtual-path"
@@ -264,7 +266,9 @@ function FolderVirtualPathModal({
                 Browse
               </button>
             </div>
-            <p className="text-xs text-muted-foreground">Leave empty to clear the folder virtual path.</p>
+            <p className="text-xs text-muted-foreground">
+              Leave empty to clear the folder virtual path.
+            </p>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <button

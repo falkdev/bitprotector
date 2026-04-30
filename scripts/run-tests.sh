@@ -38,7 +38,7 @@ run_lint() {
     cargo clippy -- -D warnings
     cd "${PROJECT_ROOT}/frontend"
     npm run lint
-    npx prettier --check "src/**/*.{ts,tsx,css}" 2>/dev/null || true
+    npx prettier --check "src/**/*.{ts,tsx,css}"
     cd "${PROJECT_ROOT}"
     echo "lint: OK"
 }
