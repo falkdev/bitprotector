@@ -466,7 +466,7 @@ export function TrackingWorkspacePage() {
     }))
   }
 
-  const items = response?.items ?? []
+  const items = useMemo(() => response?.items ?? [], [response])
   const folderItems = useMemo(
     () =>
       items
