@@ -175,10 +175,25 @@ pub struct DbBackupConfig {
     pub id: i64,
     pub backup_path: String,
     pub drive_label: Option<String>,
-    pub max_copies: i64,
+    pub priority: i64,
     pub enabled: bool,
     pub last_backup: Option<String>,
+    pub last_integrity_check: Option<String>,
+    pub last_integrity_status: Option<String>,
+    pub last_error: Option<String>,
     pub created_at: String,
+}
+
+/// Represents global database backup settings.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DbBackupSettings {
+    pub backup_enabled: bool,
+    pub backup_interval_seconds: i64,
+    pub integrity_enabled: bool,
+    pub integrity_interval_seconds: i64,
+    pub last_backup_run: Option<String>,
+    pub last_integrity_run: Option<String>,
+    pub updated_at: String,
 }
 
 /// Represents an integrity run summary.
@@ -2000,15 +2015,19 @@ impl Repository {
         &self,
         backup_path: &str,
         drive_label: Option<&str>,
-        max_copies: i64,
         enabled: bool,
     ) -> anyhow::Result<DbBackupConfig> {
         let id = {
             let conn = self.conn()?;
+            let priority: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(priority) + 1, 0) FROM db_backup_config",
+                [],
+                |row| row.get(0),
+            )?;
             conn.execute(
-                "INSERT INTO db_backup_config (backup_path, drive_label, max_copies, enabled)
+                "INSERT INTO db_backup_config (backup_path, drive_label, priority, enabled)
                  VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![backup_path, drive_label, max_copies, enabled as i64],
+                rusqlite::params![backup_path, drive_label, priority, enabled as i64],
             )?;
             conn.last_insert_rowid()
         };
@@ -2018,7 +2037,8 @@ impl Repository {
     pub fn get_db_backup_config(&self, id: i64) -> anyhow::Result<DbBackupConfig> {
         let conn = self.conn()?;
         let cfg = conn.query_row(
-            "SELECT id, backup_path, drive_label, max_copies, enabled, last_backup, created_at
+            "SELECT id, backup_path, drive_label, priority, enabled, last_backup,
+                    last_integrity_check, last_integrity_status, last_error, created_at
              FROM db_backup_config WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -2026,10 +2046,13 @@ impl Repository {
                     id: row.get(0)?,
                     backup_path: row.get(1)?,
                     drive_label: row.get(2)?,
-                    max_copies: row.get(3)?,
+                    priority: row.get(3)?,
                     enabled: row.get::<_, i64>(4)? != 0,
                     last_backup: row.get(5)?,
-                    created_at: row.get(6)?,
+                    last_integrity_check: row.get(6)?,
+                    last_integrity_status: row.get(7)?,
+                    last_error: row.get(8)?,
+                    created_at: row.get(9)?,
                 })
             },
         )?;
@@ -2039,8 +2062,9 @@ impl Repository {
     pub fn list_db_backup_configs(&self) -> anyhow::Result<Vec<DbBackupConfig>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, backup_path, drive_label, max_copies, enabled, last_backup, created_at
-             FROM db_backup_config ORDER BY id",
+            "SELECT id, backup_path, drive_label, priority, enabled, last_backup,
+                    last_integrity_check, last_integrity_status, last_error, created_at
+             FROM db_backup_config ORDER BY priority, id",
         )?;
         let cfgs = stmt
             .query_map([], |row| {
@@ -2048,10 +2072,13 @@ impl Repository {
                     id: row.get(0)?,
                     backup_path: row.get(1)?,
                     drive_label: row.get(2)?,
-                    max_copies: row.get(3)?,
+                    priority: row.get(3)?,
                     enabled: row.get::<_, i64>(4)? != 0,
                     last_backup: row.get(5)?,
-                    created_at: row.get(6)?,
+                    last_integrity_check: row.get(6)?,
+                    last_integrity_status: row.get(7)?,
+                    last_error: row.get(8)?,
+                    created_at: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2061,15 +2088,22 @@ impl Repository {
     pub fn update_db_backup_config(
         &self,
         id: i64,
-        max_copies: Option<i64>,
+        backup_path: Option<&str>,
+        drive_label: Option<Option<&str>>,
         enabled: Option<bool>,
     ) -> anyhow::Result<DbBackupConfig> {
         {
             let conn = self.conn()?;
-            if let Some(mc) = max_copies {
+            if let Some(path) = backup_path {
                 conn.execute(
-                    "UPDATE db_backup_config SET max_copies=?1 WHERE id=?2",
-                    rusqlite::params![mc, id],
+                    "UPDATE db_backup_config SET backup_path=?1 WHERE id=?2",
+                    rusqlite::params![path, id],
+                )?;
+            }
+            if let Some(label) = drive_label {
+                conn.execute(
+                    "UPDATE db_backup_config SET drive_label=?1 WHERE id=?2",
+                    rusqlite::params![label, id],
                 )?;
             }
             if let Some(en) = enabled {
@@ -2094,8 +2128,116 @@ impl Repository {
     pub fn update_db_backup_last_backup(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "UPDATE db_backup_config SET last_backup=datetime('now') WHERE id=?1",
+            "UPDATE db_backup_config SET last_backup=datetime('now'), last_error=NULL WHERE id=?1",
             rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_db_backup_error(&self, id: i64, error: Option<&str>) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE db_backup_config SET last_error=?1 WHERE id=?2",
+            rusqlite::params![error, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_db_backup_integrity_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE db_backup_config
+             SET last_integrity_check=datetime('now'), last_integrity_status=?1, last_error=?2
+             WHERE id=?3",
+            rusqlite::params![status, error, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_db_backup_settings(&self) -> anyhow::Result<DbBackupSettings> {
+        let conn = self.conn()?;
+        let settings = conn.query_row(
+            "SELECT backup_enabled, backup_interval_seconds, integrity_enabled,
+                    integrity_interval_seconds, last_backup_run, last_integrity_run, updated_at
+             FROM db_backup_settings WHERE id=1",
+            [],
+            |row| {
+                Ok(DbBackupSettings {
+                    backup_enabled: row.get::<_, i64>(0)? != 0,
+                    backup_interval_seconds: row.get(1)?,
+                    integrity_enabled: row.get::<_, i64>(2)? != 0,
+                    integrity_interval_seconds: row.get(3)?,
+                    last_backup_run: row.get(4)?,
+                    last_integrity_run: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            },
+        )?;
+        Ok(settings)
+    }
+
+    pub fn update_db_backup_settings(
+        &self,
+        backup_enabled: Option<bool>,
+        backup_interval_seconds: Option<i64>,
+        integrity_enabled: Option<bool>,
+        integrity_interval_seconds: Option<i64>,
+    ) -> anyhow::Result<DbBackupSettings> {
+        {
+            let conn = self.conn()?;
+            if let Some(enabled) = backup_enabled {
+                conn.execute(
+                    "UPDATE db_backup_settings
+                     SET backup_enabled=?1, updated_at=datetime('now') WHERE id=1",
+                    rusqlite::params![enabled as i64],
+                )?;
+            }
+            if let Some(interval) = backup_interval_seconds {
+                conn.execute(
+                    "UPDATE db_backup_settings
+                     SET backup_interval_seconds=?1, updated_at=datetime('now') WHERE id=1",
+                    rusqlite::params![interval],
+                )?;
+            }
+            if let Some(enabled) = integrity_enabled {
+                conn.execute(
+                    "UPDATE db_backup_settings
+                     SET integrity_enabled=?1, updated_at=datetime('now') WHERE id=1",
+                    rusqlite::params![enabled as i64],
+                )?;
+            }
+            if let Some(interval) = integrity_interval_seconds {
+                conn.execute(
+                    "UPDATE db_backup_settings
+                     SET integrity_interval_seconds=?1, updated_at=datetime('now') WHERE id=1",
+                    rusqlite::params![interval],
+                )?;
+            }
+        }
+        self.get_db_backup_settings()
+    }
+
+    pub fn mark_db_backup_settings_backup_run(&self) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE db_backup_settings
+             SET last_backup_run=datetime('now'), updated_at=datetime('now') WHERE id=1",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_db_backup_settings_integrity_run(&self) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE db_backup_settings
+             SET last_integrity_run=datetime('now'), updated_at=datetime('now') WHERE id=1",
+            [],
         )?;
         Ok(())
     }
@@ -2558,16 +2700,53 @@ mod tests {
     fn test_db_backup_config_crud() {
         let repo = make_repo();
         let cfg = repo
-            .create_db_backup_config("/mnt/backup/", Some("backup-1"), 3, true)
+            .create_db_backup_config("/mnt/backup/", Some("backup-1"), true)
             .unwrap();
         assert_eq!(cfg.backup_path, "/mnt/backup/");
-        assert_eq!(cfg.max_copies, 3);
+        assert_eq!(cfg.priority, 0);
+        assert!(cfg.enabled);
 
-        let updated = repo.update_db_backup_config(cfg.id, Some(5), None).unwrap();
-        assert_eq!(updated.max_copies, 5);
+        let updated = repo
+            .update_db_backup_config(
+                cfg.id,
+                Some("/mnt/new-backup/"),
+                Some(Some("backup-2")),
+                Some(false),
+            )
+            .unwrap();
+        assert_eq!(updated.backup_path, "/mnt/new-backup/");
+        assert_eq!(updated.drive_label.as_deref(), Some("backup-2"));
+        assert!(!updated.enabled);
+
+        repo.update_db_backup_integrity_status(cfg.id, "ok", None)
+            .unwrap();
+        let checked = repo.get_db_backup_config(cfg.id).unwrap();
+        assert_eq!(checked.last_integrity_status.as_deref(), Some("ok"));
 
         repo.delete_db_backup_config(cfg.id).unwrap();
         assert!(repo.get_db_backup_config(cfg.id).is_err());
+    }
+
+    #[test]
+    fn test_db_backup_settings_crud() {
+        let repo = make_repo();
+        let defaults = repo.get_db_backup_settings().unwrap();
+        assert!(!defaults.backup_enabled);
+        assert!(!defaults.integrity_enabled);
+
+        let updated = repo
+            .update_db_backup_settings(Some(true), Some(3600), Some(true), Some(7200))
+            .unwrap();
+        assert!(updated.backup_enabled);
+        assert_eq!(updated.backup_interval_seconds, 3600);
+        assert!(updated.integrity_enabled);
+        assert_eq!(updated.integrity_interval_seconds, 7200);
+
+        repo.mark_db_backup_settings_backup_run().unwrap();
+        repo.mark_db_backup_settings_integrity_run().unwrap();
+        let marked = repo.get_db_backup_settings().unwrap();
+        assert!(marked.last_backup_run.is_some());
+        assert!(marked.last_integrity_run.is_some());
     }
 
     // ─── System Status ────────────────────────────────────────────────────────────

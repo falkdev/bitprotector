@@ -262,7 +262,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Database { action } => {
             let repo = open_repo(&db_path)?;
-            bitprotector_lib::cli::commands::database::handle(action, &repo)?;
+            bitprotector_lib::cli::commands::database::handle_with_db_path(
+                action, &repo, &db_path,
+            )?;
         }
         Commands::Scheduler { action } => {
             let repo = open_repo(&db_path)?;

@@ -174,11 +174,49 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             backup_path TEXT NOT NULL,
             drive_label TEXT,
-            max_copies  INTEGER NOT NULL DEFAULT 3,
+            priority    INTEGER NOT NULL DEFAULT 0,
             enabled     INTEGER NOT NULL DEFAULT 1,
             last_backup TEXT,
+            last_integrity_check TEXT,
+            last_integrity_status TEXT,
+            last_error  TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );",
+        );
+         CREATE TABLE IF NOT EXISTS db_backup_settings (
+            id                         INTEGER PRIMARY KEY CHECK(id = 1),
+            backup_enabled             INTEGER NOT NULL DEFAULT 0,
+            backup_interval_seconds    INTEGER NOT NULL DEFAULT 86400,
+            integrity_enabled          INTEGER NOT NULL DEFAULT 0,
+            integrity_interval_seconds INTEGER NOT NULL DEFAULT 86400,
+            last_backup_run            TEXT,
+            last_integrity_run         TEXT,
+            updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+         INSERT OR IGNORE INTO db_backup_settings (
+            id, backup_enabled, backup_interval_seconds, integrity_enabled, integrity_interval_seconds
+         ) VALUES (1, 0, 86400, 0, 86400);",
+    )?;
+
+    // Alpha-era idempotent migrations for local development databases.
+    let _ = conn.execute(
+        "ALTER TABLE db_backup_config ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE db_backup_config ADD COLUMN last_integrity_check TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE db_backup_config ADD COLUMN last_integrity_status TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE db_backup_config ADD COLUMN last_error TEXT",
+        [],
+    );
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_db_backup_config_priority
+         ON db_backup_config(priority, id);",
     )?;
 
     Ok(())
@@ -220,6 +258,7 @@ mod tests {
             "event_log",
             "schedule_config",
             "db_backup_config",
+            "db_backup_settings",
             "sync_settings",
         ];
 

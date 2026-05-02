@@ -1,4 +1,10 @@
-import type { DbBackupConfig, RunBackupResult } from '@/types/database'
+import type {
+  BackupIntegrityResult,
+  DbBackupConfig,
+  DbBackupSettings,
+  RestoreBackupResult,
+  RunBackupResult,
+} from '@/types/database'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
 import type { TrackedFolder, ScanFolderResult } from '@/types/folder'
@@ -222,9 +228,12 @@ export function makeBackupConfig(overrides: Partial<DbBackupConfig> = {}): DbBac
     id: 1,
     backup_path: '/mnt/backups/bitprotector',
     drive_label: 'usb-backup-1',
-    max_copies: 5,
+    priority: 0,
     enabled: true,
     last_backup: DEFAULT_DATE,
+    last_integrity_check: DEFAULT_DATE,
+    last_integrity_status: 'ok',
+    last_error: null,
     created_at: DEFAULT_DATE,
     ...overrides,
   }
@@ -236,6 +245,45 @@ export function makeRunBackupResult(overrides: Partial<RunBackupResult> = {}): R
     backup_path: '/mnt/backups/bitprotector',
     status: 'success',
     error: null,
+    ...overrides,
+  }
+}
+
+export function makeBackupSettings(overrides: Partial<DbBackupSettings> = {}): DbBackupSettings {
+  return {
+    backup_enabled: false,
+    backup_interval_seconds: 86400,
+    integrity_enabled: false,
+    integrity_interval_seconds: 86400,
+    last_backup_run: null,
+    last_integrity_run: null,
+    updated_at: DEFAULT_DATE,
+    ...overrides,
+  }
+}
+
+export function makeBackupIntegrityResult(
+  overrides: Partial<BackupIntegrityResult> = {}
+): BackupIntegrityResult {
+  return {
+    backup_config_id: 1,
+    backup_path: '/mnt/backups/bitprotector/bitprotector.db',
+    status: 'ok',
+    checksum: 'abc123',
+    repaired_from_id: null,
+    error: null,
+    ...overrides,
+  }
+}
+
+export function makeRestoreBackupResult(
+  overrides: Partial<RestoreBackupResult> = {}
+): RestoreBackupResult {
+  return {
+    status: 'staged',
+    restart_required: true,
+    safety_backup_path: '/var/lib/bitprotector/bitprotector.db.safety-20260101000000',
+    staged_restore_path: '/var/lib/bitprotector/bitprotector.db.restore-pending',
     ...overrides,
   }
 }

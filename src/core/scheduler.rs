@@ -1,4 +1,5 @@
 use crate::core::{integrity_runs, sync_queue};
+use crate::db::backup;
 use crate::db::repository::{Repository, ScheduleConfig};
 use std::collections::HashMap;
 use std::sync::{
@@ -68,15 +69,28 @@ fn next_cron_sleep_ms(expr: &str) -> anyhow::Result<u64> {
 /// removed/disabled schedules and starts threads for newly added/enabled ones.
 pub struct Scheduler {
     repo: Arc<Repository>,
+    db_path: Option<String>,
     /// schedule_id → (stop_flag, thread_handle)
     threads: HashMap<i64, (Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    /// database-backup task key → (stop_flag, thread_handle)
+    backup_threads: HashMap<&'static str, (Arc<AtomicBool>, thread::JoinHandle<()>)>,
 }
 
 impl Scheduler {
     pub fn new(repo: Arc<Repository>) -> Self {
+        Self::new_inner(repo, None)
+    }
+
+    pub fn new_with_database_path(repo: Arc<Repository>, db_path: String) -> Self {
+        Self::new_inner(repo, Some(db_path))
+    }
+
+    fn new_inner(repo: Arc<Repository>, db_path: Option<String>) -> Self {
         Self {
             repo,
+            db_path,
             threads: HashMap::new(),
+            backup_threads: HashMap::new(),
         }
     }
 
@@ -109,6 +123,8 @@ impl Scheduler {
             }
         }
 
+        self.reload_database_backup_threads()?;
+
         Ok(())
     }
 
@@ -117,6 +133,7 @@ impl Scheduler {
         for (_, (stop, _)) in self.threads.drain() {
             stop.store(true, Ordering::Relaxed);
         }
+        self.stop_database_backup_threads();
     }
 
     fn start_thread(&mut self, config: ScheduleConfig) {
@@ -167,6 +184,78 @@ impl Scheduler {
         });
 
         self.threads.insert(config.id, (stop, handle));
+    }
+
+    fn stop_database_backup_threads(&mut self) {
+        for (_, (stop, _)) in self.backup_threads.drain() {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn reload_database_backup_threads(&mut self) -> anyhow::Result<()> {
+        self.stop_database_backup_threads();
+        let Some(db_path) = self.db_path.clone() else {
+            return Ok(());
+        };
+        let settings = self.repo.get_db_backup_settings()?;
+
+        if settings.backup_enabled {
+            self.start_database_backup_thread(
+                "database_backup",
+                settings.backup_interval_seconds,
+                db_path.clone(),
+                false,
+            );
+        }
+        if settings.integrity_enabled {
+            self.start_database_backup_thread(
+                "database_backup_integrity",
+                settings.integrity_interval_seconds,
+                db_path,
+                true,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn start_database_backup_thread(
+        &mut self,
+        key: &'static str,
+        interval_seconds: i64,
+        db_path: String,
+        integrity_only: bool,
+    ) {
+        let repo = Arc::clone(&self.repo);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let interval = interval_seconds.max(1) as u64;
+
+        let handle = thread::spawn(move || loop {
+            let steps = ((interval * 1_000) / 100).max(1);
+            for _ in 0..steps {
+                if stop_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+
+            if stop_clone.load(Ordering::Relaxed) {
+                return;
+            }
+
+            let result = if integrity_only {
+                backup::run_backup_integrity_check(&repo).map(|results| results.len())
+            } else {
+                backup::run_all_backups(&repo, &db_path).map(|results| results.len())
+            };
+
+            if let Err(e) = result {
+                tracing::error!("Scheduled database backup task '{}' failed: {}", key, e);
+            }
+        });
+
+        self.backup_threads.insert(key, (stop, handle));
     }
 }
 
@@ -288,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_reload_stops_disabled_schedule() {
-        let (primary, secondary, repo) = setup();
+        let (_primary, secondary, repo) = setup();
         let cfg = repo
             .create_schedule_config("sync", None, Some(3600), true, None)
             .unwrap();

@@ -23,7 +23,7 @@ actix-files = "0.6"
 futures-util = "0.3"
 
 # Database
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["backup", "bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
 
@@ -66,6 +66,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Error handling
 thiserror = "1"
 anyhow = "1"
+tempfile = "3"
 
 # Unix system calls (page cache management)
 [target.'cfg(unix)'.dependencies]
@@ -82,7 +83,6 @@ config = "0.14"
 mockall = "0.13"
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["full"] }
 

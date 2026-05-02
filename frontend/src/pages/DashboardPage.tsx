@@ -42,9 +42,8 @@ export function DashboardPage() {
   }
 
   const handleRunBackup = async () => {
-    const dbPath = import.meta.env.VITE_DB_PATH ?? '/var/lib/bitprotector/bitprotector.db'
     try {
-      const results = await databaseApi.runBackup(dbPath)
+      const results = await databaseApi.runBackup()
       const failed = results.filter((r) => r.status === 'failed').length
       if (failed === 0) {
         toast.success(`Database backup completed (${results.length} destination(s))`)
