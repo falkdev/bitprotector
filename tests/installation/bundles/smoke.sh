@@ -47,6 +47,8 @@ LIB_DIR="${INSTALL_DIR}/lib"
 source "${LIB_DIR}/qemu-helpers.sh"
 # shellcheck source=tests/installation/lib/scenarios.sh
 source "${LIB_DIR}/scenarios.sh"
+# shellcheck source=tests/installation/lib/cloud-init-db-disk.sh
+source "${LIB_DIR}/cloud-init-db-disk.sh"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
 SSH_PORT="${SSH_PORT:-2222}"
@@ -91,31 +93,7 @@ users:
       - ${SSH_KEY}
 
 write_files:
-  - path: /usr/local/bin/bitprotector-db-storage.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      set -euo pipefail
-      dev=/dev/disk/by-id/virtio-bpdb
-      for _ in \$(seq 1 30); do
-        [[ -b "\${dev}" ]] && break
-        sleep 1
-      done
-      if [[ ! -b "\${dev}" ]]; then
-        echo "ERROR: expected block device not found: \${dev}" >&2
-        echo "Contents of /dev/disk/by-id:" >&2
-        ls -l /dev/disk/by-id >&2 || true
-        exit 1
-      fi
-      mkdir -p /mnt/bitprotector-db
-      if ! blkid "\${dev}" >/dev/null 2>&1; then
-        mkfs.ext4 -F "\${dev}"
-      fi
-      uuid=\$(blkid -s UUID -o value "\${dev}")
-      grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} /mnt/bitprotector-db ext4 defaults,nofail 0 2" >> /etc/fstab
-      mount -a
-      mkdir -p /mnt/bitprotector-db/db
-      chown -R testuser:testuser /mnt/bitprotector-db
+$(cloudinit_bpdb_write_file)
 
 runcmd:
   - mkdir -p /mnt/debpkg
