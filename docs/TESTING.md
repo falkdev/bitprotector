@@ -450,6 +450,16 @@ The QEMU tests are bundle-based:
   - `tests/installation/bundles/scale.sh` (nightly-only)
   - `tests/installation/bundles/scale_lowmem.sh` (nightly-only)
 
+### QEMU guest storage layout
+
+Each QEMU bundle now provisions a dedicated database disk in the guest:
+
+- `serial=bpdb` virtual disk (32G qcow2)
+- mounted at `/mnt/bitprotector-db`
+- scenario DB files stored under `/mnt/bitprotector-db/db`
+
+This keeps scenario metadata growth off the guest root filesystem and avoids scale-test failures caused by filling `/tmp` on the cloud image root volume.
+
 ### Prerequisites
 
 | Tool | Install |
@@ -516,6 +526,12 @@ SSH_PORT=2226 API_PORT=18447 TIMEOUT=360 ./tests/installation/qemu_uninstall_tes
 ```
 
 All scripts stream serial console lines to your terminal as the VM boots. They also fail fast if the QEMU process exits early instead of waiting out the full timeout.
+
+If a run fails with `database or disk is full`, check:
+
+- mount preflight output for `/mnt/bitprotector-db`
+- `df -h` diagnostics in the scale scenario output (`/`, `/mnt/scale`, `/mnt/bitprotector-db`)
+- uploaded QEMU log artifacts from the failed CI job
 
 ### What gets tested
 

@@ -5,7 +5,7 @@
 failover_03_bit_flip_auto_repair() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-03.db
+DB=/mnt/bitprotector-db/db/failover-03.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*

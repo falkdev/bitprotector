@@ -76,6 +76,7 @@ trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/test.qcow2"
+qemu-img create -f qcow2 "${WORKDIR}/bpdb.qcow2" 32G
 
 cat > "${WORKDIR}/user-data" <<CLOUDINIT
 #cloud-config
@@ -88,9 +89,32 @@ users:
     ssh_authorized_keys:
       - ${SSH_KEY}
 
+write_files:
+  - path: /usr/local/bin/bitprotector-db-storage.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      dev=/dev/disk/by-id/virtio-bpdb
+      for _ in \$(seq 1 30); do
+        [[ -b "\${dev}" ]] && break
+        sleep 1
+      done
+      [[ -b "\${dev}" ]]
+      mkdir -p /mnt/bitprotector-db
+      if ! blkid "\${dev}" >/dev/null 2>&1; then
+        mkfs.ext4 -F "\${dev}"
+      fi
+      uuid=\$(blkid -s UUID -o value "\${dev}")
+      grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} /mnt/bitprotector-db ext4 defaults,nofail 0 2" >> /etc/fstab
+      mount -a
+      mkdir -p /mnt/bitprotector-db/db
+      chown -R testuser:testuser /mnt/bitprotector-db
+
 runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
+  - /usr/local/bin/bitprotector-db-storage.sh
   - apt-get update -q
   - apt-get install -y -q jq openssl curl /mnt/debpkg/bitprotector*.deb
   - mkdir -p /etc/bitprotector/tls
@@ -143,6 +167,8 @@ qemu-system-x86_64 \
     -serial file:"${WORKDIR}/serial.log" \
     -drive "file=${WORKDIR}/test.qcow2,format=qcow2,cache=unsafe" \
     -drive "file=${WORKDIR}/seed.iso,format=raw,readonly=on,if=virtio" \
+    -drive "if=none,id=drive-bpdb,file=${WORKDIR}/bpdb.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
@@ -150,6 +176,15 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
+ssh_vm '
+set -euo pipefail
+if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
+  echo "Expected /mnt/bitprotector-db to be mounted" >&2
+  exit 1
+fi
+touch /mnt/bitprotector-db/db/.write-test
+rm -f /mnt/bitprotector-db/db/.write-test
+'
 
 # --- Scenarios ---
 

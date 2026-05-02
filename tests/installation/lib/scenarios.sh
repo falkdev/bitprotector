@@ -23,7 +23,7 @@ make_pair() {
     local name="$1"
     local primary="$2"
     local mirror="$3"
-    ssh_vm "bitprotector --db \"\${BP_DB:-/tmp/bp-test.db}\" drives add \"${name}\" \"${primary}\" \"${mirror}\"" \
+    ssh_vm "bitprotector --db \"\${BP_DB:-/mnt/bitprotector-db/db/bp-test.db}\" drives add \"${name}\" \"${primary}\" \"${mirror}\"" \
         | grep -oP 'Drive pair #\K[0-9]+' | head -1
 }
 

@@ -5,7 +5,7 @@
 degraded_boot_01_fake_mount_point() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/degraded-01.db
+DB=/mnt/bitprotector-db/db/degraded-01.db
 
 rm -f "${DB}"
 sudo rm -rf /mnt/fake-primary

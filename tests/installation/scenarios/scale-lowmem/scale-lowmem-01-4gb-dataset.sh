@@ -5,7 +5,7 @@
 scale_lowmem_01_4gb_dataset() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/scale-lowmem-01.db
+DB=/mnt/bitprotector-db/db/scale-lowmem-01.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/lowmem /mnt/mirror/lowmem

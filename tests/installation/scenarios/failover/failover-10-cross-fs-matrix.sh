@@ -5,7 +5,7 @@
 failover_10_cross_fs_matrix() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-10.db
+DB=/mnt/bitprotector-db/db/failover-10.db
 
 rm -f "${DB}"
 rm -rf /mnt/replacement-primary/* /mnt/mirror/*

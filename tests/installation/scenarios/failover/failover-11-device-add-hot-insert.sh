@@ -5,7 +5,7 @@
 failover_11_device_add_hot_insert() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-11.db
+DB=/mnt/bitprotector-db/db/failover-11.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/* /mnt/replacement-primary/*
@@ -24,7 +24,7 @@ bitprotector --db "${DB}" drives replace confirm 1 --role primary
 
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-11.db
+DB=/mnt/bitprotector-db/db/failover-11.db
 if bitprotector --db "${DB}" drives replace assign 1 --role primary /does-not-exist 2>/tmp/f11-assign.err; then
   echo "assign unexpectedly succeeded on missing path" >&2
   exit 1
@@ -36,7 +36,7 @@ fi
 
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-11.db
+DB=/mnt/bitprotector-db/db/failover-11.db
 sudo mount -a
 bitprotector --db "${DB}" drives replace assign 1 --role primary /mnt/replacement-primary --no-validate
 bitprotector --db "${DB}" sync process
