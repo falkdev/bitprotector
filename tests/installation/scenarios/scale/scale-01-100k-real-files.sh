@@ -5,7 +5,7 @@
 scale_01_100k_real_files() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/scale-01.db
+DB=/mnt/bitprotector-db/db/scale-01.db
 RESULTS=/tmp/scale-results.txt
 
 rm -f "${DB}" "${RESULTS}"
@@ -17,8 +17,9 @@ grep -E "^(NAME|VERSION)=" /etc/os-release
 uname -r
 nproc
 free -h
-df -h /mnt/scale
+df -h / /mnt/scale /mnt/bitprotector-db
 findmnt /mnt/scale || true
+findmnt /mnt/bitprotector-db || true
 echo "=== end diagnostics ==="
 
 echo "=== phase: generation start ==="
@@ -34,6 +35,7 @@ bitprotector --db "${DB}" drives add scale /mnt/scale /mnt/scale-mirror --no-val
 bitprotector --db "${DB}" folders add 1 docs
 
 echo "=== phase: scan start ==="
+df -h / /mnt/scale /mnt/bitprotector-db
 start_scan=$(date +%s)
 bitprotector --db "${DB}" folders scan 1
 end_scan=$(date +%s)
@@ -48,6 +50,7 @@ echo "sync_seconds=$((end_sync-start_sync))" >> "${RESULTS}"
 echo "=== phase: sync done $((end_sync-start_sync))s ==="
 
 echo "=== phase: integrity start ==="
+df -h / /mnt/scale /mnt/bitprotector-db
 start_integrity=$(date +%s)
 bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover
 end_integrity=$(date +%s)

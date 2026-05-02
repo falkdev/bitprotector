@@ -54,6 +54,7 @@ trap _cleanup EXIT
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/vm.qcow2"
 qemu-img create -f qcow2 "${WORKDIR}/scale.qcow2" 100G
+qemu-img create -f qcow2 "${WORKDIR}/bpdb.qcow2" 32G
 
 cat > "${WORKDIR}/user-data" <<CLOUDINIT
 #cloud-config
@@ -72,22 +73,32 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
-      dev=/dev/disk/by-id/virtio-bpscale
-      for _ in \$(seq 1 30); do
-        [[ -b "\${dev}" ]] && break
-        sleep 1
-      done
-      [[ -b "\${dev}" ]]
-      mkdir -p /mnt/scale
-      if ! blkid "\${dev}" >/dev/null 2>&1; then
-        mkfs.ext4 -F "\${dev}"
-      fi
-      uuid=\$(blkid -s UUID -o value "\${dev}")
-      grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} /mnt/scale ext4 defaults,nofail 0 2" >> /etc/fstab
+
+      setup_disk() {
+        local serial="\$1"
+        local mount_point="\$2"
+        local dev="/dev/disk/by-id/virtio-\${serial}"
+
+        for _ in \$(seq 1 30); do
+          [[ -b "\${dev}" ]] && break
+          sleep 1
+        done
+        [[ -b "\${dev}" ]]
+        mkdir -p "\${mount_point}"
+        if ! blkid "\${dev}" >/dev/null 2>&1; then
+          mkfs.ext4 -F "\${dev}"
+        fi
+        uuid=\$(blkid -s UUID -o value "\${dev}")
+        grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} \${mount_point} ext4 defaults,nofail 0 2" >> /etc/fstab
+      }
+
+      setup_disk bpscale /mnt/scale
+      setup_disk bpdb /mnt/bitprotector-db
       mount -a
       mkdir -p /mnt/scale/mirror
+      mkdir -p /mnt/bitprotector-db/db
       ln -sfn /mnt/scale/mirror /mnt/scale-mirror
-      chown -R testuser:testuser /mnt/scale
+      chown -R testuser:testuser /mnt/scale /mnt/bitprotector-db
 
 runcmd:
   - mkdir -p /mnt/debpkg
@@ -118,6 +129,8 @@ qemu-system-x86_64 \
     -drive "file=${WORKDIR}/seed.iso,format=raw,readonly=on,if=virtio" \
     -drive "if=none,id=drive-scale,file=${WORKDIR}/scale.qcow2,format=qcow2" \
     -device "virtio-blk-pci,drive=drive-scale,id=dev-scale,serial=bpscale" \
+    -drive "if=none,id=drive-bpdb,file=${WORKDIR}/bpdb.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
@@ -125,6 +138,15 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
+ssh_vm '
+set -euo pipefail
+if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
+  echo "Expected /mnt/bitprotector-db to be mounted" >&2
+  exit 1
+fi
+touch /mnt/bitprotector-db/db/.write-test
+rm -f /mnt/bitprotector-db/db/.write-test
+'
 
 BUNDLE_START_TIME="$(date -Iseconds)"
 SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-6600}"

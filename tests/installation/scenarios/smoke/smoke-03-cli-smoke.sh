@@ -4,5 +4,5 @@
 # Bundle: smoke. Assumes: package installed via cloud-init.
 
 smoke_03_cli_smoke() {
-    ssh_vm 'bitprotector --db /tmp/smoke.db drives list && bitprotector --db /tmp/smoke.db status'
+    ssh_vm 'bitprotector --db /mnt/bitprotector-db/db/smoke.db drives list && bitprotector --db /mnt/bitprotector-db/db/smoke.db status'
 }

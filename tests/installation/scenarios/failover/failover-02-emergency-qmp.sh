@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/installation/scenarios/failover/failover-02-emergency-qmp.sh
 # Scenario E — Emergency failover after hot-removing the active replacement-primary disk via QMP.
-# Bundle: failover. Assumes: failover-01 completed (DB at /tmp/failover.db, active role = replacement-primary).
+# Bundle: failover. Assumes: failover-01 completed (DB at /mnt/bitprotector-db/db/failover.db, active role = replacement-primary).
 # Requires: QMP_SOCKET exported by the bundle.
 
 failover_02_emergency_qmp() {
@@ -11,7 +11,7 @@ failover_02_emergency_qmp() {
 
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover.db
+DB=/mnt/bitprotector-db/db/failover.db
 VIRTUAL_FILE=/tmp/bitprotector-virtual/docs/report.txt
 
 # Existing open file handles may fail after sudden device loss.

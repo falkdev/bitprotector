@@ -5,7 +5,7 @@
 failover_04_both_corrupted() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-04.db
+DB=/mnt/bitprotector-db/db/failover-04.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*

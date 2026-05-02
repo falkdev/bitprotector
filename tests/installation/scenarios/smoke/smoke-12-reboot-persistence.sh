@@ -4,11 +4,11 @@
 # Bundle: smoke. Assumes: package installed, service enabled, CLI available.
 
 smoke_12_reboot_persistence() {
-    local db="/var/tmp/smoke-reboot.db"
+    local db="/mnt/bitprotector-db/db/smoke-reboot.db"
 
     ssh_vm '
 set -euo pipefail
-DB="/var/tmp/smoke-reboot.db"
+DB="/mnt/bitprotector-db/db/smoke-reboot.db"
 
 mkdir -p /tmp/reboot-primary /tmp/reboot-secondary
 printf "persist-me\n" > /tmp/reboot-primary/persist.txt

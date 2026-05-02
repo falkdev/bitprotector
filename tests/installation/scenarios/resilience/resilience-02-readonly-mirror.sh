@@ -5,7 +5,7 @@
 resilience_02_readonly_mirror() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/resilience-02.db
+DB=/mnt/bitprotector-db/db/resilience-02.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*

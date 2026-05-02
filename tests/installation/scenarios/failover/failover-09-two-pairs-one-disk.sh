@@ -5,7 +5,7 @@
 failover_09_two_pairs_one_disk() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-09.db
+DB=/mnt/bitprotector-db/db/failover-09.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*

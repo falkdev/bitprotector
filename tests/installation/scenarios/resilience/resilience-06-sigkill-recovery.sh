@@ -5,7 +5,7 @@
 resilience_06_sigkill_recovery() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/resilience-06.db
+DB=/mnt/bitprotector-db/db/resilience-06.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*
