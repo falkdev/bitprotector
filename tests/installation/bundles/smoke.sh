@@ -101,7 +101,12 @@ write_files:
         [[ -b "\${dev}" ]] && break
         sleep 1
       done
-      [[ -b "\${dev}" ]]
+      if [[ ! -b "\${dev}" ]]; then
+        echo "ERROR: expected block device not found: \${dev}" >&2
+        echo "Contents of /dev/disk/by-id:" >&2
+        ls -l /dev/disk/by-id >&2 || true
+        exit 1
+      fi
       mkdir -p /mnt/bitprotector-db
       if ! blkid "\${dev}" >/dev/null 2>&1; then
         mkfs.ext4 -F "\${dev}"
