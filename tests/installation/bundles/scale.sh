@@ -83,7 +83,11 @@ write_files:
           [[ -b "\${dev}" ]] && break
           sleep 1
         done
-        [[ -b "\${dev}" ]]
+        if ! [[ -b "\${dev}" ]]; then
+          echo "ERROR: disk did not appear for serial='\${serial}' mount_point='\${mount_point}' expected_path='\${dev}'" >&2
+          ls -l /dev/disk/by-id >&2 || true
+          exit 1
+        fi
         mkdir -p "\${mount_point}"
         if ! blkid "\${dev}" >/dev/null 2>&1; then
           mkfs.ext4 -F "\${dev}"
