@@ -5,7 +5,7 @@
 degraded_boot_02_device_absent_at_boot() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/degraded-02.db
+DB=/mnt/bitprotector-db/db/degraded-02.db
 
 rm -f "${DB}"
 # nofail mountpoint exists but is not actually backed by a mounted device

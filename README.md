@@ -235,8 +235,8 @@ bitprotector --db /tmp/test.db drives list
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module breakdown, and database schema |
 | [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |
-| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, and the QEMU smoke plus failover suites |
-| [docs/CI.md](docs/CI.md) | CI pipeline layers, local debugging with `act`, and how to reproduce failures |
+| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, QEMU suites, and the dedicated guest DB-disk layout used by installation scenarios |
+| [docs/CI.md](docs/CI.md) | CI pipeline layers, local debugging with `act`, QEMU guest storage model, and nightly failure reproduction |
 
 ---
 

@@ -9,6 +9,7 @@ This document explains the GitHub Actions pipeline, how each layer maps to jobs,
 - [Pipeline Overview](#pipeline-overview)
 - [Trigger Matrix](#trigger-matrix)
 - [Layer Reference](#layer-reference)
+- [QEMU Guest Storage Model](#qemu-guest-storage-model)
 - [Local Debugging with `act`](#local-debugging-with-act)
 - [Native Local Runs (no Docker)](#native-local-runs-no-docker)
 - [Reproducing a Specific Failure](#reproducing-a-specific-failure)
@@ -73,6 +74,24 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 **Ubuntu 26.04 note**: until the 26.04 LTS image is fully published on `cloud-images.ubuntu.com`, the 26.04 matrix cell uses `continue-on-error: true`. Once the image is stable, remove that line from each QEMU job in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 **`scaling_100k` timing budget**: the test enforces a 3000 ms per-query budget ([tests/integration/scaling_100k.rs](../tests/integration/scaling_100k.rs)). On slow runners this may flake. If it does, bump the budget via the `SCALING_QUERY_BUDGET_MS` env var (if wired), or move the job to a larger runner by changing its `runs-on` label — one-line change.
+
+---
+
+## QEMU Guest Storage Model
+
+All QEMU installation bundles attach a dedicated guest database disk:
+
+- `serial=bpdb` virtual disk (32G qcow2)
+- mounted in-guest at `/mnt/bitprotector-db`
+- scenario DB files written to `/mnt/bitprotector-db/db`
+
+This is intentional for nightly scale stability: large scenario metadata no longer competes with guest root `/tmp` capacity.
+
+If a nightly scale job fails with `database or disk is full`:
+
+1. Inspect the failing step logs for the scale scenario `df -h` lines (`/`, `/mnt/scale`, `/mnt/bitprotector-db`).
+2. Confirm the DB mount preflight passed (`/mnt/bitprotector-db` mounted and writable).
+3. Download and inspect the uploaded `qemu-logs-*` artifact for the failing matrix cell.
 
 ---
 

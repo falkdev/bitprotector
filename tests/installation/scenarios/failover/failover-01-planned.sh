@@ -7,7 +7,7 @@
 failover_01_planned() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover.db
+DB=/mnt/bitprotector-db/db/failover.db
 VIRTUAL_FILE=/tmp/bitprotector-virtual/docs/report.txt
 
 mkdir -p /mnt/primary/docs

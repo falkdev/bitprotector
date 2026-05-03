@@ -79,6 +79,7 @@ qemu-img create -f qcow2 "${WORKDIR}/primary.qcow2" 4G
 qemu-img create -f qcow2 "${WORKDIR}/mirror.qcow2" 4G
 qemu-img create -f qcow2 "${WORKDIR}/replacement-primary.qcow2" 4G
 qemu-img create -f qcow2 "${WORKDIR}/replacement-secondary.qcow2" 4G
+qemu-img create -f qcow2 "${WORKDIR}/bpdb.qcow2" 32G
 
 cat > "${WORKDIR}/user-data" <<CLOUDINIT
 #cloud-config
@@ -137,14 +138,17 @@ write_files:
       setup_disk bpmirror /mnt/mirror ext4
       setup_disk bpreplprimary /mnt/replacement-primary xfs
       setup_disk bpreplsecondary /mnt/replacement-secondary ext4
+      setup_disk bpdb /mnt/bitprotector-db ext4
 
       mount -a
+      mkdir -p /mnt/bitprotector-db/db
       mkdir -p /tmp/bitprotector-virtual
       chown -R testuser:testuser \
           /mnt/primary \
           /mnt/mirror \
           /mnt/replacement-primary \
           /mnt/replacement-secondary \
+          /mnt/bitprotector-db \
           /tmp/bitprotector-virtual
 
 runcmd:
@@ -184,6 +188,8 @@ qemu-system-x86_64 \
     -device "virtio-blk-pci,drive=drive-replacement-primary,id=dev-replacement-primary,serial=bpreplprimary" \
     -drive "if=none,id=drive-replacement-secondary,file=${WORKDIR}/replacement-secondary.qcow2,format=qcow2" \
     -device "virtio-blk-pci,drive=drive-replacement-secondary,id=dev-replacement-secondary,serial=bpreplsecondary" \
+    -drive "if=none,id=drive-bpdb,file=${WORKDIR}/bpdb.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
@@ -191,6 +197,15 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
+ssh_vm '
+set -euo pipefail
+if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
+  echo "Expected /mnt/bitprotector-db to be mounted" >&2
+  exit 1
+fi
+touch /mnt/bitprotector-db/db/.write-test
+rm -f /mnt/bitprotector-db/db/.write-test
+'
 
 # --- Scenarios ---
 

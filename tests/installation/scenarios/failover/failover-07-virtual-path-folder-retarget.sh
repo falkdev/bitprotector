@@ -5,7 +5,7 @@
 failover_07_virtual_path_folder_retarget() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-07.db
+DB=/mnt/bitprotector-db/db/failover-07.db
 VROOT=/tmp/bitprotector-virtual/f07
 
 rm -f "${DB}"

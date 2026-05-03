@@ -44,6 +44,7 @@ ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/nul
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/vm.qcow2"
 qemu-img create -f qcow2 "${WORKDIR}/primary.qcow2" 8G
 qemu-img create -f qcow2 "${WORKDIR}/mirror.qcow2" 8G
+qemu-img create -f qcow2 "${WORKDIR}/bpdb.qcow2" 32G
 
 cat > "${WORKDIR}/user-data" <<CLOUDINIT
 #cloud-config
@@ -80,8 +81,10 @@ write_files:
       }
       setup_disk bplowprimary /mnt/primary
       setup_disk bplowmirror /mnt/mirror
+      setup_disk bpdb /mnt/bitprotector-db
       mount -a
-      chown -R testuser:testuser /mnt/primary /mnt/mirror
+      mkdir -p /mnt/bitprotector-db/db
+      chown -R testuser:testuser /mnt/primary /mnt/mirror /mnt/bitprotector-db
 
 runcmd:
   - mkdir -p /mnt/debpkg
@@ -113,6 +116,8 @@ qemu-system-x86_64 \
     -device "virtio-blk-pci,drive=drive-primary,id=dev-primary,serial=bplowprimary" \
     -drive "if=none,id=drive-mirror,file=${WORKDIR}/mirror.qcow2,format=qcow2" \
     -device "virtio-blk-pci,drive=drive-mirror,id=dev-mirror,serial=bplowmirror" \
+    -drive "if=none,id=drive-bpdb,file=${WORKDIR}/bpdb.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
     -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
@@ -120,6 +125,15 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
+ssh_vm '
+set -euo pipefail
+if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
+  echo "Expected /mnt/bitprotector-db to be mounted" >&2
+  exit 1
+fi
+touch /mnt/bitprotector-db/db/.write-test
+rm -f /mnt/bitprotector-db/db/.write-test
+'
 
 BUNDLE_START_TIME="$(date -Iseconds)"
 SSH_VM_TIMEOUT=900

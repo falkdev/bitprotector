@@ -5,7 +5,7 @@
 upgrade_01_alpha1_to_current_with_live_data() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/upgrade-01.db
+DB=/mnt/bitprotector-db/db/upgrade-01.db
 source /etc/bitprotector-upgrade.env
 
 rm -f "${DB}"

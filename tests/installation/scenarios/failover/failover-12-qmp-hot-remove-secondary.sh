@@ -5,7 +5,7 @@
 failover_12_qmp_hot_remove_secondary() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-12.db
+DB=/mnt/bitprotector-db/db/failover-12.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*
@@ -22,7 +22,7 @@ bitprotector --db "${DB}" files mirror 1
 
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-12.db
+DB=/mnt/bitprotector-db/db/failover-12.db
 out=$(bitprotector --db "${DB}" integrity check-all --drive-id 1 --recover 2>&1 || true)
 echo "${out}" | grep -Eq "SECONDARY_DRIVE_UNAVAILABLE|MIRROR_MISSING|need attention"
 bitprotector --db "${DB}" drives show 1 | grep -q "Active Role:     primary"

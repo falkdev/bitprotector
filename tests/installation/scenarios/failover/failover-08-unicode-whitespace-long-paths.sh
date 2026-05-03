@@ -5,7 +5,7 @@
 failover_08_unicode_whitespace_long_paths() {
     ssh_vm '
 set -euo pipefail
-DB=/tmp/failover-08.db
+DB=/mnt/bitprotector-db/db/failover-08.db
 
 rm -f "${DB}"
 rm -rf /mnt/primary/* /mnt/mirror/*
