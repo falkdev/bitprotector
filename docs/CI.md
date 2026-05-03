@@ -71,8 +71,6 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 
 **Runner vs guest OS**: the runner is always `ubuntu-24.04` (GitHub-hosted). The *guest* running inside QEMU is controlled by the matrix (`ubuntu-24.04` noble, `ubuntu-26.04` plucky). See [.github/actions/setup-qemu/action.yml](.github/actions/setup-qemu/action.yml) for image download logic.
 
-**Ubuntu 26.04 note**: until the 26.04 LTS image is fully published on `cloud-images.ubuntu.com`, the 26.04 matrix cell uses `continue-on-error: true`. Once the image is stable, remove that line from each QEMU job in [.github/workflows/ci.yml](.github/workflows/ci.yml).
-
 **`scaling_100k` timing budget**: the test enforces a 3000 ms per-query budget ([tests/integration/scaling_100k.rs](../tests/integration/scaling_100k.rs)). On slow runners this may flake. If it does, bump the budget via the `SCALING_QUERY_BUDGET_MS` env var (if wired), or move the job to a larger runner by changing its `runs-on` label — one-line change.
 
 ---
@@ -216,5 +214,4 @@ These are understood by the QEMU test scripts and are passed via `env:` blocks i
 
 - **Add a new integration test binary**: declare it in `Cargo.toml` under `[[test]]`, add a `cargo test --test <name>` step to the `rust-integration-fast` job in `ci.yml`, and the matching call to `run_rust_integration_fast()` in `run-tests.sh`.
 - **Change the runner**: update `runs-on:` in the relevant job. For heavy QEMU, `ubuntu-latest-4-core` is the fallback if the default runner is too slow.
-- **Promote 26.04 to required**: remove `continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}` from each QEMU job once the image is stable.
 - **Adjust coverage behavior**: edit the `coverage` job in `ci.yml` (it is non-gating via `continue-on-error: true`).

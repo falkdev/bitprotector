@@ -22,17 +22,23 @@ test "$(find "$SECONDARY" -maxdepth 1 -name bitprotector.db | wc -l)" -eq 1
 printf "not sqlite" | sudo tee "$PRIMARY/bitprotector.db" >/dev/null
 sudo bitprotector database check-integrity | grep -qi repaired
 
-python3 - "$PRIMARY/bitprotector.db" <<'"'"'PY'"'"'
+sudo python3 - "$PRIMARY/bitprotector.db" <<'"'"'PY'"'"'
 import sqlite3, sys
-conn = sqlite3.connect(sys.argv[1])
+conn = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
 assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 PY
 
 sudo bitprotector database restore "$PRIMARY/bitprotector.db"
 sudo systemctl restart bitprotector
 
+for _ in $(seq 1 20); do
+    if curl -sk https://127.0.0.1:8443/api/v1/health | jq -e ".status == \"ok\"" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
 curl -sk https://127.0.0.1:8443/api/v1/health | jq -e ".status == \"ok\""
 sudo bitprotector status >/dev/null
-sudo bitprotector database list | grep -q smoke-primary
+sudo bitprotector database list | grep -q "$PRIMARY"
 '
 }
