@@ -105,7 +105,7 @@ Use `bitprotector scheduler` subcommands or `POST /api/v1/scheduler/schedules` t
 bitprotector scheduler --help
 ```
 
-Database-backup automation is configured separately from the generic scheduler through the Database Backups web page, `bitprotector database settings`, or `/api/v1/database/backups/settings`. Automatic backups and automatic backup integrity checks are disabled by default.
+Database-backup automation is configured separately from the generic scheduler through the Database Backups web page, `bitprotector database settings`, or `/api/v1/database/backups/settings`. Automatic backups and automatic backup integrity checks are disabled by default. In the web UI, manual `Run Backup Now` and `Check Integrity Now` actions are enabled only when at least one backup destination is enabled.
 
 ---
 

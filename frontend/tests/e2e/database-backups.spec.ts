@@ -18,10 +18,12 @@ test('manages database backups from the web UI', async ({ page, qemu }) => {
   await expect(page.getByTestId('database-backups-table')).toContainText(fixture.backupPath)
 
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByLabel('Automatic backups').check()
-  await page.getByLabel('Backup Interval Seconds').fill('3600')
-  await page.getByLabel('Automatic backup integrity checks').check()
-  await page.getByLabel('Integrity Interval Seconds').fill('7200')
+  await page.getByRole('button', { name: 'Enable automatic backups' }).click()
+  await page.getByLabel('Automatic backups interval value').fill('1')
+  await page.getByLabel('Automatic backups interval unit').selectOption('hours')
+  await page.getByRole('button', { name: 'Enable automatic integrity checks' }).click()
+  await page.getByLabel('Automatic integrity checks interval value').fill('2')
+  await page.getByLabel('Automatic integrity checks interval unit').selectOption('hours')
   await page.getByRole('button', { name: 'Save Settings' }).click()
   await expectToast(page, 'Backup settings updated')
 

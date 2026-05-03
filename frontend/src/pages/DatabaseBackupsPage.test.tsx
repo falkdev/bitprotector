@@ -119,12 +119,17 @@ describe('DatabaseBackupsPage', () => {
 
     await screen.findByText('No backup destinations configured')
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await user.click(screen.getByLabelText('Automatic backups'))
-    await user.clear(screen.getByLabelText('Backup Interval Seconds'))
-    await user.type(screen.getByLabelText('Backup Interval Seconds'), '3600')
-    await user.click(screen.getByLabelText('Automatic backup integrity checks'))
-    await user.clear(screen.getByLabelText('Integrity Interval Seconds'))
-    await user.type(screen.getByLabelText('Integrity Interval Seconds'), '7200')
+    await user.click(screen.getByRole('button', { name: 'Enable automatic backups' }))
+    await user.clear(screen.getByLabelText('Automatic backups interval value'))
+    await user.type(screen.getByLabelText('Automatic backups interval value'), '1')
+    await user.selectOptions(screen.getByLabelText('Automatic backups interval unit'), 'hours')
+    await user.click(screen.getByRole('button', { name: 'Enable automatic integrity checks' }))
+    await user.clear(screen.getByLabelText('Automatic integrity checks interval value'))
+    await user.type(screen.getByLabelText('Automatic integrity checks interval value'), '2')
+    await user.selectOptions(
+      screen.getByLabelText('Automatic integrity checks interval unit'),
+      'hours'
+    )
     await user.click(screen.getByRole('button', { name: 'Save Settings' }))
 
     expect(await screen.findByText('Backup settings updated')).toBeInTheDocument()
@@ -134,6 +139,24 @@ describe('DatabaseBackupsPage', () => {
       integrity_enabled: true,
       integrity_interval_seconds: 7200,
     })
+  })
+
+  it('disables manual actions when there are no enabled destinations', async () => {
+    server.use(
+      api.get('/database/backups', () =>
+        HttpResponse.json([makeBackupConfig({ id: 1, enabled: false })])
+      ),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings()))
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+
+    await screen.findByTestId('database-backup-row-1')
+    expect(screen.getByRole('button', { name: 'Run Backup Now' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Check Integrity Now' })).toBeDisabled()
+    expect(screen.getByTestId('database-backups-manual-actions-disabled-hint')).toHaveTextContent(
+      'Enable at least one backup destination to run manual backup and integrity checks.'
+    )
   })
 
   it('runs integrity check and stages restore from a browsed backup file', async () => {

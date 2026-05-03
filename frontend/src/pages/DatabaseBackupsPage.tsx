@@ -29,6 +29,25 @@ import type {
   UpdateBackupSettingsRequest,
 } from '@/types/database'
 
+type IntervalUnit = 'minutes' | 'hours' | 'days'
+
+function intervalToSeconds(value: number, unit: IntervalUnit): number {
+  const multiplier = { minutes: 60, hours: 3600, days: 86400 }
+  return value * multiplier[unit]
+}
+
+function secondsToInterval(seconds: number): { value: number; unit: IntervalUnit } {
+  if (seconds % 86400 === 0) return { value: seconds / 86400, unit: 'days' }
+  if (seconds % 3600 === 0) return { value: seconds / 3600, unit: 'hours' }
+  return { value: Math.max(1, Math.round(seconds / 60)), unit: 'minutes' }
+}
+
+function humanizeInterval(seconds: number): string {
+  const { value, unit } = secondsToInterval(seconds)
+  if (value === 1) return `Every ${unit.slice(0, -1)}`
+  return `Every ${value} ${unit}`
+}
+
 function BackupFormModal({
   backup,
   onClose,
@@ -184,18 +203,27 @@ function SettingsModal({
   onClose: () => void
   onSave: (data: UpdateBackupSettingsRequest) => Promise<void>
 }) {
+  const backupInitial = secondsToInterval(settings.backup_interval_seconds)
+  const integrityInitial = secondsToInterval(settings.integrity_interval_seconds)
   const [backupEnabled, setBackupEnabled] = useState(settings.backup_enabled)
-  const [backupInterval, setBackupInterval] = useState(String(settings.backup_interval_seconds))
+  const [backupIntervalValue, setBackupIntervalValue] = useState(String(backupInitial.value))
+  const [backupIntervalUnit, setBackupIntervalUnit] = useState<IntervalUnit>(backupInitial.unit)
   const [integrityEnabled, setIntegrityEnabled] = useState(settings.integrity_enabled)
-  const [integrityInterval, setIntegrityInterval] = useState(
-    String(settings.integrity_interval_seconds)
+  const [integrityIntervalValue, setIntegrityIntervalValue] = useState(
+    String(integrityInitial.value)
+  )
+  const [integrityIntervalUnit, setIntegrityIntervalUnit] = useState<IntervalUnit>(
+    integrityInitial.unit
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async () => {
-    const backupSeconds = Number(backupInterval)
-    const integritySeconds = Number(integrityInterval)
+    const backupInterval = Number(backupIntervalValue)
+    const integrityInterval = Number(integrityIntervalValue)
+    const backupSeconds = intervalToSeconds(backupInterval, backupIntervalUnit)
+    const integritySeconds = intervalToSeconds(integrityInterval, integrityIntervalUnit)
+
     if (!Number.isFinite(backupSeconds) || backupSeconds <= 0) {
       setError('Backup interval must be greater than zero.')
       return
@@ -221,51 +249,129 @@ function SettingsModal({
 
   return (
     <ModalLayer>
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-lg">
         <h2 className="text-lg font-semibold">Backup Settings</h2>
-        <div className="mt-4 space-y-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={backupEnabled}
-              onChange={(event) => setBackupEnabled(event.target.checked)}
-            />
-            Automatic backups
-          </label>
-          <div>
-            <label htmlFor="backup-interval" className="mb-1 block text-sm font-medium">
-              Backup Interval Seconds
-            </label>
-            <input
-              id="backup-interval"
-              type="number"
-              min={1}
-              value={backupInterval}
-              onChange={(event) => setBackupInterval(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={integrityEnabled}
-              onChange={(event) => setIntegrityEnabled(event.target.checked)}
-            />
-            Automatic backup integrity checks
-          </label>
-          <div>
-            <label htmlFor="integrity-interval" className="mb-1 block text-sm font-medium">
-              Integrity Interval Seconds
-            </label>
-            <input
-              id="integrity-interval"
-              type="number"
-              min={1}
-              value={integrityInterval}
-              onChange={(event) => setIntegrityInterval(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
+        <div className="mt-5 space-y-6">
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium">Automatic Backups</legend>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Periodically create SQLite backups for all enabled destinations.
+            </p>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-label="Enable automatic backups"
+                aria-pressed={backupEnabled}
+                onClick={() => setBackupEnabled(true)}
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
+                  backupEnabled
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Enabled
+              </button>
+              <button
+                type="button"
+                aria-label="Disable automatic backups"
+                aria-pressed={!backupEnabled}
+                onClick={() => setBackupEnabled(false)}
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
+                  !backupEnabled
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Disabled
+              </button>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Run automatic backups every:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  aria-label="Automatic backups interval value"
+                  type="number"
+                  min={1}
+                  value={backupIntervalValue}
+                  onChange={(event) => setBackupIntervalValue(event.target.value)}
+                  className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+                <select
+                  aria-label="Automatic backups interval unit"
+                  value={backupIntervalUnit}
+                  onChange={(event) => setBackupIntervalUnit(event.target.value as IntervalUnit)}
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium">Automatic Integrity Checks</legend>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Periodically verify and repair database backups from healthy peers.
+            </p>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-label="Enable automatic integrity checks"
+                aria-pressed={integrityEnabled}
+                onClick={() => setIntegrityEnabled(true)}
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
+                  integrityEnabled
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Enabled
+              </button>
+              <button
+                type="button"
+                aria-label="Disable automatic integrity checks"
+                aria-pressed={!integrityEnabled}
+                onClick={() => setIntegrityEnabled(false)}
+                className={`shrink-0 whitespace-nowrap rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors ${
+                  !integrityEnabled
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
+              >
+                Disabled
+              </button>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Run automatic integrity checks every:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  aria-label="Automatic integrity checks interval value"
+                  type="number"
+                  min={1}
+                  value={integrityIntervalValue}
+                  onChange={(event) => setIntegrityIntervalValue(event.target.value)}
+                  className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+                <select
+                  aria-label="Automatic integrity checks interval unit"
+                  value={integrityIntervalUnit}
+                  onChange={(event) => setIntegrityIntervalUnit(event.target.value as IntervalUnit)}
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="mt-5 flex justify-end gap-2">
@@ -541,6 +647,8 @@ export function DatabaseBackupsPage() {
     }
   }
 
+  const hasEnabledDestinations = backups.some((backup) => backup.enabled)
+
   if (loading && backups.length === 0) {
     return (
       <div className="space-y-6">
@@ -590,7 +698,7 @@ export function DatabaseBackupsPage() {
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => void runBackupNow()}
-          disabled={runningBackup}
+          disabled={runningBackup || !hasEnabledDestinations}
           className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Database className="h-4 w-4" />
@@ -598,7 +706,7 @@ export function DatabaseBackupsPage() {
         </button>
         <button
           onClick={() => void runIntegrityNow()}
-          disabled={runningIntegrity}
+          disabled={runningIntegrity || !hasEnabledDestinations}
           className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           <ShieldCheck className="h-4 w-4" />
@@ -616,19 +724,30 @@ export function DatabaseBackupsPage() {
         </button>
       </div>
 
+      {!hasEnabledDestinations && (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="database-backups-manual-actions-disabled-hint"
+        >
+          Enable at least one backup destination to run manual backup and integrity checks.
+        </p>
+      )}
+
       {settings ? (
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-border bg-card p-4 text-sm">
             <p className="font-medium">Automatic Backups</p>
             <p className="mt-1 text-muted-foreground">
-              {settings.backup_enabled ? `Every ${settings.backup_interval_seconds}s` : 'Disabled'}
+              {settings.backup_enabled
+                ? humanizeInterval(settings.backup_interval_seconds)
+                : 'Disabled'}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-card p-4 text-sm">
             <p className="font-medium">Automatic Integrity Checks</p>
             <p className="mt-1 text-muted-foreground">
               {settings.integrity_enabled
-                ? `Every ${settings.integrity_interval_seconds}s`
+                ? humanizeInterval(settings.integrity_interval_seconds)
                 : 'Disabled'}
             </p>
           </div>
