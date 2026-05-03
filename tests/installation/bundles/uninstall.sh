@@ -62,7 +62,18 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-uninstall-$$"
 mkdir -p "${WORKDIR}"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+_cleanup() {
+    local _exit=$?
+    if [[ $_exit -ne 0 ]] && [[ -n "${RUNNER_TEMP:-}" ]]; then
+        local _art="${RUNNER_TEMP}/qemu-uninstall-artifacts-$$"
+        mkdir -p "${_art}"
+        cp "${WORKDIR}/serial.log" "${_art}/" 2>/dev/null || true
+        cp "${WORKDIR}/qemu.log"   "${_art}/" 2>/dev/null || true
+    fi
+    rm -rf "${WORKDIR}"
+    if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi
+}
+trap _cleanup EXIT
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 
