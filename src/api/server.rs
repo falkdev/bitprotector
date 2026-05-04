@@ -332,6 +332,7 @@ pub async fn run_server(
     tls_key: Option<&str>,
     rate_limit_rps: usize,
 ) -> anyhow::Result<()> {
+    crate::db::backup::apply_pending_restore(db_path)?;
     let pool = create_pool(db_path)?;
     {
         let conn = pool.get()?;
@@ -347,12 +348,16 @@ pub async fn run_server(
 
     // Create and load the scheduler from persisted DB schedules.
     let scheduler = {
-        let mut sched = Scheduler::new(Arc::clone(&repo_arc));
+        let mut sched =
+            Scheduler::new_with_database_path(Arc::clone(&repo_arc), db_path.to_string());
         let _ = sched.reload(); // ignore startup errors; schedules may be empty
         Arc::new(Mutex::new(sched))
     };
 
     let repo_data = web::Data::new(repo);
+    let db_path_data = web::Data::new(crate::api::routes::database::DatabasePath(
+        db_path.to_string(),
+    ));
     let jwt_data = web::Data::new(JwtSecret(jwt_secret));
     let scheduler_data = web::Data::new(scheduler);
     let revoked_tokens = web::Data::new(RevokedTokens::default());
@@ -371,6 +376,7 @@ pub async fn run_server(
             .wrap(middleware::Logger::default())
             .wrap(RateLimitLayer(limiter.clone()))
             .app_data(repo_data.clone())
+            .app_data(db_path_data.clone())
             .app_data(jwt_data.clone())
             .app_data(scheduler_data.clone())
             .app_data(revoked_tokens.clone())

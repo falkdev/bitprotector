@@ -52,9 +52,22 @@ test('dark-mode toggle persists across reload', async ({ page }) => {
 
   // html element should now have the dark class
   await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)
+    )
+    .toBe('dark')
 
-  // Open again and toggle back to light
-  await page.getByTestId('user-menu-trigger').click()
-  await page.getByTestId('user-menu-theme-toggle').click()
+  // Toggle back to light, opening the user menu only if needed.
+  const themeToggle = page.getByTestId('user-menu-theme-toggle')
+  if (!(await themeToggle.isVisible())) {
+    await page.getByTestId('user-menu-trigger').click()
+  }
+  await themeToggle.click()
   await expect(page.locator('html')).not.toHaveClass(/dark/)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)
+    )
+    .toBe('light')
 })

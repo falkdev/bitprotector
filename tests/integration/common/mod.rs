@@ -17,6 +17,13 @@ pub fn bearer() -> String {
 #[macro_export]
 macro_rules! make_app {
     ($repo:expr) => {{
+        $crate::make_app_with_db_path!($repo, "/tmp/bitprotector-test.db")
+    }};
+}
+
+#[macro_export]
+macro_rules! make_app_with_db_path {
+    ($repo:expr, $db_path:expr) => {{
         let _r = $repo;
         let _ra = std::sync::Arc::new(_r.clone());
         let _sd = actix_web::web::Data::new(std::sync::Arc::new(std::sync::Mutex::new(
@@ -25,6 +32,9 @@ macro_rules! make_app {
         actix_web::test::init_service(
             actix_web::App::new()
                 .app_data(actix_web::web::Data::new(_r))
+                .app_data(actix_web::web::Data::new(
+                    bitprotector_lib::api::routes::database::DatabasePath($db_path.to_string()),
+                ))
                 .app_data(actix_web::web::Data::new(
                     bitprotector_lib::api::auth::JwtSecret($crate::common::SECRET.to_vec()),
                 ))

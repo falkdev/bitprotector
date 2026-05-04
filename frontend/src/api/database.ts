@@ -4,6 +4,11 @@ import type {
   CreateBackupConfigRequest,
   UpdateBackupConfigRequest,
   RunBackupResult,
+  DbBackupSettings,
+  UpdateBackupSettingsRequest,
+  BackupIntegrityResult,
+  RestoreBackupRequest,
+  RestoreBackupResult,
 } from '@/types/database'
 
 export const databaseApi = {
@@ -27,9 +32,27 @@ export const databaseApi = {
     return apiClient.delete(`/database/backups/${id}`).then(() => undefined)
   },
 
-  runBackup(dbPath: string): Promise<RunBackupResult[]> {
+  runBackup(): Promise<RunBackupResult[]> {
+    return apiClient.post<RunBackupResult[]>('/database/backups/run').then((r) => r.data)
+  },
+
+  getSettings(): Promise<DbBackupSettings> {
+    return apiClient.get<DbBackupSettings>('/database/backups/settings').then((r) => r.data)
+  },
+
+  updateSettings(data: UpdateBackupSettingsRequest): Promise<DbBackupSettings> {
+    return apiClient.put<DbBackupSettings>('/database/backups/settings', data).then((r) => r.data)
+  },
+
+  runIntegrityCheck(): Promise<BackupIntegrityResult[]> {
     return apiClient
-      .post<RunBackupResult[]>('/database/backups/run', null, { params: { db_path: dbPath } })
+      .post<BackupIntegrityResult[]>('/database/backups/integrity-check')
+      .then((r) => r.data)
+  },
+
+  restoreBackup(data: RestoreBackupRequest): Promise<RestoreBackupResult> {
+    return apiClient
+      .post<RestoreBackupResult>('/database/backups/restore', data)
       .then((r) => r.data)
   },
 }

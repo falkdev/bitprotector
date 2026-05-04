@@ -7,7 +7,11 @@ function shellQuote(value: string) {
 }
 
 function sanitizeSegment(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
 }
 
 function readEnv() {
@@ -60,9 +64,7 @@ function runProcess(command: string, args: string[], input?: string) {
       }
 
       reject(
-        new Error(
-          `${command} ${args.join(' ')} failed with exit code ${code}\n${stderr || stdout}`
-        )
+        new Error(`${command} ${args.join(' ')} failed with exit code ${code}\n${stderr || stdout}`)
       )
     })
 
@@ -210,6 +212,7 @@ sudo rm -rf \
   ${shellQuote(basePaths.replacementPrimaryRoot)} \
   ${shellQuote(basePaths.spareRoot)} \
   ${shellQuote(basePaths.virtualRoot)}
+sudo rm -f /var/lib/bitprotector/bitprotector.db.restore-pending
 `)
     },
   }

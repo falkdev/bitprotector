@@ -101,7 +101,7 @@ Data persistence. All SQLite access goes through this module.
 | --- | --- |
 | `schema.rs` | `CREATE TABLE` statements and schema migration logic. Runs at startup to ensure the database is up to date. |
 | `repository.rs` | Data access object (DAO). One method per database operation. The trait is annotated with `#[cfg_attr(test, mockall::automock)]` so unit tests can inject a mock. |
-| `backup.rs` | Copy the live database file to each configured backup destination, rotating old copies when `max_copies` is exceeded. |
+| `backup.rs` | Create SQLite-aware database backup snapshots, write one canonical `bitprotector.db` per destination, verify/repair configured backups, and stage safe restores for startup. |
 
 Connection pooling is provided by `r2d2` + `r2d2_sqlite`. The pool is wrapped inside `Repository` which is shared across all actix-web workers via `web::Data<Repository>`.
 
@@ -256,10 +256,24 @@ CREATE TABLE db_backup_config (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     backup_path TEXT    NOT NULL,
     drive_label TEXT,
-    max_copies  INTEGER NOT NULL DEFAULT 5,
+    priority    INTEGER NOT NULL DEFAULT 0,
     enabled     INTEGER NOT NULL DEFAULT 1,
     last_backup TEXT,
+    last_integrity_check TEXT,
+    last_integrity_status TEXT,
+    last_error  TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE db_backup_settings (
+    id                         INTEGER PRIMARY KEY CHECK(id = 1),
+    backup_enabled             INTEGER NOT NULL DEFAULT 0,
+    backup_interval_seconds    INTEGER NOT NULL DEFAULT 86400,
+    integrity_enabled          INTEGER NOT NULL DEFAULT 0,
+    integrity_interval_seconds INTEGER NOT NULL DEFAULT 86400,
+    last_backup_run            TEXT,
+    last_integrity_run         TEXT,
+    updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
