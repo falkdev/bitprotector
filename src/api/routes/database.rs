@@ -135,10 +135,15 @@ async fn update_backup(
     path: web::Path<i64>,
     body: web::Json<UpdateBackupBody>,
 ) -> HttpResponse {
+    let backup_path = body.backup_path.as_deref().map(str::trim);
+    if backup_path.map_or(false, str::is_empty) {
+        return HttpResponse::BadRequest()
+            .json(ApiError::new("validation_error", "backup_path cannot be empty"));
+    }
     let drive_label = body.drive_label.as_ref().map(|opt| opt.as_deref());
     match data.update_db_backup_config(
         *path,
-        body.backup_path.as_deref(),
+        backup_path,
         drive_label,
         body.enabled,
     ) {
