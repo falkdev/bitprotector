@@ -136,7 +136,7 @@ async fn update_backup(
     body: web::Json<UpdateBackupBody>,
 ) -> HttpResponse {
     let backup_path = body.backup_path.as_deref().map(str::trim);
-    if backup_path.map_or(false, str::is_empty) {
+    if backup_path.is_some_and(str::is_empty) {
         return HttpResponse::BadRequest()
             .json(ApiError::new("validation_error", "backup_path cannot be empty"));
     }
