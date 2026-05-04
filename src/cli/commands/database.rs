@@ -49,19 +49,19 @@ pub struct RestoreArgs {
 #[derive(Args, Debug)]
 pub struct SettingsArgs {
     /// Enable automatic database backups
-    #[arg(long)]
+    #[arg(long, conflicts_with = "backup_disabled")]
     pub backup_enabled: bool,
     /// Disable automatic database backups
-    #[arg(long)]
+    #[arg(long, conflicts_with = "backup_enabled")]
     pub backup_disabled: bool,
     /// Automatic backup interval in seconds
     #[arg(long)]
     pub backup_interval_seconds: Option<i64>,
     /// Enable automatic database backup integrity checks
-    #[arg(long)]
+    #[arg(long, conflicts_with = "integrity_disabled")]
     pub integrity_enabled: bool,
     /// Disable automatic database backup integrity checks
-    #[arg(long)]
+    #[arg(long, conflicts_with = "integrity_enabled")]
     pub integrity_disabled: bool,
     /// Automatic backup integrity check interval in seconds
     #[arg(long)]
