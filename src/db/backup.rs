@@ -98,8 +98,13 @@ fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result
         fs::remove_file(snapshot_path).context("Failed to remove old snapshot file")?;
     }
 
-    let source = Connection::open(db_path)
-        .with_context(|| format!("Failed to open live database {}", db_path))?;
+    let db_path = Path::new(db_path);
+    if !db_path.is_file() {
+        bail!("Live database does not exist: {}", db_path.display());
+    }
+
+    let source = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("Failed to open live database {}", db_path.display()))?;
     source
         .backup(DatabaseName::Main, snapshot_path, None)
         .context("Failed to create SQLite backup snapshot")?;
