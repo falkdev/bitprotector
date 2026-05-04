@@ -22,6 +22,7 @@
 #   #15  smoke-10-tls-cert-rotation
 #   #16  smoke-11-path-traversal-rejected
 #   #10  smoke-12-reboot-persistence
+#   #17  smoke-13-database-backup-repair-restore
 #
 # Prerequisites:
 #   - qemu-system-x86_64, qemu-img, cloud-localds, ssh, ssh-keygen
@@ -220,6 +221,10 @@ run_scenario "smoke-11-path-traversal-rejected" smoke_11_path_traversal_rejected
 # shellcheck source=tests/installation/scenarios/smoke/smoke-12-reboot-persistence.sh
 source "${SCENARIOS_DIR}/smoke-12-reboot-persistence.sh"
 run_scenario "smoke-12-reboot-persistence" smoke_12_reboot_persistence
+
+# shellcheck source=tests/installation/scenarios/smoke/smoke-13-database-backup-repair-restore.sh
+source "${SCENARIOS_DIR}/smoke-13-database-backup-repair-restore.sh"
+run_scenario "smoke-13-database-backup-repair-restore" smoke_13_database_backup_repair_restore
 
 run_scenario "journal-error-scraper" journal_error_scraper
 

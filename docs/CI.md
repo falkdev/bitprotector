@@ -62,7 +62,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 3 | `rust-integration-fast` | CLI + split API integration binaries + core integration tests (except `scaling_100k`) | ubuntu-24.04 | 4-7 min |
 | 4 | `rust-integration-heavy` | `cargo test --test scaling_100k` (100k rows, 3 s/query budgets) | ubuntu-24.04 | 2-4 min |
 | 5 | `build-artifacts` | `npm ci && npm run build && cargo deb` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
-| 6 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios. | ubuntu-24.04 | 8-12 min per guest |
+| 6 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including database backup repair/restore. | ubuntu-24.04 | 8-12 min per guest |
 | 7 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
 | 8 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
 | 9 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
@@ -70,8 +70,6 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 11 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
 
 **Runner vs guest OS**: the runner is always `ubuntu-24.04` (GitHub-hosted). The *guest* running inside QEMU is controlled by the matrix (`ubuntu-24.04` noble, `ubuntu-26.04` plucky). See [.github/actions/setup-qemu/action.yml](.github/actions/setup-qemu/action.yml) for image download logic.
-
-**Ubuntu 26.04 note**: until the 26.04 LTS image is fully published on `cloud-images.ubuntu.com`, the 26.04 matrix cell uses `continue-on-error: true`. Once the image is stable, remove that line from each QEMU job in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 **`scaling_100k` timing budget**: the test enforces a 3000 ms per-query budget ([tests/integration/scaling_100k.rs](../tests/integration/scaling_100k.rs)). On slow runners this may flake. If it does, bump the budget via the `SCALING_QUERY_BUDGET_MS` env var (if wired), or move the job to a larger runner by changing its `runs-on` label — one-line change.
 
@@ -216,5 +214,4 @@ These are understood by the QEMU test scripts and are passed via `env:` blocks i
 
 - **Add a new integration test binary**: declare it in `Cargo.toml` under `[[test]]`, add a `cargo test --test <name>` step to the `rust-integration-fast` job in `ci.yml`, and the matching call to `run_rust_integration_fast()` in `run-tests.sh`.
 - **Change the runner**: update `runs-on:` in the relevant job. For heavy QEMU, `ubuntu-latest-4-core` is the fallback if the default runner is too slow.
-- **Promote 26.04 to required**: remove `continue-on-error: ${{ matrix.guest == 'ubuntu-26.04' }}` from each QEMU job once the image is stable.
 - **Adjust coverage behavior**: edit the `coverage` job in `ci.yml` (it is non-gating via `continue-on-error: true`).

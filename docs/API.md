@@ -1275,9 +1275,12 @@ List all backup destination configurations.
         "id": 1,
         "backup_path": "/mnt/backup1/db/",
         "drive_label": "backup-drive-1",
-        "max_copies": 5,
+        "priority": 0,
         "enabled": true,
         "last_backup": "2026-03-15T02:30:00Z",
+        "last_integrity_check": "2026-03-15T03:00:00Z",
+        "last_integrity_status": "ok",
+        "last_error": null,
         "created_at": "2026-01-01T00:00:00Z"
     }
 ]
@@ -1295,12 +1298,11 @@ Add a backup destination.
 {
     "backup_path": "/mnt/backup1/db/",
     "drive_label": "backup-drive-1",
-    "max_copies": 5,
     "enabled": true
 }
 ```
 
-`drive_label`, `max_copies` (default: `5`), and `enabled` (default: `true`) are optional.
+`drive_label` and `enabled` (default: `true`) are optional. Each destination stores one canonical backup file at `<backup_path>/bitprotector.db`. Priority is assigned automatically in creation order.
 
 **Response `201`:** Created backup config object.  
 **Errors:** `400 Bad Request`
@@ -1318,7 +1320,7 @@ Get a single backup config.
 
 ### PUT `/database/backups/{id}`
 
-**Request body:** any subset of `max_copies`, `enabled`.
+**Request body:** any subset of `backup_path`, `drive_label`, `enabled`.
 
 **Response `200`:** Updated config object.  
 **Errors:** `404 Not Found`
@@ -1336,11 +1338,7 @@ Get a single backup config.
 
 Trigger an immediate backup to all enabled destinations.
 
-**Required query parameter:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `db_path` | string | Absolute path to the live database file to copy |
+The backend uses its configured live database path; the caller does not provide `db_path`.
 
 **Response `200`:** Flat JSON array of per-destination results:
 
@@ -1348,7 +1346,7 @@ Trigger an immediate backup to all enabled destinations.
 [
     {
         "backup_config_id": 1,
-        "backup_path": "/mnt/backup1/db/bitprotector-2026-03-15T023000.db",
+        "backup_path": "/mnt/backup1/db/bitprotector.db",
         "status": "success",
         "error": null
     }
@@ -1356,6 +1354,89 @@ Trigger an immediate backup to all enabled destinations.
 ```
 
 **Errors:** `500 Internal Server Error`
+
+---
+
+### GET `/database/backups/settings`
+
+Return dedicated database-backup automation settings.
+
+**Response `200`:**
+
+```json
+{
+    "backup_enabled": false,
+    "backup_interval_seconds": 86400,
+    "integrity_enabled": false,
+    "integrity_interval_seconds": 86400,
+    "last_backup_run": null,
+    "last_integrity_run": null,
+    "updated_at": "2026-01-01T00:00:00Z"
+}
+```
+
+---
+
+### PUT `/database/backups/settings`
+
+Update any subset of automatic backup and backup-integrity timing settings.
+
+```json
+{
+    "backup_enabled": true,
+    "backup_interval_seconds": 3600,
+    "integrity_enabled": true,
+    "integrity_interval_seconds": 7200
+}
+```
+
+**Errors:** `400 Bad Request`
+
+---
+
+### POST `/database/backups/integrity-check`
+
+Verify configured backup files and repair corrupt or missing backups from the first healthy backup in priority order.
+
+**Response `200`:**
+
+```json
+[
+    {
+        "backup_config_id": 1,
+        "backup_path": "/mnt/backup1/db/bitprotector.db",
+        "status": "ok",
+        "checksum": "b3...",
+        "repaired_from_id": null,
+        "error": null
+    }
+]
+```
+
+---
+
+### POST `/database/backups/restore`
+
+Stage a verified older backup for restore. The staged restore is applied on service restart before SQLite is opened.
+
+```json
+{
+    "source_path": "/mnt/backup1/db/bitprotector.db"
+}
+```
+
+**Response `200`:**
+
+```json
+{
+    "status": "staged",
+    "restart_required": true,
+    "safety_backup_path": "/var/lib/bitprotector/bitprotector.db.safety-20260315040000",
+    "staged_restore_path": "/var/lib/bitprotector/bitprotector.db.restore-pending"
+}
+```
+
+**Errors:** `400 Bad Request`
 
 ---
 

@@ -539,7 +539,7 @@ The scenario catalog lives under `tests/installation/scenarios/` and is grouped 
 
 ### Smoke test coverage
 
-`tests/installation/scenarios/smoke/` currently contains 12 ordered scenarios:
+`tests/installation/scenarios/smoke/` currently contains 13 ordered scenarios:
 
 - package install + service boot under TLS
 - CLI/profile smoke checks
@@ -549,6 +549,7 @@ The scenario catalog lives under `tests/installation/scenarios/` and is grouped 
 - TLS cert rotation
 - path traversal rejection checks
 - reboot persistence of service + tracked data
+- database backup canonical file, integrity repair, and staged restore
 
 ### Failover suite coverage
 
