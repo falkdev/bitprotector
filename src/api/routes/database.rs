@@ -137,16 +137,13 @@ async fn update_backup(
 ) -> HttpResponse {
     let backup_path = body.backup_path.as_deref().map(str::trim);
     if backup_path.map_or(false, str::is_empty) {
-        return HttpResponse::BadRequest()
-            .json(ApiError::new("validation_error", "backup_path cannot be empty"));
+        return HttpResponse::BadRequest().json(ApiError::new(
+            "validation_error",
+            "backup_path cannot be empty",
+        ));
     }
     let drive_label = body.drive_label.as_ref().map(|opt| opt.as_deref());
-    match data.update_db_backup_config(
-        *path,
-        backup_path,
-        drive_label,
-        body.enabled,
-    ) {
+    match data.update_db_backup_config(*path, backup_path, drive_label, body.enabled) {
         Ok(cfg) => HttpResponse::Ok().json(BackupConfigResponse::from(cfg)),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
