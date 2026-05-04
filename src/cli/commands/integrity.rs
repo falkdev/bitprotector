@@ -54,7 +54,12 @@ fn status_label(status: &IntegrityStatus) -> &'static str {
 fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(file_id)?;
     let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
-    let result = integrity::check_file_integrity(&pair, &file)?;
+    let result = integrity::check_file_integrity(
+        &pair,
+        &file,
+        crate::core::checksum::ChecksumStrategy::Streaming,
+        crate::core::checksum::ChecksumStrategy::Streaming,
+    )?;
 
     println!(
         "File #{}: {} — {}",
@@ -86,12 +91,17 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
 }
 
 fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow::Result<()> {
-    let run = integrity_runs::run_sync(repo, drive_id, recover, "cli", None)?;
-    let clean = run.processed_files - run.attention_files;
+    let cfg = crate::core::checksum::ChecksumConfig::default();
+    let run = integrity_runs::run_sync(repo, drive_id, recover, "cli", None, cfg.clone())?;
+    let clean = run.processed_files - run.recovered_files;
 
     println!(
         "Integrity run complete (#{}): {} checked, {} clean, {} recovered, {} need attention",
         run.id, run.processed_files, clean, run.recovered_files, run.attention_files
+    );
+    println!(
+        "  Parallelism used: HDD pairs={} files/batch, SSD pairs={} files/batch",
+        cfg.hdd_max_parallel, cfg.resolved_ssd_parallel
     );
     if run.attention_files > 0 {
         let mut page = 1i64;
@@ -258,7 +268,13 @@ mod tests {
         fs::write(primary.path().join("mc.txt"), b"corrupted master").unwrap();
 
         let file = repo.get_tracked_file(tracked.id).unwrap();
-        let result = crate::core::integrity::check_file_integrity(&pair, &file).unwrap();
+        let result = crate::core::integrity::check_file_integrity(
+            &pair,
+            &file,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::MasterCorrupted);
     }
 
@@ -278,7 +294,13 @@ mod tests {
         fs::write(secondary.path().join("bc.txt"), b"bad mirror").unwrap();
 
         let file = repo.get_tracked_file(tracked.id).unwrap();
-        let result = crate::core::integrity::check_file_integrity(&pair, &file).unwrap();
+        let result = crate::core::integrity::check_file_integrity(
+            &pair,
+            &file,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::BothCorrupted);
 
         // Attempt recovery returns false (cannot recover)

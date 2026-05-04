@@ -1,6 +1,78 @@
+use crate::core::drive::DriveMediaType;
+use crate::core::system;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
+
+/// How a single file should be hashed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChecksumStrategy {
+    /// 64 KiB streaming loop + fadvise_dontneed (safe for all hardware).
+    Streaming,
+    /// Memory-map the entire file and hash all chunks with rayon (SSD + file fits in RAM/2).
+    MmapRayon,
+}
+
+impl ChecksumStrategy {
+    /// Choose the best strategy for a file on a drive of the given media type.
+    pub fn for_drive(media_type: DriveMediaType, file_size: u64) -> ChecksumStrategy {
+        if media_type == DriveMediaType::Ssd && file_size <= system::mmap_threshold_bytes() {
+            ChecksumStrategy::MmapRayon
+        } else {
+            ChecksumStrategy::Streaming
+        }
+    }
+}
+
+/// Parallelism limits read from the [checksum] config section.
+#[derive(Debug, Clone)]
+pub struct ChecksumConfig {
+    /// Max simultaneous files for HDD pairs. Default 2.
+    pub hdd_max_parallel: usize,
+    /// Max simultaneous files for SSD pairs. 0 = auto (num_cpus/2, min 2).
+    pub ssd_max_parallel: usize,
+    /// Resolved ssd_max_parallel (never 0 after startup).
+    pub resolved_ssd_parallel: usize,
+}
+
+impl Default for ChecksumConfig {
+    fn default() -> Self {
+        let resolved = system::default_ssd_parallel();
+        ChecksumConfig {
+            hdd_max_parallel: 2,
+            ssd_max_parallel: 0,
+            resolved_ssd_parallel: resolved,
+        }
+    }
+}
+
+impl ChecksumConfig {
+    pub fn resolve(hdd_max_parallel: usize, ssd_max_parallel: usize) -> Self {
+        let resolved = if ssd_max_parallel == 0 {
+            system::default_ssd_parallel()
+        } else {
+            ssd_max_parallel
+        };
+        ChecksumConfig {
+            hdd_max_parallel,
+            ssd_max_parallel,
+            resolved_ssd_parallel: resolved,
+        }
+    }
+}
+
+/// Number of files to process in parallel for a given drive pair and config.
+/// Mixed pairs are limited by the HDD side to avoid seek contention.
+pub fn pool_size_for_pair(
+    primary_media: DriveMediaType,
+    secondary_media: DriveMediaType,
+    cfg: &ChecksumConfig,
+) -> usize {
+    match (primary_media, secondary_media) {
+        (DriveMediaType::Ssd, DriveMediaType::Ssd) => cfg.resolved_ssd_parallel,
+        _ => cfg.hdd_max_parallel,
+    }
+}
 
 /// Compute BLAKE3 checksum of the given byte slice, returning lowercase hex.
 pub fn checksum_bytes(data: &[u8]) -> String {
@@ -18,46 +90,64 @@ fn fadvise_dontneed(file: &File) {
     }
 }
 
-/// Compute BLAKE3 checksum of a file at the given path, returning lowercase hex.
-/// After reading, advises the OS to release the file's pages from the page cache.
-pub fn checksum_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = [0u8; 65536];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
+/// Compute BLAKE3 checksum of a file, choosing strategy based on drive type and file size.
+pub fn checksum_file<P: AsRef<Path>>(path: P, strategy: ChecksumStrategy) -> io::Result<String> {
+    let file = File::open(path.as_ref())?;
+    match strategy {
+        ChecksumStrategy::MmapRayon => {
+            let mut hasher = blake3::Hasher::new();
+            hasher
+                .update_mmap_rayon(path.as_ref())
+                .map_err(io::Error::other)?;
+            #[cfg(unix)]
+            fadvise_dontneed(&file);
+            Ok(hasher.finalize().to_hex().to_string())
         }
-        hasher.update(&buf[..n]);
+        ChecksumStrategy::Streaming => {
+            let mut file = file;
+            let mut hasher = blake3::Hasher::new();
+            let mut buf = [0u8; 65536];
+            loop {
+                let n = file.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+            }
+            #[cfg(unix)]
+            fadvise_dontneed(&file);
+            Ok(hasher.finalize().to_hex().to_string())
+        }
     }
-    #[cfg(unix)]
-    fadvise_dontneed(&file);
-    Ok(hasher.finalize().to_hex().to_string())
 }
 
-/// Copy a file from `src` to `dst` while computing the BLAKE3 checksum of the
-/// source in a single streaming pass. Returns the source checksum as lowercase hex.
-///
-/// This is more efficient than calling `fs::copy` and `checksum_file` separately
-/// because the source file is read only once instead of twice.
-pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q) -> io::Result<String> {
+/// Copy src to dst while computing BLAKE3 checksums of both in a single pass.
+/// Returns `(src_checksum, dst_checksum)`.
+pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
+    src: P,
+    dst: Q,
+) -> io::Result<(String, String)> {
     let mut src_file = File::open(src)?;
     let mut dst_file = File::create(dst)?;
-    let mut hasher = blake3::Hasher::new();
+    let mut src_hasher = blake3::Hasher::new();
+    let mut dst_hasher = blake3::Hasher::new();
     let mut buf = [0u8; 65536];
     loop {
         let n = src_file.read(&mut buf)?;
         if n == 0 {
             break;
         }
-        hasher.update(&buf[..n]);
+        src_hasher.update(&buf[..n]);
         dst_file.write_all(&buf[..n])?;
+        dst_hasher.update(&buf[..n]);
     }
     dst_file.flush()?;
     #[cfg(unix)]
     fadvise_dontneed(&src_file);
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok((
+        src_hasher.finalize().to_hex().to_string(),
+        dst_hasher.finalize().to_hex().to_string(),
+    ))
 }
 
 /// Copy a file from `src` to `dst` while verifying it matches `expected_checksum`
@@ -105,7 +195,7 @@ pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
 
 /// Verify that a file's current checksum matches the expected checksum.
 pub fn verify_file<P: AsRef<Path>>(path: P, expected: &str) -> io::Result<bool> {
-    let actual = checksum_file(path)?;
+    let actual = checksum_file(path, ChecksumStrategy::Streaming)?;
     Ok(actual == expected)
 }
 
@@ -156,7 +246,7 @@ mod tests {
         file.flush().unwrap();
 
         let expected = checksum_bytes(data);
-        let actual = checksum_file(file.path()).unwrap();
+        let actual = checksum_file(file.path(), ChecksumStrategy::Streaming).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -169,7 +259,7 @@ mod tests {
         file.flush().unwrap();
 
         let expected = checksum_bytes(&data);
-        let actual = checksum_file(file.path()).unwrap();
+        let actual = checksum_file(file.path(), ChecksumStrategy::Streaming).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -196,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_checksum_file_not_found() {
-        let result = checksum_file("/nonexistent/path/to/file.txt");
+        let result = checksum_file("/nonexistent/path/to/file.txt", ChecksumStrategy::Streaming);
         assert!(result.is_err());
     }
 
@@ -214,6 +304,36 @@ mod tests {
     }
 
     #[test]
+    fn test_strategy_hdd_always_streaming() {
+        assert_eq!(
+            ChecksumStrategy::for_drive(DriveMediaType::Hdd, 0),
+            ChecksumStrategy::Streaming
+        );
+        assert_eq!(
+            ChecksumStrategy::for_drive(DriveMediaType::Hdd, u64::MAX),
+            ChecksumStrategy::Streaming
+        );
+    }
+
+    #[test]
+    fn test_strategy_ssd_small_file_mmap() {
+        // A 1-byte file is always <= threshold
+        assert_eq!(
+            ChecksumStrategy::for_drive(DriveMediaType::Ssd, 1),
+            ChecksumStrategy::MmapRayon
+        );
+    }
+
+    #[test]
+    fn test_strategy_ssd_huge_file_streaming() {
+        // u64::MAX is always > threshold
+        assert_eq!(
+            ChecksumStrategy::for_drive(DriveMediaType::Ssd, u64::MAX),
+            ChecksumStrategy::Streaming
+        );
+    }
+
+    #[test]
     fn test_copy_with_checksum_creates_copy() {
         let mut src_file = NamedTempFile::new().unwrap();
         let dst_file = NamedTempFile::new().unwrap();
@@ -221,26 +341,27 @@ mod tests {
         src_file.write_all(data).unwrap();
         src_file.flush().unwrap();
 
-        let checksum = copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
+        let (src_checksum, dst_checksum) =
+            copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
 
         let expected = checksum_bytes(data);
-        assert_eq!(checksum, expected);
+        assert_eq!(src_checksum, expected);
+        assert_eq!(src_checksum, dst_checksum);
         let dst_contents = std::fs::read(dst_file.path()).unwrap();
         assert_eq!(dst_contents, data);
     }
 
     #[test]
-    fn test_copy_with_checksum_returns_source_checksum() {
-        let mut src_file = NamedTempFile::new().unwrap();
-        let dst_file = NamedTempFile::new().unwrap();
-        let data = b"source checksum data";
-        src_file.write_all(data).unwrap();
-        src_file.flush().unwrap();
-
-        let result = copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
-        let direct = checksum_file(src_file.path()).unwrap();
-
-        assert_eq!(result, direct);
+    fn test_copy_with_checksum_returns_matching_hashes() {
+        let mut src = NamedTempFile::new().unwrap();
+        src.write_all(b"hello world").unwrap();
+        let dst = NamedTempFile::new().unwrap();
+        let (src_hash, dst_hash) = copy_with_checksum(src.path(), dst.path()).unwrap();
+        assert_eq!(src_hash, dst_hash);
+        assert_eq!(
+            src_hash,
+            checksum_file(dst.path(), ChecksumStrategy::Streaming).unwrap()
+        );
     }
 
     #[test]

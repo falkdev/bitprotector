@@ -48,6 +48,8 @@ pub struct DrivePair {
     pub primary_state: String,
     pub secondary_state: String,
     pub active_role: String,
+    pub primary_media_type: String,
+    pub secondary_media_type: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -208,6 +210,7 @@ pub struct IntegrityRun {
     pub processed_files: i64,
     pub attention_files: i64,
     pub recovered_files: i64,
+    pub active_workers: i64,
     pub stop_requested: bool,
     pub started_at: String,
     pub ended_at: Option<String>,
@@ -251,13 +254,32 @@ impl Repository {
         primary: &str,
         secondary: &str,
     ) -> anyhow::Result<DrivePair> {
+        self.create_drive_pair_with_media(name, primary, secondary, "hdd", "hdd")
+    }
+
+    pub fn create_drive_pair_with_media(
+        &self,
+        name: &str,
+        primary: &str,
+        secondary: &str,
+        primary_media_type: &str,
+        secondary_media_type: &str,
+    ) -> anyhow::Result<DrivePair> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
                 "INSERT INTO drive_pairs (
-                    name, primary_path, secondary_path, primary_state, secondary_state, active_role
-                 ) VALUES (?1, ?2, ?3, 'active', 'active', 'primary')",
-                rusqlite::params![name, primary, secondary],
+                    name, primary_path, secondary_path,
+                    primary_state, secondary_state, active_role,
+                    primary_media_type, secondary_media_type
+                 ) VALUES (?1, ?2, ?3, 'active', 'active', 'primary', ?4, ?5)",
+                rusqlite::params![
+                    name,
+                    primary,
+                    secondary,
+                    primary_media_type,
+                    secondary_media_type
+                ],
             )?;
             conn.last_insert_rowid()
         };
@@ -268,7 +290,7 @@ impl Repository {
         let conn = self.conn()?;
         let pair = conn.query_row(
             "SELECT id, name, primary_path, secondary_path, primary_state, secondary_state,
-                    active_role, created_at, updated_at
+                    active_role, primary_media_type, secondary_media_type, created_at, updated_at
              FROM drive_pairs WHERE id = ?1",
             rusqlite::params![id],
             |row| {
@@ -280,8 +302,10 @@ impl Repository {
                     primary_state: row.get(4)?,
                     secondary_state: row.get(5)?,
                     active_role: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    primary_media_type: row.get(7)?,
+                    secondary_media_type: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             },
         )?;
@@ -292,7 +316,7 @@ impl Repository {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, primary_path, secondary_path, primary_state, secondary_state,
-                    active_role, created_at, updated_at
+                    active_role, primary_media_type, secondary_media_type, created_at, updated_at
              FROM drive_pairs ORDER BY id",
         )?;
         let pairs = stmt
@@ -305,8 +329,10 @@ impl Repository {
                     primary_state: row.get(4)?,
                     secondary_state: row.get(5)?,
                     active_role: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    primary_media_type: row.get(7)?,
+                    secondary_media_type: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -319,6 +345,18 @@ impl Repository {
         name: Option<&str>,
         primary: Option<&str>,
         secondary: Option<&str>,
+    ) -> anyhow::Result<DrivePair> {
+        self.update_drive_pair_with_media(id, name, primary, secondary, None, None)
+    }
+
+    pub fn update_drive_pair_with_media(
+        &self,
+        id: i64,
+        name: Option<&str>,
+        primary: Option<&str>,
+        secondary: Option<&str>,
+        primary_media_type: Option<&str>,
+        secondary_media_type: Option<&str>,
     ) -> anyhow::Result<DrivePair> {
         {
             let conn = self.conn()?;
@@ -333,6 +371,12 @@ impl Repository {
             }
             if let Some(s) = secondary {
                 conn.execute("UPDATE drive_pairs SET secondary_path=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![s, id])?;
+            }
+            if let Some(pmt) = primary_media_type {
+                conn.execute("UPDATE drive_pairs SET primary_media_type=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![pmt, id])?;
+            }
+            if let Some(smt) = secondary_media_type {
+                conn.execute("UPDATE drive_pairs SET secondary_media_type=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![smt, id])?;
             }
         }
         self.get_drive_pair(id)
@@ -756,7 +800,7 @@ impl Repository {
         let conn = self.conn()?;
         let run = conn.query_row(
             "SELECT id, scope_drive_pair_id, recover, trigger, status,
-                    total_files, processed_files, attention_files, recovered_files,
+                    total_files, processed_files, attention_files, recovered_files, active_workers,
                     stop_requested, started_at, ended_at, error_message
              FROM integrity_runs
              WHERE id=?1",
@@ -772,10 +816,11 @@ impl Repository {
                     processed_files: row.get(6)?,
                     attention_files: row.get(7)?,
                     recovered_files: row.get(8)?,
-                    stop_requested: row.get::<_, i64>(9)? != 0,
-                    started_at: row.get(10)?,
-                    ended_at: row.get(11)?,
-                    error_message: row.get(12)?,
+                    active_workers: row.get(9)?,
+                    stop_requested: row.get::<_, i64>(10)? != 0,
+                    started_at: row.get(11)?,
+                    ended_at: row.get(12)?,
+                    error_message: row.get(13)?,
                 })
             },
         )?;
@@ -786,7 +831,7 @@ impl Repository {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, scope_drive_pair_id, recover, trigger, status,
-                    total_files, processed_files, attention_files, recovered_files,
+                    total_files, processed_files, attention_files, recovered_files, active_workers,
                     stop_requested, started_at, ended_at, error_message
              FROM integrity_runs
              WHERE status IN ('running', 'stopping')
@@ -805,10 +850,11 @@ impl Repository {
                 processed_files: row.get(6)?,
                 attention_files: row.get(7)?,
                 recovered_files: row.get(8)?,
-                stop_requested: row.get::<_, i64>(9)? != 0,
-                started_at: row.get(10)?,
-                ended_at: row.get(11)?,
-                error_message: row.get(12)?,
+                active_workers: row.get(9)?,
+                stop_requested: row.get::<_, i64>(10)? != 0,
+                started_at: row.get(11)?,
+                ended_at: row.get(12)?,
+                error_message: row.get(13)?,
             }));
         }
         Ok(None)
@@ -818,7 +864,7 @@ impl Repository {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, scope_drive_pair_id, recover, trigger, status,
-                    total_files, processed_files, attention_files, recovered_files,
+                    total_files, processed_files, attention_files, recovered_files, active_workers,
                     stop_requested, started_at, ended_at, error_message
              FROM integrity_runs
              ORDER BY started_at DESC, id DESC
@@ -836,13 +882,23 @@ impl Repository {
                 processed_files: row.get(6)?,
                 attention_files: row.get(7)?,
                 recovered_files: row.get(8)?,
-                stop_requested: row.get::<_, i64>(9)? != 0,
-                started_at: row.get(10)?,
-                ended_at: row.get(11)?,
-                error_message: row.get(12)?,
+                active_workers: row.get(9)?,
+                stop_requested: row.get::<_, i64>(10)? != 0,
+                started_at: row.get(11)?,
+                ended_at: row.get(12)?,
+                error_message: row.get(13)?,
             }));
         }
         Ok(None)
+    }
+
+    pub fn set_integrity_run_active_workers(&self, run_id: i64, count: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE integrity_runs SET active_workers=?1 WHERE id=?2",
+            rusqlite::params![count, run_id],
+        )?;
+        Ok(())
     }
 
     pub fn request_integrity_run_stop(&self, id: i64) -> anyhow::Result<()> {

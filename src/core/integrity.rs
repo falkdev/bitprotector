@@ -41,6 +41,8 @@ pub struct IntegrityCheckResult {
 pub fn check_file_integrity(
     drive_pair: &DrivePair,
     file: &TrackedFile,
+    master_strategy: checksum::ChecksumStrategy,
+    mirror_strategy: checksum::ChecksumStrategy,
 ) -> anyhow::Result<IntegrityCheckResult> {
     let master_path = PathBuf::from(&drive_pair.primary_path).join(&file.relative_path);
     let mirror_path = PathBuf::from(&drive_pair.secondary_path).join(&file.relative_path);
@@ -73,17 +75,25 @@ pub fn check_file_integrity(
         });
     }
 
-    let master_checksum = if primary_root_available && master_path.exists() {
-        Some(checksum::checksum_file(&master_path)?)
-    } else {
-        None
-    };
+    let (master_result, mirror_result) = rayon::join(
+        || {
+            if primary_root_available && master_path.exists() {
+                Some(checksum::checksum_file(&master_path, master_strategy))
+            } else {
+                None
+            }
+        },
+        || {
+            if secondary_root_available && mirror_path.exists() {
+                Some(checksum::checksum_file(&mirror_path, mirror_strategy))
+            } else {
+                None
+            }
+        },
+    );
 
-    let mirror_checksum = if secondary_root_available && mirror_path.exists() {
-        Some(checksum::checksum_file(&mirror_path)?)
-    } else {
-        None
-    };
+    let master_checksum = master_result.transpose()?;
+    let mirror_checksum = mirror_result.transpose()?;
 
     let master_valid = master_checksum.as_deref() == Some(&file.checksum);
     let mirror_valid = mirror_checksum.as_deref() == Some(&file.checksum);
@@ -239,6 +249,8 @@ mod tests {
             primary_state: "active".to_string(),
             secondary_state: "active".to_string(),
             active_role: "primary".to_string(),
+            primary_media_type: "hdd".to_string(),
+            secondary_media_type: "hdd".to_string(),
             created_at: "".to_string(),
             updated_at: "".to_string(),
         }
@@ -278,7 +290,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::Ok);
         assert!(result.master_valid);
         assert!(result.mirror_valid);
@@ -297,7 +315,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::MasterCorrupted);
         assert!(!result.master_valid);
         assert!(result.mirror_valid);
@@ -315,7 +339,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::MirrorCorrupted);
         assert!(result.master_valid);
         assert!(!result.mirror_valid);
@@ -332,7 +362,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &stored_hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::BothCorrupted);
         assert!(!result.master_valid);
         assert!(!result.mirror_valid);
@@ -347,7 +383,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::MirrorMissing);
     }
 
@@ -360,7 +402,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::MasterMissing);
     }
 
@@ -374,7 +422,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::PrimaryDriveUnavailable);
     }
 
@@ -390,7 +444,13 @@ mod tests {
         pair.active_role = "secondary".to_string();
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, IntegrityStatus::Ok);
         assert!(result.mirror_valid);
     }
@@ -407,7 +467,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         let recovered = attempt_recovery(&pair, &file, &result).unwrap();
         assert!(recovered);
 
@@ -427,7 +493,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         let recovered = attempt_recovery(&pair, &file, &result).unwrap();
         assert!(recovered);
 
@@ -446,7 +518,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         let recovered = attempt_recovery(&pair, &file, &result).unwrap();
         assert!(!recovered);
     }
@@ -462,7 +540,13 @@ mod tests {
         let pair = make_pair(&primary, &secondary);
         let file = make_tracked_file(1, "f.txt", &stored_hash);
 
-        let result = check_file_integrity(&pair, &file).unwrap();
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         let recovered = attempt_recovery(&pair, &file, &result).unwrap();
         assert!(!recovered);
     }

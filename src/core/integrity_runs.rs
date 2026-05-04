@@ -1,7 +1,9 @@
-use crate::core::drive;
+use crate::core::checksum::{self, ChecksumConfig, ChecksumStrategy};
+use crate::core::drive::DriveMediaType;
 use crate::core::integrity::{self, IntegrityStatus};
-use crate::db::repository::{IntegrityRun, Repository};
+use crate::db::repository::{IntegrityRun, Repository, TrackedFile};
 use crate::logging::event_logger;
+use rayon::prelude::*;
 
 pub const RUN_STATUS_RUNNING: &str = "running";
 pub const RUN_STATUS_STOPPING: &str = "stopping";
@@ -28,6 +30,7 @@ pub fn start_run_async(
     recover: bool,
     trigger: &str,
     deadline: Option<std::time::Instant>,
+    cfg: ChecksumConfig,
 ) -> anyhow::Result<IntegrityRun> {
     if repo.get_active_integrity_run()?.is_some() {
         anyhow::bail!("Another integrity run is already active");
@@ -39,9 +42,10 @@ pub fn start_run_async(
     let repo_clone = repo.clone();
 
     std::thread::spawn(move || {
-        if let Err(error) = process_run(&repo_clone, run_id, deadline) {
+        if let Err(error) = process_run(&repo_clone, run_id, deadline, cfg) {
             let message = error.to_string();
             let _ = repo_clone.finish_integrity_run(run_id, RUN_STATUS_FAILED, Some(&message));
+            let _ = repo_clone.set_integrity_run_active_workers(run_id, 0);
         }
     });
 
@@ -54,146 +58,190 @@ pub fn run_sync(
     recover: bool,
     trigger: &str,
     deadline: Option<std::time::Instant>,
+    cfg: ChecksumConfig,
 ) -> anyhow::Result<IntegrityRun> {
     if repo.get_active_integrity_run()?.is_some() {
         anyhow::bail!("Another integrity run is already active");
     }
     let total_files = repo.count_tracked_files(scope_drive_pair_id)?;
     let run = repo.create_integrity_run(scope_drive_pair_id, recover, trigger, total_files)?;
-    process_run(repo, run.id, deadline)?;
+    process_run(repo, run.id, deadline, cfg)?;
     repo.get_integrity_run(run.id)
+}
+
+fn check_should_stop(
+    repo: &Repository,
+    run_id: i64,
+    deadline: Option<std::time::Instant>,
+) -> anyhow::Result<bool> {
+    let current = repo.get_integrity_run(run_id)?;
+    if current.stop_requested {
+        repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
+        return Ok(true);
+    }
+
+    if let Some(dl) = deadline {
+        if std::time::Instant::now() >= dl {
+            repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 pub fn process_run(
     repo: &Repository,
     run_id: i64,
     deadline: Option<std::time::Instant>,
+    cfg: ChecksumConfig,
 ) -> anyhow::Result<()> {
     let run = repo.get_integrity_run(run_id)?;
     let recover = run.recover;
     let scope_drive_pair_id = run.scope_drive_pair_id;
-    let mut page = 1i64;
     let per_page = 100i64;
 
     let _ = event_logger::log_integrity_run_started(repo, run_id, run.total_files, &run.trigger);
 
-    loop {
-        let (files, total) =
-            repo.list_tracked_files_oldest_integrity_first(scope_drive_pair_id, page, per_page)?;
-        if files.is_empty() {
-            break;
-        }
+    let pairs = if let Some(pair_id) = scope_drive_pair_id {
+        vec![repo.get_drive_pair(pair_id)?]
+    } else {
+        repo.list_drive_pairs()?
+    };
 
-        for file in &files {
-            let current = repo.get_integrity_run(run_id)?;
-            if current.stop_requested {
-                repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
+    for pair in pairs {
+        let primary_media = DriveMediaType::from_str(&pair.primary_media_type);
+        let secondary_media = DriveMediaType::from_str(&pair.secondary_media_type);
+        let pool_size =
+            checksum::pool_size_for_pair(primary_media, secondary_media, &cfg).max(1usize);
+
+        repo.set_integrity_run_active_workers(run_id, pool_size as i64)?;
+
+        let pool = match rayon::ThreadPoolBuilder::new()
+            .num_threads(pool_size)
+            .build()
+        {
+            Ok(pool) => pool,
+            Err(_) => rayon::ThreadPoolBuilder::new().num_threads(1).build()?,
+        };
+
+        let mut page = 1i64;
+        loop {
+            if check_should_stop(repo, run_id, deadline)? {
+                repo.set_integrity_run_active_workers(run_id, 0)?;
                 return Ok(());
             }
 
-            // Honour scheduler time window: stop gracefully at the deadline.
-            if let Some(dl) = deadline {
-                if std::time::Instant::now() >= dl {
-                    repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
-                    return Ok(());
-                }
+            let (files, total) =
+                repo.list_tracked_files_oldest_integrity_first(Some(pair.id), page, per_page)?;
+            if files.is_empty() {
+                break;
             }
 
-            let pair = match drive::load_operational_pair(repo, file.drive_pair_id) {
-                Ok(pair) => pair,
-                Err(_) => {
-                    repo.update_tracked_file_last_integrity_check_at(file.id)?;
-                    repo.append_integrity_run_result(
-                        run_id,
-                        file.id,
-                        file.drive_pair_id,
-                        &file.relative_path,
-                        "internal_error",
-                        false,
-                        true,
-                    )?;
-                    repo.increment_integrity_run_progress(run_id, 1, 0)?;
-                    continue;
-                }
-            };
+            let parallel_results: Vec<(
+                TrackedFile,
+                anyhow::Result<integrity::IntegrityCheckResult>,
+            )> = pool.install(|| {
+                files
+                    .par_iter()
+                    .map(|file| {
+                        let master_strategy =
+                            ChecksumStrategy::for_drive(primary_media, file.file_size as u64);
+                        let mirror_strategy =
+                            ChecksumStrategy::for_drive(secondary_media, file.file_size as u64);
+                        let result = integrity::check_file_integrity(
+                            &pair,
+                            file,
+                            master_strategy,
+                            mirror_strategy,
+                        );
+                        (file.clone(), result)
+                    })
+                    .collect()
+            });
 
-            let result = match integrity::check_file_integrity(&pair, file) {
-                Ok(result) => result,
-                Err(_) => {
-                    repo.update_tracked_file_last_integrity_check_at(file.id)?;
-                    repo.append_integrity_run_result(
-                        run_id,
-                        file.id,
-                        file.drive_pair_id,
-                        &file.relative_path,
-                        "internal_error",
-                        false,
-                        true,
-                    )?;
-                    repo.increment_integrity_run_progress(run_id, 1, 0)?;
-                    continue;
-                }
-            };
+            for (file, result) in parallel_results {
+                let result = match result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        repo.update_tracked_file_last_integrity_check_at(file.id)?;
+                        repo.append_integrity_run_result(
+                            run_id,
+                            file.id,
+                            file.drive_pair_id,
+                            &file.relative_path,
+                            "internal_error",
+                            false,
+                            true,
+                        )?;
+                        repo.increment_integrity_run_progress(run_id, 1, 0)?;
+                        continue;
+                    }
+                };
 
-            let mut recovered = false;
-            if recover && result.status != IntegrityStatus::Ok {
-                recovered =
-                    integrity::attempt_recovery_with_reconciliation(repo, &pair, file, &result)
-                        .unwrap_or(false);
+                let mut recovered = false;
+                if recover && result.status != IntegrityStatus::Ok {
+                    recovered = integrity::attempt_recovery_with_reconciliation(
+                        repo, &pair, &file, &result,
+                    )
+                    .unwrap_or(false);
+                }
+
+                // Log per-file integrity result to event log.
+                let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+                match &result.status {
+                    IntegrityStatus::Ok => {}
+                    IntegrityStatus::BothCorrupted => {
+                        let _ = event_logger::log_both_corrupted(
+                            repo,
+                            file.id,
+                            &full_path,
+                            result.master_checksum.as_deref(),
+                            result.mirror_checksum.as_deref(),
+                            &result.stored_checksum,
+                        );
+                        let _ = event_logger::log_integrity_fail(
+                            repo,
+                            file.id,
+                            &full_path,
+                            status_str(&result.status),
+                        );
+                    }
+                    _ => {
+                        let _ = event_logger::log_integrity_fail(
+                            repo,
+                            file.id,
+                            &full_path,
+                            status_str(&result.status),
+                        );
+                    }
+                }
+
+                let needs_attention = result.status != IntegrityStatus::Ok && !recovered;
+                repo.update_tracked_file_last_integrity_check_at(file.id)?;
+                repo.append_integrity_run_result(
+                    run_id,
+                    file.id,
+                    file.drive_pair_id,
+                    &file.relative_path,
+                    status_str(&result.status),
+                    recovered,
+                    needs_attention,
+                )?;
+                repo.increment_integrity_run_progress(
+                    run_id,
+                    if needs_attention { 1 } else { 0 },
+                    if recovered { 1 } else { 0 },
+                )?;
             }
 
-            // Log per-file integrity result to event log.
-            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
-            match &result.status {
-                IntegrityStatus::Ok => {}
-                IntegrityStatus::BothCorrupted => {
-                    let _ = event_logger::log_both_corrupted(
-                        repo,
-                        file.id,
-                        &full_path,
-                        result.master_checksum.as_deref(),
-                        result.mirror_checksum.as_deref(),
-                        &result.stored_checksum,
-                    );
-                    let _ = event_logger::log_integrity_fail(
-                        repo,
-                        file.id,
-                        &full_path,
-                        status_str(&result.status),
-                    );
-                }
-                _ => {
-                    let _ = event_logger::log_integrity_fail(
-                        repo,
-                        file.id,
-                        &full_path,
-                        status_str(&result.status),
-                    );
-                }
+            if (page * per_page) >= total {
+                break;
             }
-
-            let needs_attention = result.status != IntegrityStatus::Ok && !recovered;
-            repo.update_tracked_file_last_integrity_check_at(file.id)?;
-            repo.append_integrity_run_result(
-                run_id,
-                file.id,
-                file.drive_pair_id,
-                &file.relative_path,
-                status_str(&result.status),
-                recovered,
-                needs_attention,
-            )?;
-            repo.increment_integrity_run_progress(
-                run_id,
-                if needs_attention { 1 } else { 0 },
-                if recovered { 1 } else { 0 },
-            )?;
+            page += 1;
         }
 
-        if (page * per_page) >= total {
-            break;
-        }
-        page += 1;
+        repo.set_integrity_run_active_workers(run_id, 0)?;
     }
 
     let final_state = repo.get_integrity_run(run_id)?;
@@ -304,7 +352,15 @@ mod tests {
         let (primary, secondary, pair_id) = setup_pair(&repo);
         create_tracked_file(&repo, pair_id, &primary, &secondary, "a.txt", true);
 
-        let run = start_run_async(&repo, Some(pair_id), false, "test", None).unwrap();
+        let run = start_run_async(
+            &repo,
+            Some(pair_id),
+            false,
+            "test",
+            None,
+            ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(run.status, RUN_STATUS_RUNNING);
         assert_eq!(run.total_files, 1);
 
@@ -328,7 +384,15 @@ mod tests {
         create_tracked_file(&repo, pair_id, &primary, &secondary, "ok.txt", true);
         create_tracked_file(&repo, pair_id, &primary, &secondary, "missing.txt", false);
 
-        let run = run_sync(&repo, Some(pair_id), false, "test", None).unwrap();
+        let run = run_sync(
+            &repo,
+            Some(pair_id),
+            false,
+            "test",
+            None,
+            ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(run.status, RUN_STATUS_COMPLETED);
         assert_eq!(run.total_files, 2);
         assert_eq!(run.processed_files, 2);
@@ -362,7 +426,7 @@ mod tests {
             .unwrap();
         repo.request_integrity_run_stop(run.id).unwrap();
 
-        process_run(&repo, run.id, None).unwrap();
+        process_run(&repo, run.id, None, ChecksumConfig::default()).unwrap();
         let stopped = repo.get_integrity_run(run.id).unwrap();
         assert_eq!(stopped.status, RUN_STATUS_STOPPED);
         assert!(stopped.stop_requested);
@@ -388,7 +452,15 @@ mod tests {
 
         // Deadline already in the past — the run should stop immediately
         let past_deadline = Instant::now() - Duration::from_secs(1);
-        let run = run_sync(&repo, Some(pair_id), false, "test", Some(past_deadline)).unwrap();
+        let run = run_sync(
+            &repo,
+            Some(pair_id),
+            false,
+            "test",
+            Some(past_deadline),
+            ChecksumConfig::default(),
+        )
+        .unwrap();
 
         // The run must be stopped, not completed, since the deadline has passed
         assert_eq!(

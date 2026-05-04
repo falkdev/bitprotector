@@ -148,4 +148,45 @@ describe('IntegrityPage', () => {
       expect(screen.getByText('Stop requested for run #301')).toBeInTheDocument()
     })
   })
+
+  it('shows active workers card for running runs', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/integrity/runs/active', () =>
+        HttpResponse.json({
+          run: makeIntegrityRun({
+            id: 502,
+            status: 'running',
+            active_workers: 4,
+          }),
+        })
+      ),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: null,
+            results: [],
+            total: 0,
+          })
+        )
+      ),
+      api.get('/integrity/runs/:id/results', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({
+              id: 502,
+              status: 'running',
+              active_workers: 4,
+            }),
+            results: [],
+            total: 0,
+          })
+        )
+      )
+    )
+
+    renderWithApp(<IntegrityPage />)
+    expect(await screen.findByText('Files checking in parallel')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+  })
 })

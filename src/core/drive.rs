@@ -65,6 +65,29 @@ impl DriveState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveMediaType {
+    Hdd,
+    Ssd,
+}
+
+impl DriveMediaType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DriveMediaType::Hdd => "hdd",
+            DriveMediaType::Ssd => "ssd",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> DriveMediaType {
+        match value {
+            "ssd" => DriveMediaType::Ssd,
+            _ => DriveMediaType::Hdd,
+        }
+    }
+}
+
 impl DrivePair {
     pub fn role_state(&self, role: DriveRole) -> DriveState {
         match role {
@@ -111,6 +134,13 @@ impl DrivePair {
             self.role_state(self.standby_role()),
             DriveState::Active | DriveState::Rebuilding
         ) && path_is_available(self.standby_path())
+    }
+
+    pub fn media_type_for_role(&self, role: DriveRole) -> DriveMediaType {
+        match role {
+            DriveRole::Primary => DriveMediaType::from_str(&self.primary_media_type),
+            DriveRole::Secondary => DriveMediaType::from_str(&self.secondary_media_type),
+        }
     }
 }
 

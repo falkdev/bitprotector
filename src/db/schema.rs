@@ -15,6 +15,8 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             primary_state   TEXT NOT NULL DEFAULT 'active' CHECK(primary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
             secondary_state TEXT NOT NULL DEFAULT 'active' CHECK(secondary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
             active_role     TEXT NOT NULL DEFAULT 'primary' CHECK(active_role IN ('primary', 'secondary')),
+            primary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(primary_media_type IN ('hdd', 'ssd')),
+            secondary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(secondary_media_type IN ('hdd', 'ssd')),
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );",
@@ -72,6 +74,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             processed_files    INTEGER NOT NULL DEFAULT 0,
             attention_files    INTEGER NOT NULL DEFAULT 0,
             recovered_files    INTEGER NOT NULL DEFAULT 0,
+            active_workers     INTEGER NOT NULL DEFAULT 0,
             stop_requested     INTEGER NOT NULL DEFAULT 0,
             started_at         TEXT NOT NULL DEFAULT (datetime('now')),
             ended_at           TEXT,

@@ -169,3 +169,48 @@ jobs:
             ${{ runner.temp }}/**/qemu.log
           retention-days: 7
           if-no-files-found: warn
+
+  qemu-drive-media-type:
+    name: QEMU Drive Media Type (nightly, ${{ matrix.guest }})
+    needs: build-artifacts-nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2294
+            api_port: 19243
+            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+          - guest: ubuntu-26.04
+            ssh_port: 2295
+            api_port: 19244
+            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+      - name: Download nightly .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: target/debian/
+      - name: QEMU drive media type test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/drive_media_type.sh
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn

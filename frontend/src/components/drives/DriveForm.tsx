@@ -13,6 +13,8 @@ const schema = z.object({
   name: z.string().min(1, 'Name is required'),
   primary_path: z.string().min(1, 'Primary path is required'),
   secondary_path: z.string().min(1, 'Secondary path is required'),
+  primary_media_type: z.enum(['hdd', 'ssd']).default('hdd'),
+  secondary_media_type: z.enum(['hdd', 'ssd']).default('hdd'),
   skip_validation: z.boolean().default(false),
 })
 
@@ -57,6 +59,8 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
       name: '',
       primary_path: '',
       secondary_path: '',
+      primary_media_type: 'hdd',
+      secondary_media_type: 'hdd',
       skip_validation: false,
     },
   })
@@ -69,6 +73,8 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
         name: initial.name,
         primary_path: initial.primary_path,
         secondary_path: initial.secondary_path,
+        primary_media_type: initial.primary_media_type,
+        secondary_media_type: initial.secondary_media_type,
         skip_validation: false,
       })
     }
@@ -87,6 +93,8 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
           name: data.name,
           primary_path: data.primary_path,
           secondary_path: data.secondary_path,
+          primary_media_type: data.primary_media_type,
+          secondary_media_type: data.secondary_media_type,
         })
         return
       }
@@ -95,6 +103,8 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
         name: data.name,
         primary_path: data.primary_path,
         secondary_path: data.secondary_path,
+        primary_media_type: data.primary_media_type,
+        secondary_media_type: data.secondary_media_type,
         skip_validation: data.skip_validation,
       })
     } catch (error) {
@@ -164,6 +174,27 @@ export function DriveForm({ initial, onClose, onSave }: DriveFormProps) {
                   Browse
                 </button>
               </div>
+            </Field>
+
+            <Field label="Primary Drive Type">
+              <select
+                {...register('primary_media_type')}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="drive-primary-media-type-select"
+              >
+                <option value="hdd">HDD — spinning disk</option>
+                <option value="ssd">SSD / NVMe</option>
+              </select>
+            </Field>
+            <Field label="Secondary Drive Type">
+              <select
+                {...register('secondary_media_type')}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="drive-secondary-media-type-select"
+              >
+                <option value="hdd">HDD — spinning disk</option>
+                <option value="ssd">SSD / NVMe</option>
+              </select>
             </Field>
 
             {!initial ? (

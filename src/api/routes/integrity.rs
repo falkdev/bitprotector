@@ -44,7 +44,12 @@ pub async fn check_file(
                 .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
         }
     };
-    let result = match integrity::check_file_integrity(&pair, &file) {
+    let result = match integrity::check_file_integrity(
+        &pair,
+        &file,
+        crate::core::checksum::ChecksumStrategy::Streaming,
+        crate::core::checksum::ChecksumStrategy::Streaming,
+    ) {
         Ok(r) => r,
         Err(e) => {
             return HttpResponse::InternalServerError()
@@ -78,6 +83,7 @@ pub async fn check_file(
 /// POST /api/v1/integrity/runs — start a batch integrity run
 pub async fn start_run(
     repo: web::Data<Repository>,
+    checksum_cfg: web::Data<crate::core::checksum::ChecksumConfig>,
     body: Option<web::Json<StartRunBody>>,
 ) -> impl Responder {
     let body = body.map(|b| b.into_inner()).unwrap_or(StartRunBody {
@@ -90,6 +96,7 @@ pub async fn start_run(
         body.recover.unwrap_or(false),
         "api",
         None,
+        (**checksum_cfg).clone(),
     ) {
         Ok(run) => HttpResponse::Accepted().json(run),
         Err(e) if e.to_string().contains("already active") => {
