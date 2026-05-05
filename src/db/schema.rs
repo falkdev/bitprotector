@@ -167,6 +167,14 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE schedule_config ADD COLUMN max_duration_seconds INTEGER",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE drive_pairs ADD COLUMN primary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(primary_media_type IN ('hdd', 'ssd'))",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE drive_pairs ADD COLUMN secondary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(secondary_media_type IN ('hdd', 'ssd'))",
+        [],
+    );
     let _ = conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_tracked_files_integrity_check
          ON tracked_files(last_integrity_check_at);",
@@ -346,6 +354,48 @@ mod tests {
         assert!(
             result.is_err(),
             "Invalid action check constraint should fail"
+        );
+    }
+
+    #[test]
+    fn test_drive_pairs_media_type_columns_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE drive_pairs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL UNIQUE,
+                primary_path    TEXT NOT NULL,
+                secondary_path  TEXT NOT NULL,
+                primary_state   TEXT NOT NULL DEFAULT 'healthy',
+                secondary_state TEXT NOT NULL DEFAULT 'healthy',
+                active_role     TEXT NOT NULL DEFAULT 'primary',
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .expect("Failed to create legacy drive_pairs");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let primary_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('drive_pairs') WHERE name='primary_media_type'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect drive_pairs columns");
+        let secondary_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('drive_pairs') WHERE name='secondary_media_type'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect drive_pairs columns");
+
+        assert_eq!(primary_col_count, 1, "primary_media_type should be added");
+        assert_eq!(
+            secondary_col_count, 1,
+            "secondary_media_type should be added"
         );
     }
 }

@@ -19,6 +19,7 @@ DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
 SSH_PORT="${SSH_PORT:-2264}"
 API_PORT="${API_PORT:-18845}"
 TIMEOUT="${TIMEOUT:-900}"
+export SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-180}"
 
 require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
 SSH_KEY="$(resolve_ssh_key)"
@@ -159,6 +160,7 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
+wait_for_api "${API_PORT}" 120
 ssh_vm '
 set -euo pipefail
 if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
@@ -171,13 +173,13 @@ rm -f /mnt/bitprotector-db/db/.write-test
 
 BUNDLE_START_TIME="$(date -Iseconds)"
 
-# shellcheck source=tests/installation/scenarios/smoke/smoke-13-drive-media-type.sh
-source "${SCENARIOS_DIR}/smoke-13-drive-media-type.sh"
-run_scenario "smoke-13-drive-media-type" smoke_13_drive_media_type
+# shellcheck source=tests/installation/scenarios/smoke/smoke-14-drive-media-type.sh
+source "${SCENARIOS_DIR}/smoke-14-drive-media-type.sh"
+run_scenario "smoke-14-drive-media-type" smoke_14_drive_media_type
 
-# shellcheck source=tests/installation/scenarios/smoke/smoke-14-parallel-integrity-progress.sh
-source "${SCENARIOS_DIR}/smoke-14-parallel-integrity-progress.sh"
-run_scenario "smoke-14-parallel-integrity-progress" smoke_14_parallel_integrity_progress
+# shellcheck source=tests/installation/scenarios/smoke/smoke-15-parallel-integrity-progress.sh
+source "${SCENARIOS_DIR}/smoke-15-parallel-integrity-progress.sh"
+run_scenario "smoke-15-parallel-integrity-progress" smoke_15_parallel_integrity_progress
 
 run_scenario "journal-error-scraper" journal_error_scraper
 
