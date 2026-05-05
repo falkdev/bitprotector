@@ -202,6 +202,10 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
 
     // Alpha-era idempotent migrations for local development databases.
     let _ = conn.execute(
+        "ALTER TABLE integrity_runs ADD COLUMN active_workers INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
         "ALTER TABLE db_backup_config ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
         [],
     );
