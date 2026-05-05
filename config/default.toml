@@ -15,3 +15,13 @@ file = "/var/log/bitprotector/bitprotector.log"
 enabled = true
 sync_interval_seconds = 3600
 integrity_interval_seconds = 86400
+
+[checksum]
+# Maximum files checked in parallel for HDD-backed drive pairs.
+# HDD seek time makes high parallelism counter-productive; keep this low.
+# Default: 2 (allows master+mirror of one file to be read concurrently on separate drives)
+hdd_max_parallel = 2
+
+# Maximum files checked in parallel for SSD-backed drive pairs.
+# 0 = auto (num_logical_cpus / 2, minimum 2).
+ssd_max_parallel = 0

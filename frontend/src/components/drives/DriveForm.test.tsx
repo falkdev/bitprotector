@@ -42,6 +42,8 @@ describe('DriveForm', () => {
       name: 'Mirror A',
       primary_path: '/mnt/primary',
       secondary_path: '/mnt/secondary',
+      primary_media_type: 'hdd',
+      secondary_media_type: 'hdd',
       skip_validation: true,
     })
   })

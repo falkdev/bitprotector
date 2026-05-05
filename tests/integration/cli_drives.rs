@@ -68,6 +68,62 @@ fn test_drives_add_no_validate() {
 }
 
 #[test]
+fn test_cli_add_drive_with_ssd_flag() {
+    let db = temp_db();
+
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "drives",
+            "add",
+            "--no-validate",
+            "ssd-pair",
+            "/nonexistent/primary",
+            "/nonexistent/secondary",
+            "--primary-media-type",
+            "ssd",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ssd"));
+}
+
+#[test]
+fn test_cli_show_drive_includes_media_type() {
+    let db = temp_db();
+
+    cmd(db.path().to_str().unwrap())
+        .args(["drives", "add", "--no-validate", "show-media", "/p", "/s"])
+        .assert()
+        .success();
+
+    cmd(db.path().to_str().unwrap())
+        .args(["drives", "show", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Primary media:"))
+        .stdout(predicate::str::contains("Secondary media:"));
+}
+
+#[test]
+fn test_cli_add_drive_invalid_media_type() {
+    let db = temp_db();
+
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "drives",
+            "add",
+            "--no-validate",
+            "invalid-media",
+            "/p",
+            "/s",
+            "--primary-media-type",
+            "nvme",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
 fn test_drives_add_invalid_path_fails() {
     let db = temp_db();
 

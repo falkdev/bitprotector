@@ -187,6 +187,8 @@ jobs:
         run: cargo test --test core_change_detection
       - name: core_scheduler
         run: cargo test --test core_scheduler
+      - name: core_checksum_strategy
+        run: cargo test --test core_checksum_strategy
 
   # ---------------------------------------------------------------------------
   # Layer 3 — Rust integration tests (heavy — scaling_100k with 3s budgets)
@@ -579,7 +581,60 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 10 — QEMU uninstall (PR + main + nightly + workflow_dispatch)
+  # Layer 10 — QEMU drive media type (PR + main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-drive-media-type:
+    name: QEMU Drive Media Type (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2264
+            api_port: 18845
+            deb_artifact: bitprotector-deb-ubuntu-24.04
+          - guest: ubuntu-26.04
+            ssh_port: 2265
+            api_port: 18846
+            deb_artifact: bitprotector-deb-ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: target/debian/
+      - name: QEMU drive media type test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/drive_media_type.sh
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 11 — QEMU uninstall (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-uninstall:
     name: QEMU Uninstall (${{ matrix.guest }})

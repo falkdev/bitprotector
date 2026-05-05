@@ -35,10 +35,15 @@ pub fn run_task(
 ) -> anyhow::Result<u32> {
     match task {
         TaskType::Sync => sync_queue::process_all_pending(repo, stop_by),
-        TaskType::IntegrityCheck => {
-            integrity_runs::run_sync(repo, None, false, "scheduler", stop_by)
-                .map(|run| run.attention_files as u32)
-        }
+        TaskType::IntegrityCheck => integrity_runs::run_sync(
+            repo,
+            None,
+            false,
+            "scheduler",
+            stop_by,
+            crate::core::checksum::ChecksumConfig::default(),
+        )
+        .map(|run| run.attention_files as u32),
     }
 }
 

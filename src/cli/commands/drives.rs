@@ -67,6 +67,12 @@ pub struct AddArgs {
     /// Skip path existence and writability validation
     #[arg(long)]
     pub no_validate: bool,
+    /// Media type of the primary drive (hdd or ssd)
+    #[arg(long, default_value = "hdd")]
+    pub primary_media_type: String,
+    /// Media type of the secondary drive (hdd or ssd)
+    #[arg(long, default_value = "hdd")]
+    pub secondary_media_type: String,
 }
 
 #[derive(Args, Debug)]
@@ -82,6 +88,12 @@ pub struct UpdateArgs {
     /// New secondary path
     #[arg(long)]
     pub secondary: Option<String>,
+    /// New media type for the primary drive (hdd or ssd)
+    #[arg(long)]
+    pub primary_media_type: Option<String>,
+    /// New media type for the secondary drive (hdd or ssd)
+    #[arg(long)]
+    pub secondary_media_type: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -114,6 +126,8 @@ fn print_pair(pair: &crate::db::repository::DrivePair) {
     println!("  Secondary:       {}", pair.secondary_path);
     println!("  Primary State:   {}", pair.primary_state);
     println!("  Secondary State: {}", pair.secondary_state);
+    println!("  Primary media:   {}", pair.primary_media_type);
+    println!("  Secondary media: {}", pair.secondary_media_type);
     println!("  Active Role:     {}", pair.active_role);
     println!("  Created:         {}", pair.created_at);
     println!("  Updated:         {}", pair.updated_at);
@@ -122,10 +136,22 @@ fn print_pair(pair: &crate::db::repository::DrivePair) {
 pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         DrivesCommand::Add(args) => {
+            if !["hdd", "ssd"].contains(&args.primary_media_type.as_str()) {
+                anyhow::bail!("--primary-media-type must be 'hdd' or 'ssd'");
+            }
+            if !["hdd", "ssd"].contains(&args.secondary_media_type.as_str()) {
+                anyhow::bail!("--secondary-media-type must be 'hdd' or 'ssd'");
+            }
             if !args.no_validate {
                 validate_drive_pair(&args.primary, &args.secondary)?;
             }
-            let pair = repo.create_drive_pair(&args.name, &args.primary, &args.secondary)?;
+            let pair = repo.create_drive_pair_with_media(
+                &args.name,
+                &args.primary,
+                &args.secondary,
+                &args.primary_media_type,
+                &args.secondary_media_type,
+            )?;
             let _ = event_logger::log_drive_created(
                 repo,
                 pair.id,
@@ -134,8 +160,14 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 &pair.secondary_path,
             );
             println!("Created drive pair #{}: {}", pair.id, pair.name);
-            println!("  Primary:   {}", pair.primary_path);
-            println!("  Secondary: {}", pair.secondary_path);
+            println!(
+                "  Primary:   {} ({})",
+                pair.primary_path, pair.primary_media_type
+            );
+            println!(
+                "  Secondary: {} ({})",
+                pair.secondary_path, pair.secondary_media_type
+            );
         }
         DrivesCommand::List => {
             let pairs = repo.list_drive_pairs()?;
@@ -143,18 +175,27 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 println!("No drive pairs registered.");
             } else {
                 println!(
-                    "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} Secondary Path",
-                    "ID", "Name", "Active", "Primary", "Secondary", "Primary Path",
+                    "{:<6} {:<20} {:<12} {:<12} {:<12} {:<8} {:<8} {:<24} Secondary Path",
+                    "ID",
+                    "Name",
+                    "Active",
+                    "Primary",
+                    "Secondary",
+                    "P-Media",
+                    "S-Media",
+                    "Primary Path",
                 );
-                println!("{}", "-".repeat(136));
+                println!("{}", "-".repeat(152));
                 for p in pairs {
                     println!(
-                        "{:<6} {:<20} {:<12} {:<12} {:<12} {:<28} {}",
+                        "{:<6} {:<20} {:<12} {:<12} {:<12} {:<8} {:<8} {:<24} {}",
                         p.id,
                         p.name,
                         p.active_role,
                         p.primary_state,
                         p.secondary_state,
+                        p.primary_media_type,
+                        p.secondary_media_type,
                         p.primary_path,
                         p.secondary_path
                     );
@@ -166,11 +207,24 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
             print_pair(&pair);
         }
         DrivesCommand::Update(args) => {
-            let pair = repo.update_drive_pair(
+            if let Some(primary_media_type) = &args.primary_media_type {
+                if !["hdd", "ssd"].contains(&primary_media_type.as_str()) {
+                    anyhow::bail!("--primary-media-type must be 'hdd' or 'ssd'");
+                }
+            }
+            if let Some(secondary_media_type) = &args.secondary_media_type {
+                if !["hdd", "ssd"].contains(&secondary_media_type.as_str()) {
+                    anyhow::bail!("--secondary-media-type must be 'hdd' or 'ssd'");
+                }
+            }
+
+            let pair = repo.update_drive_pair_with_media(
                 args.id,
                 args.name.as_deref(),
                 args.primary.as_deref(),
                 args.secondary.as_deref(),
+                args.primary_media_type.as_deref(),
+                args.secondary_media_type.as_deref(),
             )?;
             let _ = event_logger::log_drive_updated(repo, pair.id, &pair.name);
             println!("Updated drive pair #{}: {}", pair.id, pair.name);
@@ -259,6 +313,8 @@ mod tests {
                 primary: "/tmp/p".to_string(),
                 secondary: "/tmp/s".to_string(),
                 no_validate: true,
+                primary_media_type: "hdd".to_string(),
+                secondary_media_type: "hdd".to_string(),
             }),
             &repo,
         )
@@ -279,6 +335,8 @@ mod tests {
                 primary: primary.path().to_str().unwrap().to_string(),
                 secondary: secondary.path().to_str().unwrap().to_string(),
                 no_validate: false,
+                primary_media_type: "hdd".to_string(),
+                secondary_media_type: "hdd".to_string(),
             }),
             &repo,
         )
@@ -310,6 +368,8 @@ mod tests {
                 name: Some("new_name".to_string()),
                 primary: None,
                 secondary: None,
+                primary_media_type: None,
+                secondary_media_type: None,
             }),
             &repo,
         )
@@ -335,6 +395,8 @@ mod tests {
                 primary: "/nonexistent/primary".to_string(),
                 secondary: "/nonexistent/secondary".to_string(),
                 no_validate: false,
+                primary_media_type: "hdd".to_string(),
+                secondary_media_type: "hdd".to_string(),
             }),
             &repo,
         );

@@ -23,7 +23,8 @@ fn create_tracked_file_from_disk(
     }
 
     let file_checksum =
-        checksum::checksum_file(&master_path).context("Failed to compute file checksum")?;
+        checksum::checksum_file(&master_path, checksum::ChecksumStrategy::Streaming)
+            .context("Failed to compute file checksum")?;
     let file_size = master_path.metadata()?.len() as i64;
 
     repo.create_tracked_file_with_source(

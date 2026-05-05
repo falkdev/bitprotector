@@ -20,6 +20,8 @@ struct AppConfig {
     server: ServerConfig,
     #[serde(default)]
     database: DatabaseConfig,
+    #[serde(default)]
+    checksum: ChecksumFileConfig,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -35,6 +37,12 @@ struct ServerConfig {
 #[derive(serde::Deserialize, Default)]
 struct DatabaseConfig {
     path: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ChecksumFileConfig {
+    hdd_max_parallel: Option<usize>,
+    ssd_max_parallel: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +220,10 @@ async fn main() -> anyhow::Result<()> {
             let resolved_rate_limit = rate_limit_rps
                 .or(file_cfg.server.rate_limit_rps)
                 .unwrap_or(100);
+            let checksum_cfg = bitprotector_lib::core::checksum::ChecksumConfig::resolve(
+                file_cfg.checksum.hdd_max_parallel.unwrap_or(2),
+                file_cfg.checksum.ssd_max_parallel.unwrap_or(0),
+            );
 
             tracing::info!(
                 "Starting BitProtector server on {}:{}",
@@ -226,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
                 resolved_tls_cert.as_deref(),
                 resolved_tls_key.as_deref(),
                 resolved_rate_limit,
+                checksum_cfg,
             )
             .await?;
         }

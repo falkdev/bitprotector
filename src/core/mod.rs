@@ -6,5 +6,6 @@ pub mod integrity_runs;
 pub mod mirror;
 pub mod scheduler;
 pub mod sync_queue;
+pub mod system;
 pub mod tracker;
 pub mod virtual_path;

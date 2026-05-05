@@ -24,7 +24,12 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
             mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum)
         }
         "verify" => {
-            let result = integrity::check_file_integrity(&pair, &file)?;
+            let result = integrity::check_file_integrity(
+                &pair,
+                &file,
+                crate::core::checksum::ChecksumStrategy::Streaming,
+                crate::core::checksum::ChecksumStrategy::Streaming,
+            )?;
             if result.status == integrity::IntegrityStatus::Ok {
                 Ok(())
             } else {
@@ -380,7 +385,13 @@ mod tests {
 
         // Corrupt the mirror
         fs::write(secondary.path().join("mi.txt"), b"corrupted").unwrap();
-        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+        let result = integrity::check_file_integrity(
+            &pair,
+            &file,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
 
         let item = create_from_integrity_failure(&repo, &file, &result).unwrap();
         assert!(item.is_some());
@@ -405,7 +416,13 @@ mod tests {
         let file = repo
             .create_tracked_file(pair.id, "ok.txt", &hash, content.len() as i64, None)
             .unwrap();
-        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+        let result = integrity::check_file_integrity(
+            &pair,
+            &file,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
 
         let item = create_from_integrity_failure(&repo, &file, &result).unwrap();
         assert!(
@@ -452,7 +469,13 @@ mod tests {
             .unwrap();
 
         // Mirror is missing
-        let result = integrity::check_file_integrity(&pair, &file).unwrap();
+        let result = integrity::check_file_integrity(
+            &pair,
+            &file,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, integrity::IntegrityStatus::MirrorMissing);
 
         let item = create_from_integrity_failure(&repo, &file, &result)

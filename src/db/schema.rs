@@ -15,6 +15,8 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             primary_state   TEXT NOT NULL DEFAULT 'active' CHECK(primary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
             secondary_state TEXT NOT NULL DEFAULT 'active' CHECK(secondary_state IN ('active', 'quiescing', 'failed', 'rebuilding')),
             active_role     TEXT NOT NULL DEFAULT 'primary' CHECK(active_role IN ('primary', 'secondary')),
+            primary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(primary_media_type IN ('hdd', 'ssd')),
+            secondary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(secondary_media_type IN ('hdd', 'ssd')),
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );",
@@ -72,6 +74,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             processed_files    INTEGER NOT NULL DEFAULT 0,
             attention_files    INTEGER NOT NULL DEFAULT 0,
             recovered_files    INTEGER NOT NULL DEFAULT 0,
+            active_workers     INTEGER NOT NULL DEFAULT 0,
             stop_requested     INTEGER NOT NULL DEFAULT 0,
             started_at         TEXT NOT NULL DEFAULT (datetime('now')),
             ended_at           TEXT,
@@ -164,6 +167,14 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE schedule_config ADD COLUMN max_duration_seconds INTEGER",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE drive_pairs ADD COLUMN primary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(primary_media_type IN ('hdd', 'ssd'))",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE drive_pairs ADD COLUMN secondary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(secondary_media_type IN ('hdd', 'ssd'))",
+        [],
+    );
     let _ = conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_tracked_files_integrity_check
          ON tracked_files(last_integrity_check_at);",
@@ -198,6 +209,10 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     )?;
 
     // Alpha-era idempotent migrations for local development databases.
+    let _ = conn.execute(
+        "ALTER TABLE integrity_runs ADD COLUMN active_workers INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     let _ = conn.execute(
         "ALTER TABLE db_backup_config ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
         [],
@@ -339,6 +354,48 @@ mod tests {
         assert!(
             result.is_err(),
             "Invalid action check constraint should fail"
+        );
+    }
+
+    #[test]
+    fn test_drive_pairs_media_type_columns_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE drive_pairs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL UNIQUE,
+                primary_path    TEXT NOT NULL,
+                secondary_path  TEXT NOT NULL,
+                primary_state   TEXT NOT NULL DEFAULT 'healthy',
+                secondary_state TEXT NOT NULL DEFAULT 'healthy',
+                active_role     TEXT NOT NULL DEFAULT 'primary',
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .expect("Failed to create legacy drive_pairs");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let primary_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('drive_pairs') WHERE name='primary_media_type'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect drive_pairs columns");
+        let secondary_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('drive_pairs') WHERE name='secondary_media_type'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect drive_pairs columns");
+
+        assert_eq!(primary_col_count, 1, "primary_media_type should be added");
+        assert_eq!(
+            secondary_col_count, 1,
+            "secondary_media_type should be added"
         );
     }
 }

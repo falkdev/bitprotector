@@ -23,7 +23,7 @@ pub fn detect_change(
     if !full_path.exists() {
         return Ok(None);
     }
-    let current = checksum::checksum_file(&full_path)?;
+    let current = checksum::checksum_file(&full_path, checksum::ChecksumStrategy::Streaming)?;
     if current != stored_checksum {
         Ok(Some(current))
     } else {

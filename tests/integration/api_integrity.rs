@@ -1,7 +1,7 @@
 mod common;
 
 use actix_web::test;
-use bitprotector_lib::core::{checksum, drive, integrity, virtual_path};
+use bitprotector_lib::core::{checksum, drive, integrity};
 use common::{bearer, make_repo};
 use std::fs;
 use tempfile::TempDir;
@@ -208,12 +208,19 @@ async fn test_integrity_run_with_recovery_reconciles_queue_and_logs_per_file() {
         fs::write(&primary_path, content.as_bytes()).unwrap();
         fs::write(&secondary_path, b"corrupt").unwrap();
 
-        let hash = checksum::checksum_file(&primary_path).unwrap();
+        let hash =
+            checksum::checksum_file(&primary_path, checksum::ChecksumStrategy::Streaming).unwrap();
         let file = repo
             .create_tracked_file(pair.id, &relative, &hash, content.len() as i64, None)
             .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
-        let before_run = integrity::check_file_integrity(&pair, &file).unwrap();
+        let before_run = integrity::check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(
             before_run.status,
             integrity::IntegrityStatus::MirrorCorrupted
@@ -356,6 +363,7 @@ async fn test_integrity_run_start_and_latest_results() {
     let latest: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(latest["run"]["id"], run_id);
     assert_eq!(latest["run"]["status"], "completed");
+    assert_eq!(latest["run"]["active_workers"], 0);
     assert_eq!(latest["total"], 1);
     assert_eq!(latest["results"][0]["file_id"], 1);
     assert_eq!(latest["results"][0]["status"], "mirror_missing");
@@ -397,6 +405,7 @@ async fn test_integrity_run_stop_and_results_endpoint() {
     assert_eq!(resp.status(), 202);
     let started: serde_json::Value = test::read_body_json(resp).await;
     let run_id = started["id"].as_i64().unwrap();
+    assert_eq!(started["active_workers"], 0);
 
     let req = test::TestRequest::post()
         .uri(&format!("/api/v1/integrity/runs/{run_id}/stop"))

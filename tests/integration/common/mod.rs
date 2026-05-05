@@ -38,6 +38,9 @@ macro_rules! make_app_with_db_path {
                 .app_data(actix_web::web::Data::new(
                     bitprotector_lib::api::auth::JwtSecret($crate::common::SECRET.to_vec()),
                 ))
+                .app_data(actix_web::web::Data::new(
+                    bitprotector_lib::core::checksum::ChecksumConfig::default(),
+                ))
                 .app_data(_sd)
                 .configure(bitprotector_lib::api::server::configure_routes),
         )

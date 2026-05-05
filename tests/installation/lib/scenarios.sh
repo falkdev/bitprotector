@@ -24,7 +24,7 @@ make_pair() {
     local primary="$2"
     local mirror="$3"
     ssh_vm "bitprotector --db \"\${BP_DB:-/mnt/bitprotector-db/db/bp-test.db}\" drives add \"${name}\" \"${primary}\" \"${mirror}\"" \
-        | grep -oP 'Drive pair #\K[0-9]+' | head -1
+        | sed -nE 's/.*[Dd]rive pair #([0-9]+).*/\1/p' | head -1
 }
 
 # Create a file of a given size filled with random data on the guest.
