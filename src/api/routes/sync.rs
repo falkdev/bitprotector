@@ -135,14 +135,18 @@ async fn clear_completed_queue(repo: web::Data<Repository>) -> HttpResponse {
 }
 
 /// POST /sync/run/{task}
-async fn run_task(repo: web::Data<Repository>, path: web::Path<String>) -> HttpResponse {
+async fn run_task(
+    repo: web::Data<Repository>,
+    path: web::Path<String>,
+    checksum_cfg: web::Data<crate::core::checksum::ChecksumConfig>,
+) -> HttpResponse {
     let task_name = path.into_inner();
     let task = match task_name.as_str() {
         "sync" => scheduler::TaskType::Sync,
         "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
         other => return HttpResponse::BadRequest().body(format!("Unknown task: {}", other)),
     };
-    match scheduler::run_task(&task, &repo, None) {
+    match scheduler::run_task(&task, &repo, None, &checksum_cfg) {
         Ok(count) => HttpResponse::Ok().json(TaskResult {
             task: task.as_str().to_string(),
             count,

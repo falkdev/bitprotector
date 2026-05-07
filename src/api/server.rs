@@ -351,8 +351,11 @@ pub async fn run_server(
 
     // Create and load the scheduler from persisted DB schedules.
     let scheduler = {
-        let mut sched =
-            Scheduler::new_with_database_path(Arc::clone(&repo_arc), db_path.to_string());
+        let mut sched = Scheduler::new_with_checksum_config(
+            Arc::clone(&repo_arc),
+            db_path.to_string(),
+            checksum_cfg.clone(),
+        );
         let _ = sched.reload(); // ignore startup errors; schedules may be empty
         Arc::new(Mutex::new(sched))
     };
