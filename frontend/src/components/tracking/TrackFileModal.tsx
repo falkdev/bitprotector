@@ -54,7 +54,7 @@ export function TrackFileModal({
   return (
     <>
       <ModalLayer>
-        <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl">
+        <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-xl">
           <h2 className="mb-4 text-lg font-semibold">Track new file</h2>
           <form
             onSubmit={handleSubmit(async (data) => {
@@ -83,16 +83,13 @@ export function TrackFileModal({
             className="space-y-4"
           >
             <div>
-              <label
-                htmlFor="track-file-drive-pair"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
+              <label htmlFor="track-file-drive-pair" className="mb-1 block text-sm font-medium">
                 Drive pair
               </label>
               <select
                 id="track-file-drive-pair"
                 {...register('drive_pair_id')}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">Select...</option>
                 {drives.map((drive) => (
@@ -106,10 +103,7 @@ export function TrackFileModal({
               ) : null}
             </div>
             <div>
-              <label
-                htmlFor="track-file-path"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
+              <label htmlFor="track-file-path" className="mb-1 block text-sm font-medium">
                 File path
               </label>
               <div className="flex gap-2">
@@ -117,19 +111,19 @@ export function TrackFileModal({
                   id="track-file-path"
                   type="text"
                   {...register('relative_path')}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="docs/report.pdf or /mnt/drive-a/docs/report.pdf"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPicker(true)}
                   disabled={!selectedDrive}
-                  className="whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="whitespace-nowrap rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Browse
                 </button>
               </div>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {selectedDrive
                   ? `Primary root: ${primaryRoot}`
                   : 'Select a drive pair before browsing or submitting.'}
@@ -138,19 +132,16 @@ export function TrackFileModal({
               rawPath.trim() &&
               !pathResolution.error &&
               pathResolution.relativePath ? (
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
                 </p>
               ) : null}
               {errors.relative_path ? (
-                <p className="mt-1 text-xs text-red-500">{errors.relative_path.message}</p>
+                <p className="mt-1 text-xs text-destructive">{errors.relative_path.message}</p>
               ) : null}
             </div>
             <div>
-              <label
-                htmlFor="track-file-virtual-path"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
+              <label htmlFor="track-file-virtual-path" className="mb-1 block text-sm font-medium">
                 Virtual Path (optional)
               </label>
               <div className="flex gap-2">
@@ -158,22 +149,22 @@ export function TrackFileModal({
                   id="track-file-virtual-path"
                   type="text"
                   {...register('virtual_path')}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="/docs/report.pdf"
                 />
                 <button
                   type="button"
                   onClick={() => setShowVirtualPicker(true)}
-                  className="whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                  className="whitespace-nowrap rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-accent"
                 >
                   Browse
                 </button>
               </div>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-muted-foreground">
                 If set, BitProtector will create a symlink exactly at this path to the tracked file.
               </p>
               {errors.virtual_path ? (
-                <p className="mt-1 text-xs text-red-500">{errors.virtual_path.message}</p>
+                <p className="mt-1 text-xs text-destructive">{errors.virtual_path.message}</p>
               ) : null}
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -183,14 +174,14 @@ export function TrackFileModal({
                   reset()
                   onClose()
                 }}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                className="rounded-md border border-input px-4 py-2 text-sm font-medium hover:bg-accent"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 {isSubmitting ? 'Tracking...' : 'Track file'}
               </button>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderPlus, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
@@ -426,6 +426,12 @@ export function TrackingWorkspacePage() {
 
   const virtualPrefix = params.virtual_prefix ?? ''
   const hasDrivePairs = drives.length > 0
+  const hasActiveFilters =
+    !!params.q ||
+    params.drive_id != null ||
+    (params.item_kind ?? 'all') !== 'all' ||
+    (params.source ?? 'all') !== 'all' ||
+    params.has_virtual_path != null
 
   const load = useCallback(async (nextParams: TrackingListParams) => {
     setLoading(true)
@@ -498,6 +504,8 @@ export function TrackingWorkspacePage() {
     items.length > 0 && items.every((item) => selectedRowKeys.has(trackingRowKey(item)))
   const someVisibleSelected =
     !allVisibleSelected && items.some((item) => selectedRowKeys.has(trackingRowKey(item)))
+  const selectedFileCount = selectedItems.filter((item) => item.kind === 'file').length
+  const selectedFolderCount = selectedItems.filter((item) => item.kind === 'folder').length
 
   const toggleRowSelection = useCallback((item: TrackingItem, checked: boolean) => {
     const key = trackingRowKey(item)
@@ -817,7 +825,7 @@ export function TrackingWorkspacePage() {
                   disabled={!hasDrivePairs}
                   data-testid="add-folder-button"
                 >
-                  <FolderPlus className="h-4 w-4" /> Add Folder
+                  <Plus className="h-4 w-4" /> Add Folder
                 </button>
                 <button
                   className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
@@ -905,6 +913,25 @@ export function TrackingWorkspacePage() {
                 <option value="no">Without Virtual Path</option>
               </select>
             </div>
+            {hasActiveFilters ? (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateParams({
+                      q: undefined,
+                      drive_id: undefined,
+                      item_kind: 'all',
+                      source: 'all',
+                      has_virtual_path: undefined,
+                    })
+                  }
+                  className="text-xs text-muted-foreground underline hover:text-foreground"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex-1 overflow-auto p-4">
@@ -913,7 +940,11 @@ export function TrackingWorkspacePage() {
                 <LoadingSpinner />
               </div>
             ) : (
-              <div className="space-y-3">
+              <div
+                className={`space-y-3 transition-opacity duration-150${
+                  loading ? ' pointer-events-none opacity-60' : ''
+                }`}
+              >
                 <DataTable
                   tableTestId="tracking-table"
                   columns={[
@@ -985,11 +1016,11 @@ export function TrackingWorkspacePage() {
                       cell: (item) => {
                         if (item.kind === 'file') {
                           return item.is_mirrored ? (
-                            <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                               Mirrored
                             </span>
                           ) : (
-                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-700/40 dark:text-slate-300">
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700/40 dark:text-slate-300">
                               Tracked
                             </span>
                           )
@@ -1077,10 +1108,17 @@ export function TrackingWorkspacePage() {
                   selectedRowKey={selectedFile ? `file-${selectedFile.id}` : null}
                   selectedRowKeys={selectedRowKeys}
                   emptyState={
-                    <EmptyState
-                      title="No tracked items"
-                      description="Track files or add folders to start managing content here."
-                    />
+                    hasActiveFilters ? (
+                      <EmptyState
+                        title="No results"
+                        description="No items match the current filters. Try adjusting or clearing the filters."
+                      />
+                    ) : (
+                      <EmptyState
+                        title="No tracked items"
+                        description="Track files or add folders to start managing content here."
+                      />
+                    )
                   }
                 />
 
@@ -1103,6 +1141,10 @@ export function TrackingWorkspacePage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground" data-testid="selected-count">
                   {selectedItems.length} selected
+                  <span className="ml-1 text-muted-foreground/60">
+                    ({selectedFileCount} file{selectedFileCount !== 1 ? 's' : ''},{' '}
+                    {selectedFolderCount} folder{selectedFolderCount !== 1 ? 's' : ''})
+                  </span>
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
