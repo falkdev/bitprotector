@@ -1,5 +1,6 @@
 use crate::api::auth::{JwtSecret, RevokedTokens};
 use crate::api::models::ApiError;
+use crate::core::checksum::ChecksumConfig;
 use crate::core::scheduler::Scheduler;
 use crate::db::repository::{create_pool, Repository};
 use actix_cors::Cors;
@@ -323,6 +324,7 @@ fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::Se
 // ---------------------------------------------------------------------------
 
 /// Start the HTTP (or HTTPS) server.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_server(
     host: &str,
     port: u16,
@@ -331,6 +333,7 @@ pub async fn run_server(
     tls_cert: Option<&str>,
     tls_key: Option<&str>,
     rate_limit_rps: usize,
+    checksum_cfg: ChecksumConfig,
 ) -> anyhow::Result<()> {
     crate::db::backup::apply_pending_restore(db_path)?;
     let pool = create_pool(db_path)?;
@@ -348,8 +351,11 @@ pub async fn run_server(
 
     // Create and load the scheduler from persisted DB schedules.
     let scheduler = {
-        let mut sched =
-            Scheduler::new_with_database_path(Arc::clone(&repo_arc), db_path.to_string());
+        let mut sched = Scheduler::new_with_checksum_config(
+            Arc::clone(&repo_arc),
+            db_path.to_string(),
+            checksum_cfg.clone(),
+        );
         let _ = sched.reload(); // ignore startup errors; schedules may be empty
         Arc::new(Mutex::new(sched))
     };
@@ -360,6 +366,7 @@ pub async fn run_server(
     ));
     let jwt_data = web::Data::new(JwtSecret(jwt_secret));
     let scheduler_data = web::Data::new(scheduler);
+    let checksum_cfg_data = web::Data::new(checksum_cfg);
     let revoked_tokens = web::Data::new(RevokedTokens::default());
     let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
     let frontend_dir = PathBuf::from(FRONTEND_DIST_DIR);
@@ -379,6 +386,7 @@ pub async fn run_server(
             .app_data(db_path_data.clone())
             .app_data(jwt_data.clone())
             .app_data(scheduler_data.clone())
+            .app_data(checksum_cfg_data.clone())
             .app_data(revoked_tokens.clone())
             .configure(|cfg| configure_application(cfg, Some(frontend_dir.clone())))
     });
@@ -433,6 +441,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -451,6 +460,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -469,6 +479,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -487,6 +498,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -505,6 +517,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -528,6 +541,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -546,6 +560,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -584,6 +599,7 @@ mod tests {
                 )
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -628,6 +644,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -653,6 +670,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -694,6 +712,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(repo.clone()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(configure_routes),
         )
         .await;
@@ -764,6 +783,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(|cfg| {
                     configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
                 }),
@@ -791,6 +811,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(|cfg| {
                     configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
                 }),
@@ -818,6 +839,7 @@ mod tests {
             App::new()
                 .app_data(web::Data::new(make_repo()))
                 .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(web::Data::new(ChecksumConfig::default()))
                 .configure(|cfg| {
                     configure_application(cfg, Some(frontend_dir.path().to_path_buf()))
                 }),

@@ -13,6 +13,8 @@ const drive: DrivePair = {
   name: 'Main Pair',
   primary_path: '/mnt/primary',
   secondary_path: '/mnt/secondary',
+  primary_media_type: 'hdd',
+  secondary_media_type: 'hdd',
   primary_state: 'active',
   secondary_state: 'active',
   active_role: 'secondary',

@@ -109,7 +109,12 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
                     other
                 ),
             };
-            let count = scheduler::run_task(&task, repo, None)?;
+            let count = scheduler::run_task(
+                &task,
+                repo,
+                None,
+                &crate::core::checksum::ChecksumConfig::default(),
+            )?;
             println!(
                 "Task '{}' completed: {} items processed",
                 task.as_str(),

@@ -28,7 +28,9 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.24"
 
 # Checksum
-blake3 = "1"
+blake3 = { version = "1", features = ["rayon", "mmap"] }
+rayon = "1"
+num_cpus = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -189,6 +191,10 @@ path = "tests/integration/core_change_detection.rs"
 [[test]]
 name = "core_scheduler"
 path = "tests/integration/core_scheduler.rs"
+
+[[test]]
+name = "core_checksum_strategy"
+path = "tests/integration/core_checksum_strategy.rs"
 
 [package.metadata.deb]
 name = "bitprotector"

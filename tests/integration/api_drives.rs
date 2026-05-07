@@ -1,9 +1,7 @@
 mod common;
 
 use actix_web::test;
-use bitprotector_lib::core::{checksum, drive, integrity, virtual_path};
 use common::{bearer, make_repo};
-use std::fs;
 use tempfile::TempDir;
 
 // ── Drives ─────────────────────────────────────────────────────────────────
@@ -38,6 +36,8 @@ async fn test_drives_create_skip_validation() {
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["name"], "test-pair");
+    assert_eq!(body["primary_media_type"], "hdd");
+    assert_eq!(body["secondary_media_type"], "hdd");
 }
 
 #[actix_rt::test]
@@ -69,6 +69,8 @@ async fn test_drives_get_existing() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["name"], "get-pair");
+    assert_eq!(body["primary_media_type"], "hdd");
+    assert_eq!(body["secondary_media_type"], "hdd");
 }
 
 #[actix_rt::test]
@@ -98,6 +100,64 @@ async fn test_drives_update() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["name"], "updated");
+}
+
+#[actix_rt::test]
+async fn test_create_drive_with_ssd_type() {
+    let app = make_app!(make_repo()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/drives")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "name": "ssd-pair",
+            "primary_path": "/tmp/p",
+            "secondary_path": "/tmp/s",
+            "primary_media_type": "ssd",
+            "secondary_media_type": "hdd",
+            "skip_validation": true
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["primary_media_type"], "ssd");
+    assert_eq!(body["secondary_media_type"], "hdd");
+}
+
+#[actix_rt::test]
+async fn test_create_drive_invalid_media_type() {
+    let app = make_app!(make_repo()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/drives")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "name": "invalid-media",
+            "primary_path": "/tmp/p",
+            "secondary_path": "/tmp/s",
+            "primary_media_type": "nvme",
+            "skip_validation": true
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[actix_rt::test]
+async fn test_update_drive_media_type() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("update-media", "/p", "/s").unwrap();
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/v1/drives/{}", pair.id))
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({ "primary_media_type": "ssd" }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["primary_media_type"], "ssd");
 }
 
 #[actix_rt::test]

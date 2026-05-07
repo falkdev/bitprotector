@@ -28,6 +28,7 @@ export interface IntegrityRun {
   processed_files: number
   attention_files: number
   recovered_files: number
+  active_workers: number
   stop_requested: boolean
   started_at: string
   ended_at: string | null

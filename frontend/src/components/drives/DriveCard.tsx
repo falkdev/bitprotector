@@ -75,6 +75,16 @@ export function DriveCard({ drive, onEdit, onDelete, onManageReplacement }: Driv
         </span>
       </div>
 
+      {/* Media type badges */}
+      <div className="flex gap-2">
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 uppercase">
+          P: {drive.primary_media_type}
+        </span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 uppercase">
+          S: {drive.secondary_media_type}
+        </span>
+      </div>
+
       {/* Updated at */}
       <p className="text-xs text-muted-foreground">Updated {formatDate(drive.updated_at)}</p>
 

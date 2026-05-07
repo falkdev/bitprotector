@@ -11,6 +11,10 @@ pub struct CreateDrivePairRequest {
     pub name: String,
     pub primary_path: String,
     pub secondary_path: String,
+    #[serde(default = "default_media_type")]
+    pub primary_media_type: String,
+    #[serde(default = "default_media_type")]
+    pub secondary_media_type: String,
     #[serde(default)]
     pub skip_validation: bool,
 }
@@ -20,6 +24,8 @@ pub struct UpdateDrivePairRequest {
     pub name: Option<String>,
     pub primary_path: Option<String>,
     pub secondary_path: Option<String>,
+    pub primary_media_type: Option<String>,
+    pub secondary_media_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,18 +49,38 @@ fn parse_role(role: &str) -> anyhow::Result<DriveRole> {
     }
 }
 
+fn default_media_type() -> String {
+    "hdd".to_string()
+}
+
 /// POST /api/v1/drives — create a new drive pair
 pub async fn create_drive_pair(
     repo: web::Data<Repository>,
     body: web::Json<CreateDrivePairRequest>,
 ) -> impl Responder {
+    let valid = ["hdd", "ssd"];
+    if !valid.contains(&body.primary_media_type.as_str())
+        || !valid.contains(&body.secondary_media_type.as_str())
+    {
+        return HttpResponse::BadRequest().json(ApiError::new(
+            "VALIDATION_ERROR",
+            "media_type must be 'hdd' or 'ssd'",
+        ));
+    }
+
     if !body.skip_validation {
         if let Err(e) = validate_drive_pair(&body.primary_path, &body.secondary_path) {
             return HttpResponse::BadRequest()
                 .json(ApiError::new("VALIDATION_ERROR", &e.to_string()));
         }
     }
-    match repo.create_drive_pair(&body.name, &body.primary_path, &body.secondary_path) {
+    match repo.create_drive_pair_with_media(
+        &body.name,
+        &body.primary_path,
+        &body.secondary_path,
+        &body.primary_media_type,
+        &body.secondary_media_type,
+    ) {
         Ok(pair) => {
             let _ = event_logger::log_drive_created(
                 &repo,
@@ -98,11 +124,31 @@ pub async fn update_drive_pair(
     body: web::Json<UpdateDrivePairRequest>,
 ) -> impl Responder {
     let id = path.into_inner();
-    match repo.update_drive_pair(
+    let valid = ["hdd", "ssd"];
+    if let Some(primary_media_type) = &body.primary_media_type {
+        if !valid.contains(&primary_media_type.as_str()) {
+            return HttpResponse::BadRequest().json(ApiError::new(
+                "VALIDATION_ERROR",
+                "media_type must be 'hdd' or 'ssd'",
+            ));
+        }
+    }
+    if let Some(secondary_media_type) = &body.secondary_media_type {
+        if !valid.contains(&secondary_media_type.as_str()) {
+            return HttpResponse::BadRequest().json(ApiError::new(
+                "VALIDATION_ERROR",
+                "media_type must be 'hdd' or 'ssd'",
+            ));
+        }
+    }
+
+    match repo.update_drive_pair_with_media(
         id,
         body.name.as_deref(),
         body.primary_path.as_deref(),
         body.secondary_path.as_deref(),
+        body.primary_media_type.as_deref(),
+        body.secondary_media_type.as_deref(),
     ) {
         Ok(pair) => {
             let _ = event_logger::log_drive_updated(&repo, pair.id, &pair.name);

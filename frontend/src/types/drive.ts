@@ -6,6 +6,8 @@ export interface DrivePair {
   name: string
   primary_path: string
   secondary_path: string
+  primary_media_type: 'ssd' | 'hdd'
+  secondary_media_type: 'ssd' | 'hdd'
   primary_state: DriveState
   secondary_state: DriveState
   active_role: DriveRole
@@ -17,6 +19,8 @@ export interface CreateDrivePairRequest {
   name: string
   primary_path: string
   secondary_path: string
+  primary_media_type?: 'ssd' | 'hdd'
+  secondary_media_type?: 'ssd' | 'hdd'
   skip_validation?: boolean
 }
 
@@ -24,6 +28,8 @@ export interface UpdateDrivePairRequest {
   name?: string
   primary_path?: string
   secondary_path?: string
+  primary_media_type?: 'ssd' | 'hdd'
+  secondary_media_type?: 'ssd' | 'hdd'
 }
 
 export interface MarkReplacementRequest {

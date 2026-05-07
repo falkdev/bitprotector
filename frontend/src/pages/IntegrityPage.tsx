@@ -367,11 +367,16 @@ export function IntegrityPage() {
       </div>
 
       {run && (
-        <div className="grid gap-3 md:grid-cols-4">
+        <div
+          className={`grid gap-3 ${run.status === 'running' ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}
+        >
           <SummaryCard label="Files Processed" value={run.processed_files} />
           <SummaryCard label="Total Files" value={run.total_files} />
           <SummaryCard label="Need Attention" value={run.attention_files} />
           <SummaryCard label="Recovered" value={run.recovered_files} />
+          {run.status === 'running' && (
+            <SummaryCard label="Files checking in parallel" value={run.active_workers} />
+          )}
         </div>
       )}
 

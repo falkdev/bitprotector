@@ -1,3 +1,4 @@
+use crate::core::checksum::ChecksumConfig;
 use crate::core::{integrity_runs, sync_queue};
 use crate::db::backup;
 use crate::db::repository::{Repository, ScheduleConfig};
@@ -32,11 +33,12 @@ pub fn run_task(
     task: &TaskType,
     repo: &Repository,
     stop_by: Option<std::time::Instant>,
+    cfg: &ChecksumConfig,
 ) -> anyhow::Result<u32> {
     match task {
         TaskType::Sync => sync_queue::process_all_pending(repo, stop_by),
         TaskType::IntegrityCheck => {
-            integrity_runs::run_sync(repo, None, false, "scheduler", stop_by)
+            integrity_runs::run_sync(repo, None, false, "scheduler", stop_by, cfg.clone())
                 .map(|run| run.attention_files as u32)
         }
     }
@@ -70,6 +72,7 @@ fn next_cron_sleep_ms(expr: &str) -> anyhow::Result<u64> {
 pub struct Scheduler {
     repo: Arc<Repository>,
     db_path: Option<String>,
+    checksum_cfg: ChecksumConfig,
     /// schedule_id → (stop_flag, thread_handle)
     threads: HashMap<i64, (Arc<AtomicBool>, thread::JoinHandle<()>)>,
     /// database-backup task key → (stop_flag, thread_handle)
@@ -78,17 +81,30 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new(repo: Arc<Repository>) -> Self {
-        Self::new_inner(repo, None)
+        Self::new_inner(repo, None, ChecksumConfig::default())
     }
 
     pub fn new_with_database_path(repo: Arc<Repository>, db_path: String) -> Self {
-        Self::new_inner(repo, Some(db_path))
+        Self::new_inner(repo, Some(db_path), ChecksumConfig::default())
     }
 
-    fn new_inner(repo: Arc<Repository>, db_path: Option<String>) -> Self {
+    pub fn new_with_checksum_config(
+        repo: Arc<Repository>,
+        db_path: String,
+        checksum_cfg: ChecksumConfig,
+    ) -> Self {
+        Self::new_inner(repo, Some(db_path), checksum_cfg)
+    }
+
+    fn new_inner(
+        repo: Arc<Repository>,
+        db_path: Option<String>,
+        checksum_cfg: ChecksumConfig,
+    ) -> Self {
         Self {
             repo,
             db_path,
+            checksum_cfg,
             threads: HashMap::new(),
             backup_threads: HashMap::new(),
         }
@@ -140,6 +156,7 @@ impl Scheduler {
         let repo = Arc::clone(&self.repo);
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
+        let checksum_cfg = self.checksum_cfg.clone();
 
         let task_type = match config.task_type.as_str() {
             "integrity_check" => TaskType::IntegrityCheck,
@@ -178,7 +195,7 @@ impl Scheduler {
             let stop_by = max_duration_secs
                 .map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s as u64));
 
-            if let Err(e) = run_task(&task_type, &repo, stop_by) {
+            if let Err(e) = run_task(&task_type, &repo, stop_by, &checksum_cfg) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
             }
         });
@@ -297,7 +314,13 @@ mod tests {
             .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        let processed = run_task(&TaskType::Sync, &repo, None).unwrap();
+        let processed = run_task(
+            &TaskType::Sync,
+            &repo,
+            None,
+            &checksum::ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(processed, 1, "Should process one pending item");
         assert!(
             secondary.path().join("sched.txt").exists(),
@@ -323,7 +346,13 @@ mod tests {
         repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None)
             .unwrap();
 
-        let attention = run_task(&TaskType::IntegrityCheck, &repo, None).unwrap();
+        let attention = run_task(
+            &TaskType::IntegrityCheck,
+            &repo,
+            None,
+            &checksum::ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(attention, 1, "Should persist one integrity attention row");
 
         let latest = repo

@@ -290,13 +290,21 @@ mod tests {
             .unwrap();
 
         // Verify mirror is byte-identical
-        let mirror_checksum =
-            checksum::checksum_file(&std::path::PathBuf::from(&pair.secondary_path).join("rt.txt"))
-                .unwrap();
+        let mirror_checksum = checksum::checksum_file(
+            &std::path::PathBuf::from(&pair.secondary_path).join("rt.txt"),
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(mirror_checksum, tracked.checksum);
 
         // Integrity check passes
-        let result = integrity::check_file_integrity(&pair, &tracked).unwrap();
+        let result = integrity::check_file_integrity(
+            &pair,
+            &tracked,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+            crate::core::checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
         assert_eq!(result.status, integrity::IntegrityStatus::Ok);
     }
 }
