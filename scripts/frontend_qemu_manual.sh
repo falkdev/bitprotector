@@ -184,8 +184,8 @@ check_node_runtime() {
     node_major="${BASH_REMATCH[1]}"
     node_minor="${BASH_REMATCH[2]}"
 
-    if [[ "${node_major}" -lt 20 || ( "${node_major}" -eq 20 && "${node_minor}" -lt 19 ) ]]; then
-        echo "ERROR: Node.js 20.19+ is required for the frontend helper (found $(node --version))" >&2
+    if [[ "${node_major}" -lt 24 ]]; then
+        echo "ERROR: Node.js 24+ is required for the frontend helper (found $(node --version))" >&2
         exit 1
     fi
 }
