@@ -37,15 +37,10 @@ pub fn run_task(
 ) -> anyhow::Result<u32> {
     match task {
         TaskType::Sync => sync_queue::process_all_pending(repo, stop_by),
-        TaskType::IntegrityCheck => integrity_runs::run_sync(
-            repo,
-            None,
-            false,
-            "scheduler",
-            stop_by,
-            cfg.clone(),
-        )
-        .map(|run| run.attention_files as u32),
+        TaskType::IntegrityCheck => {
+            integrity_runs::run_sync(repo, None, false, "scheduler", stop_by, cfg.clone())
+                .map(|run| run.attention_files as u32)
+        }
     }
 }
 
@@ -101,7 +96,11 @@ impl Scheduler {
         Self::new_inner(repo, Some(db_path), checksum_cfg)
     }
 
-    fn new_inner(repo: Arc<Repository>, db_path: Option<String>, checksum_cfg: ChecksumConfig) -> Self {
+    fn new_inner(
+        repo: Arc<Repository>,
+        db_path: Option<String>,
+        checksum_cfg: ChecksumConfig,
+    ) -> Self {
         Self {
             repo,
             db_path,
@@ -315,7 +314,13 @@ mod tests {
             .unwrap();
         repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        let processed = run_task(&TaskType::Sync, &repo, None, &checksum::ChecksumConfig::default()).unwrap();
+        let processed = run_task(
+            &TaskType::Sync,
+            &repo,
+            None,
+            &checksum::ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(processed, 1, "Should process one pending item");
         assert!(
             secondary.path().join("sched.txt").exists(),
@@ -341,7 +346,13 @@ mod tests {
         repo.create_tracked_file(pair.id, "integ.txt", &hash, content.len() as i64, None)
             .unwrap();
 
-        let attention = run_task(&TaskType::IntegrityCheck, &repo, None, &checksum::ChecksumConfig::default()).unwrap();
+        let attention = run_task(
+            &TaskType::IntegrityCheck,
+            &repo,
+            None,
+            &checksum::ChecksumConfig::default(),
+        )
+        .unwrap();
         assert_eq!(attention, 1, "Should persist one integrity attention row");
 
         let latest = repo
