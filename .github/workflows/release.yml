@@ -118,7 +118,7 @@ jobs:
             --ubuntu-version ${{ matrix.ubuntu }}
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: bitprotector-deb-release-ubuntu-${{ matrix.ubuntu }}
           path: target/debian/bitprotector_*.deb
@@ -138,13 +138,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download ubuntu-24.04 .deb artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: bitprotector-deb-release-ubuntu-24.04
           path: dist/
 
       - name: Download ubuntu-26.04 .deb artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: bitprotector-deb-release-ubuntu-26.04
           path: dist/
