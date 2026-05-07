@@ -93,7 +93,7 @@ fn check_single(repo: &Repository, file_id: i64, recover: bool) -> anyhow::Resul
 fn check_all(repo: &Repository, drive_id: Option<i64>, recover: bool) -> anyhow::Result<()> {
     let cfg = crate::core::checksum::ChecksumConfig::default();
     let run = integrity_runs::run_sync(repo, drive_id, recover, "cli", None, cfg.clone())?;
-    let clean = run.processed_files - run.recovered_files;
+    let clean = run.processed_files - run.recovered_files - run.attention_files;
 
     println!(
         "Integrity run complete (#{}): {} checked, {} clean, {} recovered, {} need attention",
