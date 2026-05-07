@@ -115,15 +115,18 @@ pub fn process_run(
         let pool_size =
             checksum::pool_size_for_pair(primary_media, secondary_media, &cfg).max(1usize);
 
-        repo.set_integrity_run_active_workers(run_id, pool_size as i64)?;
-
-        let pool = match rayon::ThreadPoolBuilder::new()
+        let (pool, active_workers) = match rayon::ThreadPoolBuilder::new()
             .num_threads(pool_size)
             .build()
         {
-            Ok(pool) => pool,
-            Err(_) => rayon::ThreadPoolBuilder::new().num_threads(1).build()?,
+            Ok(pool) => (pool, pool_size as i64),
+            Err(_) => (
+                rayon::ThreadPoolBuilder::new().num_threads(1).build()?,
+                1i64,
+            ),
         };
+
+        repo.set_integrity_run_active_workers(run_id, active_workers)?;
 
         let mut page = 1i64;
         loop {
