@@ -925,6 +925,8 @@ export function TrackingWorkspacePage() {
                       item_kind: 'all',
                       source: 'all',
                       has_virtual_path: undefined,
+                      virtual_prefix: undefined,
+                      page: 1,
                     })
                   }
                   className="text-xs text-muted-foreground underline hover:text-foreground"
