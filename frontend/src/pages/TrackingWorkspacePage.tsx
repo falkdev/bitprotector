@@ -431,7 +431,8 @@ export function TrackingWorkspacePage() {
     params.drive_id != null ||
     (params.item_kind ?? 'all') !== 'all' ||
     (params.source ?? 'all') !== 'all' ||
-    params.has_virtual_path != null
+    params.has_virtual_path != null ||
+    !!virtualPrefix
 
   const load = useCallback(async (nextParams: TrackingListParams) => {
     setLoading(true)
