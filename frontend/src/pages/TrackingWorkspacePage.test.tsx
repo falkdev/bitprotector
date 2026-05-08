@@ -253,10 +253,12 @@ describe('TrackingWorkspacePage', () => {
     await screen.findByTestId('file-row-11')
     await user.click(screen.getByTestId('select-row-file-11'))
     expect(screen.getByTestId('tracking-bulk-actions')).toBeInTheDocument()
-    expect(screen.getByTestId('selected-count')).toHaveTextContent('1 selected')
+    expect(screen.getByTestId('selected-count')).toHaveTextContent('1 selected (1 file, 0 folders)')
 
     await user.click(screen.getByTestId('select-row-file-12'))
-    expect(screen.getByTestId('selected-count')).toHaveTextContent('2 selected')
+    expect(screen.getByTestId('selected-count')).toHaveTextContent(
+      '2 selected (2 files, 0 folders)'
+    )
 
     await user.click(screen.getByTestId('bulk-deselect'))
     expect(screen.queryByTestId('tracking-bulk-actions')).not.toBeInTheDocument()
@@ -301,6 +303,7 @@ describe('TrackingWorkspacePage', () => {
     await screen.findByTestId('file-row-11')
     await user.click(screen.getByTestId('select-row-file-11'))
     await user.click(screen.getByTestId('select-row-folder-21'))
+    expect(screen.getByTestId('selected-count')).toHaveTextContent('2 selected (1 file, 1 folder)')
     await user.click(screen.getByTestId('bulk-mirror'))
 
     await waitFor(() => {

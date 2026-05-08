@@ -12,7 +12,7 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
   return (
     <div className="flex items-center gap-1" data-testid={`file-actions-${file.id}`}>
       <button
-        className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+        className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
         title="Set virtual path"
         onClick={(event) => {
           event.stopPropagation()
@@ -23,7 +23,7 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
         <Link className="h-4 w-4" />
       </button>
       <button
-        className="rounded p-1 text-gray-500 hover:bg-green-50 hover:text-green-600"
+        className="rounded p-1 text-muted-foreground hover:bg-green-500/10 hover:text-green-500"
         title="Mirror file"
         onClick={(event) => {
           event.stopPropagation()
@@ -34,7 +34,7 @@ export function FileActions({ file, onMirror, onDelete, onSetVirtualPath }: File
         <RefreshCw className="h-4 w-4" />
       </button>
       <button
-        className="rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600"
+        className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         title="Delete file"
         onClick={(event) => {
           event.stopPropagation()
