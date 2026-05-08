@@ -1143,7 +1143,7 @@ export function TrackingWorkspacePage() {
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground" data-testid="selected-count">
-                  {selectedItems.length} selected
+                  {selectedItems.length} selected{' '}
                   <span className="ml-1 text-muted-foreground/60">
                     ({selectedFileCount} file{selectedFileCount !== 1 ? 's' : ''},{' '}
                     {selectedFolderCount} folder{selectedFolderCount !== 1 ? 's' : ''})
