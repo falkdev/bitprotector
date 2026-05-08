@@ -99,7 +99,7 @@ export function TrackFileModal({
                 ))}
               </select>
               {errors.drive_pair_id ? (
-                <p className="mt-1 text-xs text-red-500">{errors.drive_pair_id.message}</p>
+                <p className="mt-1 text-xs text-destructive">{errors.drive_pair_id.message}</p>
               ) : null}
             </div>
             <div>
