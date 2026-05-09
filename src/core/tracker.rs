@@ -126,8 +126,8 @@ pub fn auto_track_folder_files(
     let mut dirs_to_visit: Vec<PathBuf> = vec![folder_full_path];
 
     while let Some(dir) = dirs_to_visit.pop() {
-        for entry in fs::read_dir(&dir)
-            .with_context(|| format!("Cannot read folder: {}", dir.display()))?
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("Cannot read folder: {}", dir.display()))?
         {
             let entry = entry?;
             let path = entry.path();

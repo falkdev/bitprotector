@@ -202,7 +202,11 @@ impl Scheduler {
 
             // ── Persist last_run / next_run after each execution ────────────
             if let Err(e) = repo.update_schedule_last_run(config_id) {
-                tracing::warn!("Failed to update last_run for schedule {}: {}", config_id, e);
+                tracing::warn!(
+                    "Failed to update last_run for schedule {}: {}",
+                    config_id,
+                    e
+                );
             }
         });
 
