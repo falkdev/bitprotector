@@ -65,7 +65,12 @@ pub fn run_sync(
     }
     let total_files = repo.count_tracked_files(scope_drive_pair_id)?;
     let run = repo.create_integrity_run(scope_drive_pair_id, recover, trigger, total_files)?;
-    process_run(repo, run.id, deadline, cfg)?;
+    if let Err(e) = process_run(repo, run.id, deadline, cfg) {
+        let message = e.to_string();
+        let _ = repo.finish_integrity_run(run.id, RUN_STATUS_FAILED, Some(&message));
+        let _ = repo.set_integrity_run_active_workers(run.id, 0);
+        return Err(e);
+    }
     repo.get_integrity_run(run.id)
 }
 

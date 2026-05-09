@@ -351,6 +351,10 @@ pub async fn run_server(
 
     // Create and load the scheduler from persisted DB schedules.
     let scheduler = {
+        // Clean up any integrity runs left in "running"/"stopping" state by a previous crash.
+        if let Err(e) = repo.cleanup_stale_integrity_runs() {
+            tracing::warn!("Failed to clean up stale integrity runs on startup: {}", e);
+        }
         let mut sched = Scheduler::new_with_checksum_config(
             Arc::clone(&repo_arc),
             db_path.to_string(),

@@ -12,7 +12,10 @@ pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
         )?;
         Ok(())
     });
-    let pool = Pool::builder().max_size(10).build(manager)?;
+    let pool = Pool::builder()
+        .max_size(10)
+        .min_idle(Some(1))
+        .build(manager)?;
     Ok(pool)
 }
 
@@ -927,6 +930,20 @@ impl Repository {
             rusqlite::params![status, error_message, id],
         )?;
         Ok(())
+    }
+
+    /// Mark any integrity runs that are still in `running` or `stopping` state as `failed`.
+    /// Called on service startup to clean up stale runs left by a previous crash or restart.
+    pub fn cleanup_stale_integrity_runs(&self) -> anyhow::Result<usize> {
+        let conn = self.conn()?;
+        let count = conn.execute(
+            "UPDATE integrity_runs
+             SET status='failed', ended_at=datetime('now'), active_workers=0,
+                 error_message='Interrupted by service restart'
+             WHERE status IN ('running', 'stopping')",
+            [],
+        )?;
+        Ok(count)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1974,6 +1991,27 @@ impl Repository {
         let conn = self.conn()?;
         conn.execute(
             "DELETE FROM schedule_config WHERE id=?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Record that a scheduled task just ran.
+    /// Sets `last_run` to the current UTC time and computes `next_run` from
+    /// `interval_seconds` (cron-based schedules leave `next_run` as NULL).
+    pub fn update_schedule_last_run(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE schedule_config
+             SET last_run = datetime('now'),
+                 next_run = CASE
+                     WHEN cron_expr IS NOT NULL THEN NULL
+                     WHEN interval_seconds IS NOT NULL
+                          THEN datetime('now', '+' || interval_seconds || ' seconds')
+                     ELSE NULL
+                 END,
+                 updated_at = datetime('now')
+             WHERE id = ?1",
             rusqlite::params![id],
         )?;
         Ok(())

@@ -29,9 +29,9 @@ lint → unit → (coverage, non-gating) → rust-integration-fast → rust-inte
                                                      build-artifacts
                                                            ↓
                                                      qemu-smoke
-                  ┌────────────────────────────┬───────────────┬──────────────┬──────────────┬───────────────────┐
-                  ↓                            ↓               ↓              ↓              ↓                   ↓
-           qemu-failover                qemu-uninstall   qemu-resilience  qemu-upgrade  qemu-degraded-boot  (nightly) qemu-scale + qemu-scale-lowmem
+                  ┌──────────────────────┬────────────────────────────┬───────────────┬──────────────┬──────────────┬───────────────────────┬─────────────────────────┐
+                  ↓                      ↓                            ↓               ↓              ↓              ↓                       ↓                         ↓
+     qemu-application-workflows    qemu-failover                qemu-uninstall   qemu-resilience  qemu-upgrade  qemu-degraded-boot   qemu-drive-media-type   (nightly) qemu-scale + qemu-scale-lowmem + qemu-scheduled-load
 ```
 
 All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs use composite actions in [.github/actions/](.github/actions/) for setup.
@@ -42,11 +42,11 @@ All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs u
 
 | Event | Layers run |
 |---|---|
-| `pull_request` | 0 – 11 (full CI workflow in `ci.yml`) |
-| `push` to `main` | 0 – 11 |
-| `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 11 |
+| `pull_request` | 0 – 13 (full CI workflow in `ci.yml`) |
+| `push` to `main` | 0 – 13 |
+| `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 13 |
 | `workflow_dispatch` with `run_heavy_qemu=false` (default) | 0 – 6 (`qemu-smoke` only for QEMU layer) |
-| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 11) + nightly-only `qemu-scale` + `qemu-scale-lowmem` |
+| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 13) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` |
 
 PR runs use `cancel-in-progress: true` so a new push automatically cancels the previous run. Pushes to `main` never cancel (a heavy failover run mid-flight must finish).
 
@@ -62,12 +62,16 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 3 | `rust-integration-fast` | CLI + split API integration binaries + core integration tests (except `scaling_100k`) | ubuntu-24.04 | 4-7 min |
 | 4 | `rust-integration-heavy` | `cargo test --test scaling_100k` (100k rows, 3 s/query budgets) | ubuntu-24.04 | 2-4 min |
 | 5 | `build-artifacts` | `npm ci && npm run build && cargo deb` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
-| 6 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including database backup repair/restore. | ubuntu-24.04 | 8-12 min per guest |
-| 7 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
-| 8 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
-| 9 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
-| 10 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. alpha1 → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
-| 11 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
+| 6 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
+| 7 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
+| 8 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
+| 9 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. alpha1 → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
+| 10 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
+| 11 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
+| 12 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |
+| 13 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
+
+Nightly-only jobs in `nightly.yml` also run `qemu-scale`, `qemu-scale-lowmem`, and `qemu-scheduled-load` (all matrixed across Ubuntu 24.04 + 26.04).
 
 **Runner vs guest OS**: the runner is always `ubuntu-24.04` (GitHub-hosted). The *guest* running inside QEMU is controlled by the matrix (`ubuntu-24.04` noble, `ubuntu-26.04` plucky). See [.github/actions/setup-qemu/action.yml](.github/actions/setup-qemu/action.yml) for image download logic.
 
@@ -146,7 +150,9 @@ If you don't want the `act` overhead, run layers natively using the same layer s
 ./scripts/run-tests.sh lint
 ./scripts/run-tests.sh fast
 ./scripts/run-tests.sh smoke   # requires QEMU installed (run setup-qemu.sh first)
-./scripts/run-tests.sh full
+./scripts/run-tests.sh full    # includes qemu-application-workflows
+GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
+GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/scheduled_load.sh   # nightly-style load
 ```
 
 This script calls cargo/npm/bash directly — no containers. The layer definitions are shared with `ci-local.sh`.
@@ -165,9 +171,16 @@ This script calls cargo/npm/bash directly — no containers. The layer definitio
 3. **Run natively** (faster iteration):
    ```bash
    GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh
+   GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh
    ```
 
 4. **Inspect serial console output** — the scripts stream boot lines to your terminal. The raw log is also at `${WORKDIR}/serial.log` inside the QEMU working directory.
+
+   For scheduled-load scenarios, inspect `timing:` lines such as:
+   - `timing: scheduled-load-01 generation_seconds=...`
+   - `timing: scheduled-load-01 pending_zero_seconds=...`
+   - `timing: scheduled-load-02 backup_first_observed_seconds=...`
+   - `timing: scheduled-load-02 backup_repair_seconds=...`
 
 5. **Trigger the heavy suite manually from a PR branch** (without merging to main):
    - Go to Actions → CI → Run workflow → check `run_heavy_qemu` → Run.
@@ -190,7 +203,7 @@ Each Ubuntu image (~650 MB) is cached under `~/images/` via `actions/cache@v4` w
 
 ### .deb artifact
 
-`build-artifacts` uploads `bitprotector_*.deb` as a GitHub Actions artifact named `bitprotector-deb` with 7-day retention. QEMU jobs in `ci.yml` download it — the binary is never rebuilt during CI QEMU runs.
+`build-artifacts` uploads `bitprotector_*.deb` as matrix artifacts (`bitprotector-deb-ubuntu-24.04`, `bitprotector-deb-ubuntu-26.04`) with 7-day retention. QEMU jobs in `ci.yml` download those artifacts directly — the binary is never rebuilt during CI QEMU runs.
 
 ---
 
@@ -202,9 +215,9 @@ These are understood by the QEMU test scripts and are passed via `env:` blocks i
 |---|---|---|
 | `GUEST_IMAGE` | `ubuntu-24.04` | Guest OS label or absolute image path |
 | `UBUNTU_IMAGE` | — | Deprecated alias for `GUEST_IMAGE`; still honoured |
-| `SSH_PORT` | 2222..2229 | Host-side port forwarded to guest SSH (per-bundle defaults) |
-| `API_PORT` | 18443..18450 | Host-side port forwarded to guest API |
-| `TIMEOUT` | 600 / 900 | Seconds to wait for VM boot |
+| `SSH_PORT` | 2222..2313 | Host-side port forwarded to guest SSH (per-bundle defaults) |
+| `API_PORT` | 18443..19444 | Host-side port forwarded to guest API |
+| `TIMEOUT` | 600 / 900 / 1200 | Seconds to wait for VM boot |
 | `CI` | `1` | Enables `::group::` / `::error::` annotations in log output |
 | `BITPROTECTOR_QEMU_SSH_KEY` | — | Public key text; set by the setup-qemu action (overrides `~/.ssh` fallback) |
 

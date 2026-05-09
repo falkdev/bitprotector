@@ -170,6 +170,55 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  qemu-scheduled-load:
+    name: QEMU Scheduled Load (nightly, ${{ matrix.guest }})
+    needs: build-artifacts-nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2312
+            api_port: 19443
+            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+          - guest: ubuntu-26.04
+            ssh_port: 2313
+            api_port: 19444
+            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download nightly .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: target/debian/
+
+      - name: QEMU scheduled load test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/scheduled_load.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
   qemu-drive-media-type:
     name: QEMU Drive Media Type (nightly, ${{ matrix.guest }})
     needs: build-artifacts-nightly

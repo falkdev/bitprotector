@@ -153,9 +153,9 @@ All test categories run automatically on GitHub Actions. The pipeline is layered
 
 | Trigger | Layers |
 | --- | --- |
-| Pull request | Lint → unit (+ coverage) → integration → build → QEMU bundles (smoke/failover/uninstall/resilience/upgrade/degraded-boot) |
+| Pull request | Lint → unit (+ coverage) → integration → build → QEMU bundles (smoke/application_workflows/failover/uninstall/resilience/upgrade/degraded-boot/drive_media_type) |
 | Push to `main` | Same as pull request |
-| Nightly cron (03:00 UTC) | Full CI + nightly-only `scale` and `scale_lowmem` bundles |
+| Nightly cron (03:00 UTC) | Full CI + nightly-only `scale`, `scale_lowmem`, and `scheduled_load` bundles |
 | `workflow_dispatch` with `run_heavy_qemu=true` | Full suite from any branch |
 
 To reproduce a CI run locally, see [docs/CI.md](CI.md).
@@ -165,7 +165,7 @@ To run the full pipeline natively (no Docker):
 ```bash
 ./scripts/run-tests.sh fast    # lint + unit + Rust integration
 ./scripts/run-tests.sh smoke   # + .deb build + QEMU smoke
-./scripts/run-tests.sh full    # + failover + uninstall + resilience + upgrade + degraded-boot
+./scripts/run-tests.sh full    # + application_workflows + failover + uninstall + resilience + upgrade + degraded-boot
 ```
 
 To run through `act` (Docker-in-Docker, same YAML as CI):
@@ -444,11 +444,14 @@ The QEMU tests are bundle-based:
   - `tests/installation/qemu_failover_test.sh` -> `tests/installation/bundles/failover.sh`
   - `tests/installation/qemu_uninstall_test.sh` -> `tests/installation/bundles/uninstall.sh`
 - Additional bundles:
+  - `tests/installation/bundles/application_workflows.sh`
   - `tests/installation/bundles/resilience.sh`
   - `tests/installation/bundles/upgrade.sh`
   - `tests/installation/bundles/degraded_boot.sh`
+  - `tests/installation/bundles/drive_media_type.sh`
   - `tests/installation/bundles/scale.sh` (nightly-only)
   - `tests/installation/bundles/scale_lowmem.sh` (nightly-only)
+  - `tests/installation/bundles/scheduled_load.sh` (nightly-only)
 
 ### QEMU guest storage layout
 
@@ -515,9 +518,14 @@ The package is written to `target/debian/bitprotector_*.deb`.
 ./tests/installation/qemu_uninstall_test.sh
 
 # Additional bundles
+./tests/installation/bundles/application_workflows.sh
 ./tests/installation/bundles/resilience.sh
 ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha1_amd64.deb ./tests/installation/bundles/upgrade.sh
 ./tests/installation/bundles/degraded_boot.sh
+./tests/installation/bundles/drive_media_type.sh
+./tests/installation/bundles/scale.sh
+./tests/installation/bundles/scale_lowmem.sh
+./tests/installation/bundles/scheduled_load.sh
 
 # Optional port/timeout overrides (useful when another VM is running)
 SSH_PORT=2224 API_PORT=18445 TIMEOUT=240 ./tests/installation/qemu_test.sh
@@ -539,7 +547,7 @@ The scenario catalog lives under `tests/installation/scenarios/` and is grouped 
 
 ### Smoke test coverage
 
-`tests/installation/scenarios/smoke/` currently contains 13 ordered scenarios:
+`tests/installation/scenarios/smoke/` currently contains 16 scenario files, with 14 sourced by `smoke.sh`:
 
 - package install + service boot under TLS
 - CLI/profile smoke checks
@@ -550,6 +558,7 @@ The scenario catalog lives under `tests/installation/scenarios/` and is grouped 
 - path traversal rejection checks
 - reboot persistence of service + tracked data
 - database backup canonical file, integrity repair, and staged restore
+- scheduled sync + integrity + database-backup scheduler sweep
 
 ### Failover suite coverage
 
@@ -575,11 +584,14 @@ The scenario catalog lives under `tests/installation/scenarios/` and is grouped 
 
 ### Additional bundle coverage
 
+- `tests/installation/scenarios/application-workflows/` (4): scheduled sync/integrity over a moderate dataset, backups during churn, scheduled backup-integrity repair, restart schedule persistence.
+- `tests/installation/bundles/drive_media_type.sh` (uses smoke scenarios 14/15): media-type API/CLI coverage and parallel integrity `active_workers` visibility.
 - `tests/installation/scenarios/resilience/` (8): ENOSPC, readonly mirror, permission errors, symlink loop, SIGTERM/SIGKILL/panic recovery, journal scrape.
 - `tests/installation/scenarios/upgrade/` (2): alpha1 -> current upgrade with live data and reinstall config preservation.
 - `tests/installation/scenarios/degraded-boot/` (2): missing/fake mount points at boot without service startup failure.
 - `tests/installation/scenarios/scale/` (2, nightly-only): 100k file scan and inotify saturation.
 - `tests/installation/scenarios/scale-lowmem/` (1, nightly-only): large dataset processing under 1 GB RAM.
+- `tests/installation/scenarios/scheduled-load/` (2, nightly-only): 10k+ scheduler load timing plus backup/repair-under-load timing.
 
 All bundles fail fast on the first failed scenario and print the failing scenario name plus recent serial-log lines.
 

@@ -122,38 +122,48 @@ pub fn auto_track_folder_files(
     let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
     let mut newly_tracked = Vec::new();
 
-    for entry in fs::read_dir(&folder_full_path)
-        .with_context(|| format!("Cannot read folder: {}", folder_full_path.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
+    // Traverse recursively using an explicit stack so we don't need walkdir.
+    let mut dirs_to_visit: Vec<PathBuf> = vec![folder_full_path];
 
-        let relative_path = path
-            .strip_prefix(drive_pair.active_path())
-            .context("Path outside active drive")?
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))?
-            .to_string();
-
-        if repo
-            .get_tracked_file_by_path(drive_pair.id, &relative_path)
-            .is_ok()
+    while let Some(dir) = dirs_to_visit.pop() {
+        for entry in fs::read_dir(&dir)
+            .with_context(|| format!("Cannot read folder: {}", dir.display()))?
         {
-            continue;
-        }
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs_to_visit.push(path);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
 
-        let file = create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
-        let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
-        let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
-        if drive_pair.standby_accepts_sync() {
-            let _ = sync_queue::create_from_change(repo, file.id)?;
-        } else {
-            repo.update_tracked_file_mirror_status(file.id, false)?;
+            let relative_path = path
+                .strip_prefix(drive_pair.active_path())
+                .context("Path outside active drive")?
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))?
+                .to_string();
+
+            if repo
+                .get_tracked_file_by_path(drive_pair.id, &relative_path)
+                .is_ok()
+            {
+                continue;
+            }
+
+            let file =
+                create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
+            let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
+            let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
+            if drive_pair.standby_accepts_sync() {
+                let _ = sync_queue::create_from_change(repo, file.id)?;
+            } else {
+                repo.update_tracked_file_mirror_status(file.id, false)?;
+            }
+            newly_tracked.push(repo.get_tracked_file(file.id)?);
         }
-        newly_tracked.push(repo.get_tracked_file(file.id)?);
     }
 
     repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
@@ -318,6 +328,45 @@ mod tests {
             newly_tracked.len(),
             0,
             "Already-tracked file should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_auto_track_folder_files_recurses_into_subdirs() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        // Build: photos/flat.jpg, photos/nested/deep.jpg, photos/a/b/c/verydeep.jpg
+        fs::create_dir_all(primary.path().join("photos/nested")).unwrap();
+        fs::create_dir_all(primary.path().join("photos/a/b/c")).unwrap();
+        fs::write(primary.path().join("photos/flat.jpg"), b"flat").unwrap();
+        fs::write(primary.path().join("photos/nested/deep.jpg"), b"deep").unwrap();
+        fs::write(
+            primary.path().join("photos/a/b/c/verydeep.jpg"),
+            b"verydeep",
+        )
+        .unwrap();
+
+        let folder = track_folder(&repo, &pair, "photos", None).unwrap();
+        let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
+        assert_eq!(
+            tracked.len(),
+            3,
+            "Recursive scan must find files in nested subdirectories"
+        );
+
+        let relative_paths: Vec<_> = tracked.iter().map(|f| f.relative_path.as_str()).collect();
+        assert!(
+            relative_paths.contains(&"photos/flat.jpg"),
+            "flat.jpg must be tracked"
+        );
+        assert!(
+            relative_paths.contains(&"photos/nested/deep.jpg"),
+            "nested/deep.jpg must be tracked"
+        );
+        assert!(
+            relative_paths.contains(&"photos/a/b/c/verydeep.jpg"),
+            "a/b/c/verydeep.jpg must be tracked"
         );
     }
 }

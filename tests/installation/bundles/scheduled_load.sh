@@ -1,13 +1,13 @@
 #!/bin/bash
-# tests/installation/bundles/drive_media_type.sh
-# Drive media type bundle: media-type API/CLI flow + active_workers visibility.
+# tests/installation/bundles/scheduled_load.sh
+# Scheduled-load bundle: scheduler + backup load behavior (nightly only).
 
 set -euo pipefail
 
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "${BUNDLE_DIR}/.." && pwd)"
 PROJECT_ROOT="$(cd "${INSTALL_DIR}/../.." && pwd)"
-SCENARIOS_DIR="${INSTALL_DIR}/scenarios/smoke"
+SCENARIOS_DIR="${INSTALL_DIR}/scenarios/scheduled-load"
 LIB_DIR="${INSTALL_DIR}/lib"
 
 # shellcheck source=tests/installation/lib/qemu-helpers.sh
@@ -16,12 +16,17 @@ source "${LIB_DIR}/qemu-helpers.sh"
 source "${LIB_DIR}/scenarios.sh"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
-SSH_PORT="${SSH_PORT:-2264}"
-API_PORT="${API_PORT:-18845}"
-TIMEOUT="${TIMEOUT:-900}"
-export SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-180}"
+SSH_PORT="${SSH_PORT:-2312}"
+API_PORT="${API_PORT:-19443}"
+TIMEOUT="${TIMEOUT:-1200}"
+export SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-6600}"
 
-require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
+export SLOAD_SERVICE_DB="/var/lib/bitprotector/bitprotector.db"
+export SLOAD_PRIMARY_ROOT="/mnt/scale-primary"
+export SLOAD_MIRROR_ROOT="/mnt/scale-mirror"
+export SLOAD_SPARE_ROOT="/mnt/scale-spare"
+
+require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen curl jq
 SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
@@ -37,14 +42,28 @@ if [[ ! -f "${UBUNTU_IMAGE}" ]]; then
     exit 1
 fi
 
-WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-drive-media-type-$$"
+WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-scheduled-load-$$"
 mkdir -p "${WORKDIR}"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+_cleanup() {
+    local _exit=$?
+    if [[ $_exit -ne 0 ]] && [[ -n "${RUNNER_TEMP:-}" ]]; then
+        local _art="${RUNNER_TEMP}/qemu-scheduled-load-artifacts-$$"
+        mkdir -p "${_art}"
+        cp "${WORKDIR}/serial.log" "${_art}/" 2>/dev/null || true
+        cp "${WORKDIR}/qemu.log" "${_art}/" 2>/dev/null || true
+    fi
+    rm -rf "${WORKDIR}"
+    if [[ -n "${QEMU_PID:-}" ]]; then
+        kill "${QEMU_PID}" 2>/dev/null || true
+    fi
+}
+trap _cleanup EXIT
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/vm.qcow2"
-qemu-img create -f qcow2 "${WORKDIR}/primary.qcow2" 5G
-qemu-img create -f qcow2 "${WORKDIR}/mirror.qcow2" 5G
+qemu-img create -f qcow2 "${WORKDIR}/primary.qcow2" 100G
+qemu-img create -f qcow2 "${WORKDIR}/mirror.qcow2" 100G
+qemu-img create -f qcow2 "${WORKDIR}/spare.qcow2" 100G
 qemu-img create -f qcow2 "${WORKDIR}/bpdb.qcow2" 32G
 
 cat > "${WORKDIR}/user-data" <<CLOUDINIT
@@ -59,7 +78,7 @@ users:
       - ${SSH_KEY}
 
 write_files:
-  - path: /usr/local/bin/bitprotector-drive-media-storage.sh
+  - path: /usr/local/bin/bitprotector-scheduled-load-storage.sh
     permissions: '0755'
     content: |
       #!/bin/bash
@@ -72,34 +91,40 @@ write_files:
           [[ -b "\${dev}" ]] && break
           sleep 1
         done
-        [[ -b "\${dev}" ]]
+        if ! [[ -b "\${dev}" ]]; then
+          echo "Disk not present: \${serial} (expected \${dev})" >&2
+          ls -l /dev/disk/by-id >&2 || true
+          exit 1
+        fi
         mkdir -p "\${mount_point}"
         if ! blkid "\${dev}" >/dev/null 2>&1; then
           mkfs.ext4 -F "\${dev}"
         fi
+        local uuid
         uuid=\$(blkid -s UUID -o value "\${dev}")
         grep -q "\${uuid}" /etc/fstab || echo "UUID=\${uuid} \${mount_point} ext4 defaults,nofail 0 2" >> /etc/fstab
       }
-      setup_disk bpprimary /mnt/primary
-      setup_disk bpmirror /mnt/mirror
+      setup_disk bpsloadprimary /mnt/scale-primary
+      setup_disk bpsloadmirror /mnt/scale-mirror
+      setup_disk bpsloadspare /mnt/scale-spare
       setup_disk bpdb /mnt/bitprotector-db
       mount -a
       mkdir -p /mnt/bitprotector-db/db
-      chown -R testuser:testuser /mnt/primary /mnt/mirror /mnt/bitprotector-db
+      chown -R testuser:testuser /mnt/scale-primary /mnt/scale-mirror /mnt/scale-spare /mnt/bitprotector-db
 
 runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
   - apt-get update -q
   - apt-get install -y -q jq openssl curl /mnt/debpkg/bitprotector*.deb
-  - /usr/local/bin/bitprotector-drive-media-storage.sh
+  - /usr/local/bin/bitprotector-scheduled-load-storage.sh
   - mkdir -p /etc/bitprotector/tls
   - openssl req -x509 -nodes -newkey rsa:2048 -days 365 -subj '/CN=localhost' -keyout /etc/bitprotector/tls/key.pem -out /etc/bitprotector/tls/cert.pem
   - chown -R bitprotector:bitprotector /etc/bitprotector/tls
   - chmod 600 /etc/bitprotector/tls/key.pem
   - chmod 644 /etc/bitprotector/tls/cert.pem
   - |
-    cat > /etc/bitprotector/config.toml <<'EOF'
+    cat > /etc/bitprotector/config.toml <<'SLOADCFG'
     [server]
     host = "127.0.0.1"
     port = 8443
@@ -114,18 +139,18 @@ runcmd:
     [checksum]
     hdd_max_parallel = 2
     ssd_max_parallel = 0
-    EOF
+    SLOADCFG
   - id -u testauth >/dev/null 2>&1 || useradd -m testauth
   - echo 'testauth:hunter2' | chpasswd
   - mkdir -p /etc/systemd/system/bitprotector.service.d
   - |
-    cat > /etc/systemd/system/bitprotector.service.d/qemu-drive-media.conf <<'EOF'
+    cat > /etc/systemd/system/bitprotector.service.d/qemu-scheduled-load.conf <<'SLOADSVC'
     [Service]
     User=root
     Group=root
     PrivateTmp=no
     ProtectSystem=no
-    EOF
+    SLOADSVC
   - systemctl daemon-reload
   - systemctl enable bitprotector || true
   - systemctl start bitprotector || true
@@ -133,26 +158,28 @@ runcmd:
 CLOUDINIT
 
 cat > "${WORKDIR}/meta-data" <<'CLOUDINIT'
-instance-id: bitprotector-drive-media-test
-local-hostname: bitprotector-drive-media-test
+instance-id: bitprotector-scheduled-load
+local-hostname: bitprotector-scheduled-load
 CLOUDINIT
 
 cloud-localds "${WORKDIR}/seed.iso" "${WORKDIR}/user-data" "${WORKDIR}/meta-data"
 
-log INFO "Starting QEMU VM (drive_media_type bundle)..."
+log INFO "Starting QEMU VM (scheduled_load bundle)..."
 qemu-system-x86_64 \
     -enable-kvm \
     -cpu host \
     -smp 4 \
-    -m 4096 \
+    -m 8192 \
     -display none \
     -serial file:"${WORKDIR}/serial.log" \
     -drive "file=${WORKDIR}/vm.qcow2,format=qcow2,cache=unsafe" \
     -drive "file=${WORKDIR}/seed.iso,format=raw,readonly=on,if=virtio" \
     -drive "if=none,id=drive-primary,file=${WORKDIR}/primary.qcow2,format=qcow2" \
-    -device "virtio-blk-pci,drive=drive-primary,id=dev-primary,serial=bpprimary" \
+    -device "virtio-blk-pci,drive=drive-primary,id=dev-primary,serial=bpsloadprimary" \
     -drive "if=none,id=drive-mirror,file=${WORKDIR}/mirror.qcow2,format=qcow2" \
-    -device "virtio-blk-pci,drive=drive-mirror,id=dev-mirror,serial=bpmirror" \
+    -device "virtio-blk-pci,drive=drive-mirror,id=dev-mirror,serial=bpsloadmirror" \
+    -drive "if=none,id=drive-spare,file=${WORKDIR}/spare.qcow2,format=qcow2" \
+    -device "virtio-blk-pci,drive=drive-spare,id=dev-spare,serial=bpsloadspare" \
     -drive "if=none,id=drive-bpdb,file=${WORKDIR}/bpdb.qcow2,format=qcow2" \
     -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
@@ -162,28 +189,27 @@ qemu-system-x86_64 \
 QEMU_PID=$!
 
 wait_for_vm "${QEMU_PID}" "${SSH_PORT}" "${TIMEOUT}" "${WORKDIR}"
-wait_for_api "${API_PORT}" 120
+wait_for_api "${API_PORT}" 180
 ssh_vm '
 set -euo pipefail
-if ! findmnt /mnt/bitprotector-db >/dev/null 2>&1; then
-  echo "Expected /mnt/bitprotector-db to be mounted" >&2
-  exit 1
-fi
-touch /mnt/bitprotector-db/db/.write-test
-rm -f /mnt/bitprotector-db/db/.write-test
+for mp in /mnt/scale-primary /mnt/scale-mirror /mnt/scale-spare /mnt/bitprotector-db; do
+  findmnt "$mp" >/dev/null 2>&1 || { echo "Expected mount missing: $mp" >&2; exit 1; }
+  touch "$mp/.write-test"
+  rm -f "$mp/.write-test"
+done
 '
 
 BUNDLE_START_TIME="$(date -Iseconds)"
 
-# shellcheck source=tests/installation/scenarios/smoke/smoke-14-drive-media-type.sh
-source "${SCENARIOS_DIR}/smoke-14-drive-media-type.sh"
-run_scenario "smoke-14-drive-media-type" smoke_14_drive_media_type
+# shellcheck source=tests/installation/scenarios/scheduled-load/scheduled-load-01-moderate-scheduler-load.sh
+source "${SCENARIOS_DIR}/scheduled-load-01-moderate-scheduler-load.sh"
+run_scenario "scheduled-load-01-moderate-scheduler-load" scheduled_load_01_moderate_scheduler_load
 
-# shellcheck source=tests/installation/scenarios/smoke/smoke-15-parallel-integrity-progress.sh
-source "${SCENARIOS_DIR}/smoke-15-parallel-integrity-progress.sh"
-run_scenario "smoke-15-parallel-integrity-progress" smoke_15_parallel_integrity_progress
+# shellcheck source=tests/installation/scenarios/scheduled-load/scheduled-load-02-backup-under-load.sh
+source "${SCENARIOS_DIR}/scheduled-load-02-backup-under-load.sh"
+run_scenario "scheduled-load-02-backup-under-load" scheduled_load_02_backup_under_load
 
 run_scenario "journal-error-scraper" journal_error_scraper
 
 echo ""
-echo "=== All drive-media-type tests passed ==="
+echo "=== All scheduled-load tests passed ==="

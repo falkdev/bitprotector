@@ -299,7 +299,7 @@ Tracking files and folder scans enqueue deduplicated `mirror` work when the stan
 
 ### Full integrity checks are asynchronous and persisted
 
-Batch integrity checking is modeled as persisted runs (`integrity_runs`) with incremental per-file results (`integrity_run_results`). The worker processes tracked files in pages so frontends can poll progress and issue rows without waiting for the full dataset. Only one active run is allowed at a time, and stop behavior is cooperative via `stop_requested`.
+Batch integrity checking is modeled as persisted runs (`integrity_runs`) with incremental per-file results (`integrity_run_results`). The worker processes tracked files in pages so frontends can poll progress and issue rows without waiting for the full dataset. Only one active run is allowed at a time, and stop behavior is cooperative via `stop_requested`. If `run_sync` returns an error partway through processing, the run is marked `failed` and `active_workers` is reset to 0 so the single-active-run guard does not become permanently locked.
 
 ### Direct and folder provenance are mutually exclusive
 
@@ -332,7 +332,9 @@ Even though SQLite serialises writes, using a pool with `r2d2_sqlite` allows rea
 
 ### Background task scheduling via OS threads
 
-Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by `Scheduler::schedule`. Each thread loops: run the task, then sleep for the configured interval (checked in 100 ms increments so the `stop_flag` is responsive). Tasks can also be triggered on demand via `run_task` without any scheduler involvement. Scheduled integrity executions are persisted through the same run-service path as API/CLI starts.
+Background tasks (scheduled sync, scheduled integrity check) run in dedicated OS threads spawned by the `Scheduler`. Each thread loops: **sleep** for the configured interval first (checked in 100 ms increments so the `stop_flag` is responsive), then run the task, then persist `last_run` / `next_run` in the schedule config row. Tasks can also be triggered on demand via `run_task` without any scheduler involvement. Scheduled integrity executions are persisted through the same run-service path as API/CLI starts.
+
+At service startup, `cleanup_stale_integrity_runs()` is called before the scheduler reloads. Any run left in `running` or `stopping` state from a previous (crashed/killed) process is transitioned to `failed`, preventing a permanent single-active-run deadlock on restart.
 
 When a schedule has `max_duration_seconds` configured, the scheduler thread computes a deadline (`Instant::now() + Duration::from_secs(max_duration_seconds)`) before invoking the task. This deadline is passed as `Option<Instant>` through `run_task` → `process_all_pending` / `process_run`. Each function checks the deadline before processing the next item and exits early if time has elapsed, leaving remaining work for the next scheduled run. Setting `max_duration_seconds` to `null` disables the cap.
 

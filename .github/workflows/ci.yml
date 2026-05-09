@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       run_heavy_qemu:
-        description: Also run heavy QEMU layers (failover/uninstall/resilience/upgrade/degraded-boot) for manual runs
+        description: Also run heavy QEMU layers (application-workflows/failover/uninstall/resilience/upgrade/degraded-boot/drive-media-type) for manual runs
         type: boolean
         default: false
   workflow_call:
@@ -323,7 +323,64 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 6 — QEMU resilience (PR + main + nightly + workflow_dispatch)
+  # Layer 6 — QEMU application workflows (PR + main + nightly + workflow_dispatch)
+  # ---------------------------------------------------------------------------
+  qemu-application-workflows:
+    name: QEMU Application Workflows (${{ matrix.guest }})
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - guest: ubuntu-24.04
+            ssh_port: 2302
+            api_port: 19343
+            deb_artifact: bitprotector-deb-ubuntu-24.04
+          - guest: ubuntu-26.04
+            ssh_port: 2303
+            api_port: 19344
+            deb_artifact: bitprotector-deb-ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: target/debian/
+
+      - name: QEMU application workflows test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+        run: ./tests/installation/bundles/application_workflows.sh
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-logs-${{ github.job }}-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 7 — QEMU resilience (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-resilience:
     name: QEMU Resilience (${{ matrix.guest }})
@@ -380,7 +437,7 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 7 — QEMU upgrade (PR + main + nightly + workflow_dispatch)
+  # Layer 8 — QEMU upgrade (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-upgrade:
     name: QEMU Upgrade (${{ matrix.guest }})
@@ -467,7 +524,7 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 8 — QEMU degraded-boot (PR + main + nightly + workflow_dispatch)
+  # Layer 9 — QEMU degraded-boot (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-degraded-boot:
     name: QEMU Degraded Boot (${{ matrix.guest }})
@@ -524,7 +581,7 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 9 — QEMU failover (PR + main + nightly + workflow_dispatch)
+  # Layer 10 — QEMU failover (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-failover:
     name: QEMU Failover (${{ matrix.guest }})
@@ -581,7 +638,7 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 10 — QEMU drive media type (PR + main + nightly + workflow_dispatch)
+  # Layer 11 — QEMU drive media type (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-drive-media-type:
     name: QEMU Drive Media Type (${{ matrix.guest }})
@@ -634,7 +691,7 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Layer 11 — QEMU uninstall (PR + main + nightly + workflow_dispatch)
+  # Layer 12 — QEMU uninstall (PR + main + nightly + workflow_dispatch)
   # ---------------------------------------------------------------------------
   qemu-uninstall:
     name: QEMU Uninstall (${{ matrix.guest }})
