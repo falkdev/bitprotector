@@ -57,13 +57,19 @@ test -f '${backup_b}/bitprotector.db'
 
     local settings_condition
     settings_condition="$(cat <<CHECK
-RESP=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/database/backups/settings')
-LAST=\$(echo "\$RESP" | jq -r '.last_backup_run // empty')
+SETTINGS=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/database/backups/settings')
+LAST=\$(echo "\$SETTINGS" | jq -r '.last_backup_run // empty')
 [[ -n "\$LAST" ]] || exit 1
-[[ \$(date -d "\$LAST" +%s) -ge ${start_epoch} ]]
+[[ \$(date -d "\$LAST" +%s) -ge ${start_epoch} ]] || exit 1
+BACKUPS=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/database/backups')
+printf '%s' "\$BACKUPS" | jq -e --arg a '${backup_a}' --arg b '${backup_b}' '
+  [ .[] | select(.backup_path == \$a or .backup_path == \$b) ] as \$rows
+  | (\$rows | length) == 2
+  and ([ \$rows[] | .last_error == null ] | all)
+' >/dev/null
 CHECK
 )"
-    poll_until "app-02 backup settings updated" 180 "${settings_condition}"
+    poll_until "app-02 backup settings updated with no errors" 180 "${settings_condition}"
 
     local backups_json
     backups_json="$(api_json GET '/database/backups' "${token}")"
