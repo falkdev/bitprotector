@@ -79,6 +79,8 @@ pub fn verify_sqlite_database(path: &Path) -> anyhow::Result<()> {
 
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("Failed to open SQLite database {}", path.display()))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .context("Failed to set busy_timeout on backup verification connection")?;
     let mut stmt = conn.prepare("PRAGMA integrity_check")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     for row in rows {
@@ -105,6 +107,9 @@ fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result
 
     let source = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("Failed to open live database {}", db_path.display()))?;
+    source
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .context("Failed to set busy_timeout on snapshot connection")?;
     source
         .backup(DatabaseName::Main, snapshot_path, None)
         .context("Failed to create SQLite backup snapshot")?;

@@ -82,15 +82,16 @@ done
     local pending_zero_seconds=-1
     sync_start="$(date +%s)"
 
-    local i
+    local i in_progress
     for i in $(seq 1 900); do
         pending="$(api_json GET '/sync/queue?status=pending&page=1&per_page=200' "${token}" | jq -r '.total // 0')"
         completed="$(api_json GET '/sync/queue?status=completed&page=1&per_page=200' "${token}" | jq -r '.total // 0')"
+        in_progress="$(api_json GET '/sync/queue?status=in_progress&page=1&per_page=200' "${token}" | jq -r '.total // 0')"
 
         if [[ "${drain_started_seconds}" -lt 0 && "${pending}" -lt "${initial_pending}" ]]; then
             drain_started_seconds=$(( $(date +%s) - sync_start ))
         fi
-        if [[ "${pending}" -eq 0 ]]; then
+        if [[ "${pending}" -eq 0 && "${in_progress}" -eq 0 ]]; then
             pending_zero_seconds=$(( $(date +%s) - sync_start ))
             break
         fi
