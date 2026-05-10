@@ -99,9 +99,79 @@ cargo test -- --test-threads=1      # Serial (for shared-state tests)
 
 ---
 
+## Running QEMU / Installation Tests
+
+When the task explicitly requests QEMU tests (e.g., a handoff from the fix agent, or the user asks to run `qemu_test.sh`), **execute them — do not refuse or defer**.
+
+### Prerequisites (check and fix before running)
+
+KVM is assumed to be present and accessible. Do not check or modify `/dev/kvm`.
+
+```bash
+# QEMU image present
+./scripts/setup-qemu.sh                 # downloads images if missing
+
+# .deb package (required for QEMU tests)
+cargo build --release
+cargo deb                               # produces target/debian/*.deb
+# OR use run-tests.sh which builds it automatically:
+./scripts/run-tests.sh smoke            # builds .deb + runs QEMU smoke
+```
+
+### Running installation/scenario tests
+
+```bash
+# Single suite, single guest image
+GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_test.sh --suite scheduled_load
+
+# Both supported images
+for img in ubuntu-24.04 ubuntu-26.04; do
+  GUEST_IMAGE=$img ./tests/installation/qemu_test.sh --suite scheduled_load
+done
+
+# Full smoke layer (build .deb + QEMU smoke on both images)
+./scripts/run-tests.sh smoke
+
+# Full suite
+./scripts/run-tests.sh full
+```
+
+Collect full output (stdout + stderr). If the test runner produces a log file, read it after the run.
+
+---
+
+## Fix Proposal (when tests fail)
+
+When one or more tests fail, produce a structured fix proposal in this exact format so the user can copy it directly to the Code Fixer agent:
+
+````
+---HANDOFF TO CODE FIXER AGENT---
+
+**Failing tests:**
+<list each failing test name / suite / script with the exact error or assertion message>
+
+**Root cause analysis:**
+<brief explanation of what is going wrong and why>
+
+**Files to change:**
+- <relative/path/to/file> — <what to change and why>
+
+**Suggested fix (patch-level detail):**
+<For each file: show the exact lines to replace (before/after) or describe the change precisely enough that the fixer can implement it without guessing>
+
+**Verification:**
+After applying the fix, re-run:
+<exact commands to confirm the fix>
+---END HANDOFF---
+````
+
+Include this block at the end of your response whenever any test fails.
+
+---
+
 ## Constraints
 
-- DO NOT suggest running `full` or `smoke` layers for typical code fixes — `fast` or targeted tests are sufficient and much faster.
+- DO NOT refuse to run QEMU or smoke tests when they are explicitly requested or required by a handoff.
+- For typical code-only fixes, prefer `fast` or targeted tests (faster feedback). For packaging/installation changes, `smoke` or QEMU tests are mandatory.
 - DO NOT skip lint before declaring tests pass: `cargo fmt --check` and `cargo clippy -- -D warnings` are gating in CI.
 - ALWAYS check whether the changed module has inline `#[cfg(test)]` blocks in addition to the separate integration test files.
-- QEMU tests require `/dev/kvm` readable: `sudo chmod 666 /dev/kvm`
