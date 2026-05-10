@@ -23,7 +23,7 @@ This document explains the GitHub Actions pipeline, how each layer maps to jobs,
 
 The pipeline is **layered and fail-fast**. Cheaper, faster tests gate the expensive QEMU layers, and independent jobs fan out in parallel where possible (for example, coverage runs alongside Rust integration after unit tests).
 
-```
+```text
 lint → unit → (coverage, non-gating) → rust-integration-fast → rust-integration-heavy
                                                            ↓
                                                      build-artifacts
@@ -41,7 +41,7 @@ All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs u
 ## Trigger Matrix
 
 | Event | Layers run |
-|---|---|
+| --- | --- |
 | `pull_request` | 0 – 13 (full CI workflow in `ci.yml`) |
 | `push` to `main` | 0 – 13 |
 | `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 13 |
@@ -55,7 +55,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 ## Layer Reference
 
 | # | Job name | Content | Runner | Expected time |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 0 | `lint` | `cargo fmt --check`, `cargo clippy -D warnings`, `npm run lint`, prettier check | ubuntu-24.04 | < 2 min |
 | 1 | `unit` | `cargo test --lib` + `npm test` (vitest/jsdom) | ubuntu-24.04 | 2-4 min |
 | 2 | `coverage` | `cargo llvm-cov` + `npm run test:coverage` artifact upload (non-gating) | ubuntu-24.04 | 4-8 min |
@@ -164,11 +164,13 @@ This script calls cargo/npm/bash directly — no containers. The layer definitio
 1. **Find the failing job** in the Actions tab. Note the job name (e.g., `qemu-smoke (ubuntu-26.04)`).
 
 2. **Run locally via act**:
+
    ```bash
    ./scripts/ci-local.sh smoke --job qemu-smoke --matrix guest:ubuntu-26.04
    ```
 
 3. **Run natively** (faster iteration):
+
    ```bash
    GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh
    GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh
@@ -212,7 +214,7 @@ Each Ubuntu image (~650 MB) is cached under `~/images/` via `actions/cache@v4` w
 These are understood by the QEMU test scripts and are passed via `env:` blocks in the workflow:
 
 | Variable | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `GUEST_IMAGE` | `ubuntu-24.04` | Guest OS label or absolute image path |
 | `UBUNTU_IMAGE` | — | Deprecated alias for `GUEST_IMAGE`; still honoured |
 | `SSH_PORT` | 2222..2313 | Host-side port forwarded to guest SSH (per-bundle defaults) |
