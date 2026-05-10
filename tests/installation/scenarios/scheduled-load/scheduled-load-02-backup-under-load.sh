@@ -98,13 +98,21 @@ CHECK
     verify_sqlite "${backup_b}/bitprotector.db"
     ssh_vm "test -f '${backup_b}/bitprotector.db.blake3'"
 
+    cleanup_schedules "${token}" "${sync_schedule_id}" "${integrity_schedule_id}"
+    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":false,"integrity_enabled":false}' >/dev/null
+
+    local drain_condition
+    drain_condition="$(cat <<CHECK
+RESP=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/sync/queue?status=in_progress&page=1&per_page=1')
+test "\$(echo "\$RESP" | jq -r '.total // 0')" -eq 0
+CHECK
+)"
+    poll_until "scheduled-load-02 sync queue drained" 60 "${drain_condition}"
+
     local in_progress_total
-    in_progress_total="$(api_json GET '/sync/queue?status=in_progress&page=1&per_page=200' "${token}" | jq -r '.total // 0')"
+    in_progress_total="$(api_json GET '/sync/queue?status=in_progress&page=1&per_page=1' "${token}" | jq -r '.total // 0')"
     [[ "${in_progress_total}" -eq 0 ]] || {
         echo "scheduled-load-02 has stuck in_progress rows: ${in_progress_total}" >&2
         exit 1
     }
-
-    cleanup_schedules "${token}" "${sync_schedule_id}" "${integrity_schedule_id}"
-    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":false,"integrity_enabled":false}' >/dev/null
 }
