@@ -23,6 +23,7 @@
 #   #16  smoke-11-path-traversal-rejected
 #   #10  smoke-12-reboot-persistence
 #   #17  smoke-13-database-backup-repair-restore
+#   #30  smoke-16-scheduled-sync-integrity-db-backup
 #
 # Prerequisites:
 #   - qemu-system-x86_64, qemu-img, cloud-localds, ssh, ssh-keygen
@@ -55,7 +56,7 @@ SSH_PORT="${SSH_PORT:-2222}"
 API_PORT="${API_PORT:-18443}"
 TIMEOUT="${TIMEOUT:-600}"
 
-require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
+require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen curl jq
 SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
@@ -127,6 +128,8 @@ runcmd:
     [Service]
     User=root
     Group=root
+    PrivateTmp=no
+    ProtectSystem=no
     EOF
   - systemctl daemon-reload
   - systemctl enable bitprotector || true
@@ -225,6 +228,10 @@ run_scenario "smoke-12-reboot-persistence" smoke_12_reboot_persistence
 # shellcheck source=tests/installation/scenarios/smoke/smoke-13-database-backup-repair-restore.sh
 source "${SCENARIOS_DIR}/smoke-13-database-backup-repair-restore.sh"
 run_scenario "smoke-13-database-backup-repair-restore" smoke_13_database_backup_repair_restore
+
+# shellcheck source=tests/installation/scenarios/smoke/smoke-16-scheduled-sync-integrity-db-backup.sh
+source "${SCENARIOS_DIR}/smoke-16-scheduled-sync-integrity-db-backup.sh"
+run_scenario "smoke-16-scheduled-sync-integrity-db-backup" smoke_16_scheduled_sync_integrity_db_backup
 
 run_scenario "journal-error-scraper" journal_error_scraper
 

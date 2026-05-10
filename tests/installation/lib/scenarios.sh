@@ -71,6 +71,165 @@ wait_for_sync_queue_empty() {
     return 1
 }
 
+# Return the local base URL for the guest API forwarded port.
+api_base_url() {
+    : "${API_PORT:?API_PORT must be set by the bundle}"
+    printf 'https://localhost:%s/api/v1' "${API_PORT}"
+}
+
+# Log in through the API and print a bearer token to stdout.
+api_login() {
+    local login_url raw token attempt
+    login_url="https://localhost:8443/api/v1/auth/login"
+
+    for attempt in $(seq 1 60); do
+        raw="$(ssh_vm "curl -skS --connect-timeout 2 --max-time 8 -X POST '${login_url}' \
+            -H 'Content-Type: application/json' \
+            --data '{\"username\":\"testauth\",\"password\":\"hunter2\"}'" || true)"
+        token="$(printf '%s' "${raw}" | jq -r '.token // empty' 2>/dev/null || true)"
+        if [[ -n "${token}" && "${token}" != "null" ]]; then
+            printf '%s\n' "${token}"
+            return 0
+        fi
+        sleep 1
+    done
+
+    log ERROR "Failed API login at ${login_url}"
+    echo "Login response body:" >&2
+    echo "${raw}" >&2
+    echo "bitprotector service status:" >&2
+    ssh_vm "sudo systemctl --no-pager --full status bitprotector || true" >&2 || true
+    echo "Recent bitprotector journal:" >&2
+    ssh_vm "sudo journalctl -u bitprotector -n 120 --no-pager || true" >&2 || true
+    return 1
+}
+
+# Execute an API request and print the response body on success.
+# Usage: api_json METHOD PATH TOKEN [JSON_BODY]
+api_json() {
+    local method="$1"
+    local path="$2"
+    local token="$3"
+    local json_body="${4:-}"
+    local guest_path status response raw json_body_b64
+
+    if [[ "${path}" == /api/v1/* ]]; then
+        guest_path="${path}"
+    elif [[ "${path}" == /* ]]; then
+        guest_path="/api/v1${path}"
+    else
+        guest_path="/api/v1/${path}"
+    fi
+
+    local attempt
+    if [[ -n "${json_body}" ]]; then
+        json_body_b64="$(printf '%s' "${json_body}" | base64 -w0)"
+    else
+        json_body_b64=""
+    fi
+
+    for attempt in $(seq 1 10); do
+        if [[ -n "${json_body_b64}" ]]; then
+            raw="$(ssh_vm "set -euo pipefail
+printf '%s' '${json_body_b64}' | base64 -d \
+  | curl -skS --connect-timeout 2 --max-time 8 -w '\nHTTP_STATUS:%{http_code}\n' \
+      -X '${method}' \
+      'https://localhost:8443${guest_path}' \
+      -H 'Authorization: Bearer ${token}' \
+      -H 'Content-Type: application/json' \
+      --data-binary @-" || true)"
+        else
+            raw="$(ssh_vm "curl -skS --connect-timeout 2 --max-time 8 -w '\nHTTP_STATUS:%{http_code}\n' \
+                -X '${method}' \
+                'https://localhost:8443${guest_path}' \
+                -H 'Authorization: Bearer ${token}'" || true)"
+        fi
+        status="$(printf '%s\n' "${raw}" | sed -n 's/^HTTP_STATUS://p' | tail -1)"
+        response="$(printf '%s\n' "${raw}" | sed '/^HTTP_STATUS:/d')"
+
+        if [[ "${status}" =~ ^[0-9]{3}$ ]] && (( status >= 200 && status < 300 )); then
+            printf '%s\n' "${response}"
+            return 0
+        fi
+
+        # Retry transient connectivity errors while service/API is settling.
+        if [[ -z "${status}" || "${status}" == "000" ]]; then
+            sleep 1
+            continue
+        fi
+
+        break
+    done
+
+    if [[ ! "${status}" =~ ^[0-9]{3}$ ]]; then
+        log ERROR "Invalid HTTP status from ${method} ${guest_path}: '${status}'"
+        echo "${response}" >&2
+        return 1
+    fi
+
+    log ERROR "API call failed: ${method} ${path} (status=${status})"
+    echo "Response body:" >&2
+    echo "${response}" >&2
+    return 1
+}
+
+# Poll a guest-side shell condition once per second until it succeeds.
+# Usage: poll_until "description" TIMEOUT_SECONDS "guest shell condition"
+poll_until() {
+    local description="$1"
+    local timeout_secs="$2"
+    local guest_condition="$3"
+    local i
+
+    for i in $(seq 1 "${timeout_secs}"); do
+        if ssh_vm "bash -lc $(printf '%q' "${guest_condition}")" >/dev/null 2>&1; then
+            log INFO "poll_until ok: ${description} (${i}s)"
+            return 0
+        fi
+        sleep 1
+    done
+
+    log ERROR "poll_until timed out after ${timeout_secs}s: ${description}"
+    echo "Condition: ${guest_condition}" >&2
+    ssh_vm "bash -lc $(printf '%q' "${guest_condition}")" || true
+    ssh_vm "sudo systemctl --no-pager --full status bitprotector || true" || true
+    ssh_vm "sudo journalctl -u bitprotector -n 120 --no-pager || true" || true
+    return 1
+}
+
+# Verify a SQLite database file via PRAGMA integrity_check.
+# Usage: verify_sqlite /path/to/bitprotector.db
+verify_sqlite() {
+    local db_path="$1"
+    ssh_vm "sudo python3 - $(printf '%q' "${db_path}") <<'PY'
+import sqlite3
+import sys
+
+path = sys.argv[1]
+conn = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+row = conn.execute('PRAGMA integrity_check').fetchone()
+conn.close()
+if not row or row[0].lower() != 'ok':
+    raise SystemExit(f'integrity_check failed for {path}: {row}')
+print('sqlite integrity ok:', path)
+PY"
+}
+
+# Best-effort schedule cleanup helper.
+# Usage: cleanup_schedules TOKEN [id...]
+cleanup_schedules() {
+    local token="$1"
+    shift || true
+    local schedule_id
+
+    for schedule_id in "$@"; do
+        [[ -n "${schedule_id}" ]] || continue
+        if ! api_json DELETE "/scheduler/schedules/${schedule_id}" "${token}" >/dev/null 2>&1; then
+            log WARN "Failed to delete schedule ${schedule_id} during cleanup"
+        fi
+    done
+}
+
 # Wait for a reboot cycle to complete and SSH to become available again.
 # Usage: wait_for_reboot_and_ssh [TIMEOUT_SECS]
 wait_for_reboot_and_ssh() {
@@ -145,11 +304,16 @@ run_scenario() {
     local name="$1"
     local fn="$2"
     log GROUP "Scenario: ${name}"
-    if "${fn}"; then
+    # Call outside an 'if' context so that set -e propagates into the function.
+    # 'if fn; then' suppresses set -e inside fn, causing false-positive PASS results.
+    set +e
+    "${fn}"
+    local exit_code=$?
+    set -e
+    if [[ ${exit_code} -eq 0 ]]; then
         echo "PASS: ${name}"
         log ENDGROUP
     else
-        local exit_code=$?
         log ENDGROUP
         echo "FAIL: ${name}"
         log ERROR "Scenario ${name} failed with exit code ${exit_code}"

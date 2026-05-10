@@ -165,6 +165,7 @@ impl Scheduler {
         let cron_expr = config.cron_expr.clone();
         let interval_secs = config.interval_seconds;
         let max_duration_secs = config.max_duration_seconds;
+        let config_id = config.id;
 
         let handle = thread::spawn(move || loop {
             // ── Determine how long to sleep until next run ──────────────────
@@ -197,6 +198,15 @@ impl Scheduler {
 
             if let Err(e) = run_task(&task_type, &repo, stop_by, &checksum_cfg) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
+            }
+
+            // ── Persist last_run / next_run after each execution ────────────
+            if let Err(e) = repo.update_schedule_last_run(config_id) {
+                tracing::warn!(
+                    "Failed to update last_run for schedule {}: {}",
+                    config_id,
+                    e
+                );
             }
         });
 

@@ -10,7 +10,7 @@
 #   lint   — cargo fmt + clippy, npm lint + prettier (Layer 0)
 #   fast   — lint + unit tests + integration tests excluding scaling_100k (Layers 0-3)
 #   smoke  — fast + build .deb + QEMU smoke on ubuntu-24.04 and ubuntu-26.04 (Layers 0-5)
-#   full   — smoke + QEMU failover + uninstall + resilience + upgrade + degraded-boot (Layers 0-10)
+#   full   — smoke + application-workflows + failover + uninstall + resilience + upgrade + degraded-boot (Layers 0-11)
 
 set -euo pipefail
 
@@ -128,8 +128,20 @@ run_qemu_smoke() {
     echo "qemu-smoke: OK"
 }
 
+run_qemu_application_workflows() {
+    echo "--- Layer 6: QEMU application workflows (ubuntu-24.04 + ubuntu-26.04) ---"
+    cd "${PROJECT_ROOT}"
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
+    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh
+    else
+        echo "WARN: 26.04 image not found - skipping 26.04 application workflows"
+    fi
+    echo "qemu-application-workflows: OK"
+}
+
 run_qemu_failover() {
-    echo "--- Layer 6: QEMU failover (ubuntu-24.04 + ubuntu-26.04) ---"
+    echo "--- Layer 7: QEMU failover (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_failover_test.sh
     if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
@@ -141,7 +153,7 @@ run_qemu_failover() {
 }
 
 run_qemu_uninstall() {
-    echo "--- Layer 7: QEMU uninstall (ubuntu-24.04 + ubuntu-26.04) ---"
+    echo "--- Layer 8: QEMU uninstall (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_uninstall_test.sh
     if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
@@ -153,7 +165,7 @@ run_qemu_uninstall() {
 }
 
 run_qemu_resilience() {
-    echo "--- Layer 8: QEMU resilience (ubuntu-24.04 + ubuntu-26.04) ---"
+    echo "--- Layer 9: QEMU resilience (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/resilience.sh
     if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
@@ -165,7 +177,7 @@ run_qemu_resilience() {
 }
 
 run_qemu_upgrade() {
-    echo "--- Layer 9: QEMU upgrade (ubuntu-24.04 + ubuntu-26.04) ---"
+    echo "--- Layer 10: QEMU upgrade (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     if [[ -z "${ALPHA1_DEB:-}" ]]; then
         echo "WARN: ALPHA1_DEB is not set; skipping local upgrade bundle"
@@ -181,7 +193,7 @@ run_qemu_upgrade() {
 }
 
 run_qemu_degraded_boot() {
-    echo "--- Layer 10: QEMU degraded-boot (ubuntu-24.04 + ubuntu-26.04) ---"
+    echo "--- Layer 11: QEMU degraded-boot (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/degraded_boot.sh
     if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
@@ -221,6 +233,7 @@ case "${LAYER}" in
         run_rust_integration_heavy
         run_build_artifacts
         run_qemu_smoke
+        run_qemu_application_workflows
         run_qemu_failover
         run_qemu_uninstall
         run_qemu_resilience
