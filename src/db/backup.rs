@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::thread;
 
 const BACKUP_FILENAME: &str = "bitprotector.db";
 const CHECKSUM_FILENAME: &str = "bitprotector.db.blake3";
@@ -105,11 +106,17 @@ fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result
         bail!("Live database does not exist: {}", db_path.display());
     }
 
-    let source = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    // Open read-write so we can issue a WAL checkpoint before snapshotting.
+    // The checkpoint flushes WAL pages into the main file, making the WAL
+    // smaller when the backup reader opens and reducing SQLITE_BUSY_SNAPSHOT
+    // risk for concurrent writers during the backup.
+    let source = Connection::open(db_path)
         .with_context(|| format!("Failed to open live database {}", db_path.display()))?;
     source
-        .busy_timeout(std::time::Duration::from_secs(5))
+        .busy_timeout(std::time::Duration::from_secs(30))
         .context("Failed to set busy_timeout on snapshot connection")?;
+    // Best-effort: errors here are non-fatal (backup proceeds regardless).
+    let _ = source.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
     source
         .backup(DatabaseName::Main, snapshot_path, None)
         .context("Failed to create SQLite backup snapshot")?;
@@ -272,8 +279,44 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
                     .and_then(|_| checksum_file(&item.path))
                 {
                     Ok(checksum) => {
-                        repo.update_db_backup_integrity_status(item.config.id, "repaired", None)
-                            .ok();
+                        // Retry the status write: a transient SQLITE_BUSY_SNAPSHOT on this
+                        // call would otherwise silently drop the "repaired" record, causing
+                        // the repair to be invisible to the API and tests.
+                        let mut write_ok = false;
+                        for attempt in 0..6u32 {
+                            match repo.update_db_backup_integrity_status(
+                                item.config.id,
+                                "repaired",
+                                None,
+                            ) {
+                                Ok(_) => {
+                                    write_ok = true;
+                                    break;
+                                }
+                                Err(ref e) if attempt < 5 => {
+                                    tracing::warn!(
+                                        "Retrying repaired-status write (attempt {}): {}",
+                                        attempt + 1,
+                                        e
+                                    );
+                                    thread::sleep(std::time::Duration::from_millis(
+                                        500 * (attempt as u64 + 1),
+                                    ));
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to persist repaired status after 6 attempts: {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        if !write_ok {
+                            bail!(
+                                "Could not persist repaired status for backup #{}",
+                                item.config.id
+                            );
+                        }
                         results.push(BackupIntegrityResult {
                             backup_config_id: item.config.id,
                             backup_path: item.path.to_string_lossy().to_string(),

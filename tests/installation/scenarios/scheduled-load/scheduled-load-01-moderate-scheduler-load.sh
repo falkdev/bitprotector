@@ -150,5 +150,16 @@ CHECK
 
     echo "timing: scheduled-load-01 integrity_processed_files=${processed_files}"
 
+    # Drain any remaining sync-queue rows before stopping schedules so that
+    # scenario-02 does not inherit leftover pending/in_progress entries.
+    poll_until "scheduled-load-01 sync queue drained" 120 "
+RESP=\$(curl -sk -H 'Authorization: Bearer ${token}' \
+  'https://localhost:8443/api/v1/sync/queue?status=pending&page=1&per_page=1')
+RESP2=\$(curl -sk -H 'Authorization: Bearer ${token}' \
+  'https://localhost:8443/api/v1/sync/queue?status=in_progress&page=1&per_page=1')
+test \"\$(echo \"\$RESP\" | jq -r '.total // 0')\" -eq 0 &&
+test \"\$(echo \"\$RESP2\" | jq -r '.total // 0')\" -eq 0
+"
+
     cleanup_schedules "${token}" "${sync_schedule_id}" "${integrity_schedule_id}"
 }

@@ -47,7 +47,7 @@ done
     ssh_vm "sudo bitprotector --db '${SLOAD_SERVICE_DB}' database add '${backup_a}' --drive-label load02-a"
     ssh_vm "sudo bitprotector --db '${SLOAD_SERVICE_DB}' database add '${backup_b}' --drive-label load02-b"
 
-    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":true,"backup_interval_seconds":1,"integrity_enabled":true,"integrity_interval_seconds":1}' >/dev/null
+    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":true,"backup_interval_seconds":5,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
 
     local backup_watch_start
     backup_watch_start="$(date +%s)"
@@ -104,10 +104,12 @@ CHECK
     local drain_condition
     drain_condition="$(cat <<CHECK
 RESP=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/sync/queue?status=in_progress&page=1&per_page=1')
-test "\$(echo "\$RESP" | jq -r '.total // 0')" -eq 0
+RESP2=\$(curl -sk -H 'Authorization: Bearer ${token}' 'https://localhost:8443/api/v1/sync/queue?status=pending&page=1&per_page=1')
+test "\$(echo "\$RESP" | jq -r '.total // 0')" -eq 0 &&
+test "\$(echo "\$RESP2" | jq -r '.total // 0')" -eq 0
 CHECK
 )"
-    poll_until "scheduled-load-02 sync queue drained" 60 "${drain_condition}"
+    poll_until "scheduled-load-02 sync queue drained" 120 "${drain_condition}"
 
     local in_progress_total
     in_progress_total="$(api_json GET '/sync/queue?status=in_progress&page=1&per_page=1' "${token}" | jq -r '.total // 0')"

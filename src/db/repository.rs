@@ -8,7 +8,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
-            "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
+            "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
         )?;
         Ok(())
     });
@@ -23,7 +23,7 @@ pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
 pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
-            "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
+            "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
         )?;
         Ok(())
     });
