@@ -1,7 +1,7 @@
 #!/bin/bash
 # scripts/run-tests.sh
 # Native (no Docker) test runner — mirrors the CI layer structure.
-# Requires: Rust toolchain, Node 20.19+, and (for smoke/full) QEMU prerequisites.
+# Requires: Rust toolchain, Node 24+, and (for smoke/full) QEMU prerequisites.
 #
 # Usage:
 #   ./scripts/run-tests.sh <layer>
@@ -10,7 +10,7 @@
 #   lint   — cargo fmt + clippy, npm lint + prettier (Layer 0)
 #   fast   — lint + unit tests + integration tests excluding scaling_100k (Layers 0-3)
 #   smoke  — fast + build .deb + QEMU smoke on ubuntu-24.04 and ubuntu-26.04 (Layers 0-5)
-#   full   — smoke + application-workflows + failover + uninstall + resilience + upgrade + degraded-boot (Layers 0-11)
+#   full   — smoke + application-workflows + failover + uninstall + resilience + upgrade + degraded-boot + drive-media-type (Layers 0-12)
 
 set -euo pipefail
 
@@ -82,6 +82,7 @@ run_rust_integration_fast() {
     cargo test --test core_mirror
     cargo test --test core_change_detection
     cargo test --test core_scheduler
+    cargo test --test core_checksum_strategy
     echo "rust-integration-fast: OK"
 }
 
@@ -204,6 +205,18 @@ run_qemu_degraded_boot() {
     echo "qemu-degraded-boot: OK"
 }
 
+run_qemu_drive_media_type() {
+    echo "--- Layer 12: QEMU drive media type (ubuntu-24.04 + ubuntu-26.04) ---"
+    cd "${PROJECT_ROOT}"
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/drive_media_type.sh
+    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/drive_media_type.sh
+    else
+        echo "WARN: 26.04 image not found — skipping 26.04 drive-media-type"
+    fi
+    echo "qemu-drive-media-type: OK"
+}
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -239,6 +252,7 @@ case "${LAYER}" in
         run_qemu_resilience
         run_qemu_upgrade
         run_qemu_degraded_boot
+        run_qemu_drive_media_type
         ;;
     *)
         echo "Unknown layer: ${LAYER}"

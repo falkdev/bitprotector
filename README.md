@@ -117,8 +117,9 @@ sudo cp -r frontend/dist/* /var/lib/bitprotector/frontend/
 ## Quick Start
 
 ```bash
-# 1. Register a drive pair
-bitprotector drives add mybackup /mnt/primary /mnt/mirror
+# 1. Register a drive pair (specify media type to tune checksum parallelism)
+bitprotector drives add mybackup /mnt/primary /mnt/mirror \
+  --primary-media-type hdd --secondary-media-type hdd
 
 # 2. Track a file (queues mirror work by default)
 bitprotector files track <drive-pair-id> documents/report.pdf
@@ -127,8 +128,15 @@ bitprotector files track <drive-pair-id> documents/report.pdf
 bitprotector folders add <drive-pair-id> documents
 bitprotector folders scan <folder-id>
 
+# Optional: watch a folder for live filesystem changes (runs until Ctrl+C)
+bitprotector folders watch <folder-id>
+
 # 4. Process queued mirror/sync work
 bitprotector sync process
+
+# Optional: pause or resume automatic queue processing
+bitprotector sync pause
+bitprotector sync resume
 
 # 5. Optional: mirror immediately without waiting for queue processing
 bitprotector files mirror <file-id>
@@ -145,6 +153,9 @@ bitprotector status
 # 9. Assign a virtual path (creates a symlink exactly at this absolute path)
 bitprotector virtual-paths set <file-id> /docs/report.pdf
 
+# Recreate all virtual path symlinks (e.g. after manual cleanup)
+bitprotector virtual-paths refresh
+
 # 10. Planned primary replacement workflow
 bitprotector drives replace mark <drive-pair-id> --role primary
 # (optional) cancel if you change your mind:
@@ -152,6 +163,16 @@ bitprotector drives replace cancel <drive-pair-id> --role primary
 bitprotector drives replace confirm <drive-pair-id> --role primary
 bitprotector drives replace assign <drive-pair-id> --role primary /mnt/new-primary
 bitprotector sync process
+
+# 11. Database backup destinations
+bitprotector database add /mnt/mirror/bitprotector.db --drive-label "mirror-drive"
+bitprotector database run               # back up now to all enabled destinations
+bitprotector database check-integrity   # verify backup copies, repair where possible
+
+# 12. Scheduler (cron expression or fixed interval; optional max run duration)
+bitprotector scheduler add --task-type sync --interval 3600
+bitprotector scheduler add --task-type integrity_check --cron "0 2 * * *" --max-duration 3600
+bitprotector scheduler list
 ```
 
 During failover, virtual path symlinks automatically follow the pair's current `active_role`. Planned replacements use `mark` then `confirm` so you can quiesce external I/O before switching over.
@@ -172,14 +193,29 @@ The service reads `/etc/bitprotector/config.toml` at startup. CLI flags override
 ```toml
 # /etc/bitprotector/config.toml
 [server]
-host       = "0.0.0.0"
-port       = 8443
-jwt_secret = "replace-with-a-random-64-char-string"  # MUST be changed
-tls_cert   = "/etc/bitprotector/tls/cert.pem"
-tls_key    = "/etc/bitprotector/tls/key.pem"
+host           = "0.0.0.0"
+port           = 8443
+jwt_secret     = "replace-with-a-random-64-char-string"  # MUST be changed
+tls_cert       = "/etc/bitprotector/tls/cert.pem"
+tls_key        = "/etc/bitprotector/tls/key.pem"
+rate_limit_rps = 100
 
 [database]
 path = "/var/lib/bitprotector/bitprotector.db"
+
+[logging]
+level = "info"
+file  = "/var/log/bitprotector/bitprotector.log"
+
+[scheduler]
+enabled                    = true
+sync_interval_seconds      = 3600
+integrity_interval_seconds = 86400
+
+[checksum]
+# Lower parallelism for HDDs; set ssd_max_parallel = 0 to auto-detect CPU count
+hdd_max_parallel = 2
+ssd_max_parallel = 0
 ```
 
 CLI flags can override any value at runtime, and `--config` selects a different config file:
@@ -210,14 +246,17 @@ The REST API remains available at `https://localhost:8443/api/v1`.
 
 In the web UI:
 
+- **Dashboard** (`/`) shows a live summary of drive pair health, mirror status, and recent event log entries
 - `/files` is the unified **Tracking Workspace** for both tracked files and tracked folders (`/folders` redirects to `/files`)
 - tracked file and tracked folder forms use a filesystem browser dialog powered by the server
 - drive pair and replacement-drive forms can also fill directory paths from the same browser
 - tracked file/folder submissions are validated against the selected drive pair's active root before they are stored
 - tracking and folder scans queue mirror work by default; use explicit mirror actions or sync processing for immediate copies
+- **Sync Queue** page (`/sync`) lists pending, in-progress, and completed queue items and exposes pause/resume controls
 - Integrity page starts/stops async runs, shows a running progress banner, and only lists issue rows (`needs_attention=true`)
 - the latest run is loaded from DB automatically on page open; results are fetched in pages for responsiveness
 - the Integrity page intro shows `Last integrity check` as a date/time timestamp (instead of a run ID)
+- **Database Backups** page (`/database`) manages backup destinations, triggers manual backups, and verifies backup integrity
 - user/logout controls are pinned to the bottom of the left sidebar (top header chrome removed across authenticated pages)
 
 For a CLI-only workflow without the daemon, pass `--db <path>` to use a custom database file:
@@ -235,7 +274,7 @@ bitprotector --db /tmp/test.db drives list
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module breakdown, and database schema |
 | [docs/API.md](docs/API.md) | Full REST API reference with request/response examples |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every configuration key explained |
-| [docs/TESTING.md](docs/TESTING.md) | How to run tests, test categories, QEMU suites, and the dedicated guest DB-disk layout used by installation scenarios |
+| [docs/testing/README.md](docs/testing/README.md) | How to run tests, test categories, QEMU suites, and the dedicated guest DB-disk layout used by installation scenarios |
 | [docs/CI.md](docs/CI.md) | CI pipeline layers, local debugging with `act`, QEMU guest storage model, and nightly failure reproduction |
 
 ---
