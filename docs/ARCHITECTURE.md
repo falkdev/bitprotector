@@ -70,6 +70,7 @@ Business logic and algorithms. Has no knowledge of HTTP or CLI argument parsing.
 | `tracker.rs` | Track or untrack individual files and folders. On track/scan: compute initial checksum, store metadata, enqueue mirror work by default, and operate on the pair's current active side rather than assuming primary is always live. |
 | `scheduler.rs` | Manage background task execution. Provides `run_task` for on-demand execution and a `Scheduler` struct that spawns OS threads running tasks at fixed intervals using `thread::sleep`. When a schedule has `max_duration_seconds` set, the thread computes an `Instant` deadline before calling `run_task`, which passes it through to the underlying `process_all_pending` or `start_run_async` call. Integrity task execution persists run/result records via `integrity_runs.rs`. |
 | `change_detection.rs` | Watch the file system for modifications using the `notify` crate. When a tracked file changes, updates the checksum from the active side and enqueues a re-mirror only if the standby slot can currently accept sync. |
+| `system.rs` | System introspection helpers. Reads `/proc/meminfo` for total RAM, derives `mmap_threshold_bytes()` (50% of RAM, upper bound for mmap-based hashing on SSD pairs), and `default_ssd_parallel()` (half logical CPUs, minimum 2) used by the checksum parallelism configuration. |
 
 ### src/api/
 
@@ -127,6 +128,8 @@ CREATE TABLE drive_pairs (
     primary_state  TEXT    NOT NULL DEFAULT 'active',
     secondary_state TEXT   NOT NULL DEFAULT 'active',
     active_role    TEXT    NOT NULL DEFAULT 'primary',
+    primary_media_type   TEXT    NOT NULL DEFAULT 'hdd',
+    secondary_media_type TEXT    NOT NULL DEFAULT 'hdd',
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -159,6 +162,7 @@ CREATE TABLE integrity_runs (
     processed_files    INTEGER NOT NULL DEFAULT 0,
     attention_files    INTEGER NOT NULL DEFAULT 0,
     recovered_files    INTEGER NOT NULL DEFAULT 0,
+    active_workers     INTEGER NOT NULL DEFAULT 0,
     stop_requested     INTEGER NOT NULL DEFAULT 0,
     started_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     ended_at           TEXT,
@@ -184,6 +188,7 @@ CREATE TABLE tracked_folders (
     drive_pair_id        INTEGER NOT NULL REFERENCES drive_pairs(id),
     folder_path          TEXT    NOT NULL,
     virtual_path         TEXT,
+    last_scanned_at      TEXT,
     created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(drive_pair_id, folder_path)
 );
@@ -202,6 +207,9 @@ CREATE INDEX idx_integrity_run_results_issue
 
 CREATE INDEX idx_tracked_folders_drive_folder_path
     ON tracked_folders(drive_pair_id, folder_path);
+
+CREATE INDEX idx_tracked_files_integrity_check
+    ON tracked_files(last_integrity_check_at);
 
 -- Legacy migrated databases may still contain `auto_virtual_path` and
 -- `default_virtual_base`, but they are no longer used by the application.
@@ -227,10 +235,17 @@ CREATE TABLE event_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type      TEXT    NOT NULL CHECK(event_type IN (
                         'file_created', 'file_edited', 'file_mirrored',
+                        'file_untracked',
                         'integrity_pass', 'integrity_fail',
                         'recovery_success', 'recovery_fail',
                         'both_corrupted', 'change_detected',
-                        'sync_completed', 'sync_failed'
+                        'sync_completed', 'sync_failed',
+                        'folder_tracked', 'folder_untracked',
+                        'integrity_run_started', 'integrity_run_completed',
+                        'drive_created', 'drive_updated', 'drive_deleted',
+                        'drive_failover', 'drive_quiescing', 'drive_quiesce_cancelled',
+                        'drive_failure_confirmed', 'drive_replacement_assigned',
+                        'drive_rebuild_completed'
                     )),
     tracked_file_id INTEGER REFERENCES tracked_files(id) ON DELETE SET NULL,
     message         TEXT    NOT NULL,
@@ -243,7 +258,8 @@ CREATE TABLE schedule_config (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     task_type        TEXT    NOT NULL CHECK(task_type IN ('sync', 'integrity_check')),
     cron_expr        TEXT,
-    interval_seconds INTEGER,
+    interval_seconds     INTEGER,
+    max_duration_seconds INTEGER,
     enabled          INTEGER NOT NULL DEFAULT 1,
     last_run         TEXT,
     next_run         TEXT,
@@ -274,6 +290,12 @@ CREATE TABLE db_backup_settings (
     last_backup_run            TEXT,
     last_integrity_run         TEXT,
     updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Sync queue global settings (single-row)
+CREATE TABLE sync_settings (
+    id           INTEGER PRIMARY KEY CHECK(id = 1),
+    queue_paused INTEGER NOT NULL DEFAULT 0
 );
 ```
 

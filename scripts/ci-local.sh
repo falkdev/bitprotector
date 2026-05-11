@@ -10,7 +10,7 @@
 #   lint   — Layer 0: cargo fmt + clippy + npm lint + prettier
 #   fast   — Layers 0-3: lint + unit + integration (no scaling_100k or QEMU)
 #   smoke  — Layers 0-5: fast + build .deb + QEMU smoke (requires /dev/kvm)
-#   full   — Layers 0-7: smoke + QEMU failover + uninstall (requires /dev/kvm)
+#   full   — Layers 0-12: smoke + all QEMU bundles (requires /dev/kvm)
 #
 # Examples:
 #   ./scripts/ci-local.sh lint
@@ -62,7 +62,7 @@ preflight() {
 jobs_for_lint="lint"
 jobs_for_fast="lint,unit,rust-integration-fast,rust-integration-heavy"
 jobs_for_smoke="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke"
-jobs_for_full="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke,qemu-failover,qemu-uninstall"
+jobs_for_full="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke,qemu-application-workflows,qemu-failover,qemu-uninstall,qemu-resilience,qemu-upgrade,qemu-degraded-boot,qemu-drive-media-type"
 
 # ---------------------------------------------------------------------------
 # Parse args

@@ -42,11 +42,11 @@ All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs u
 
 | Event | Layers run |
 | --- | --- |
-| `pull_request` | 0 – 13 (full CI workflow in `ci.yml`) |
-| `push` to `main` | 0 – 13 |
-| `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 13 |
-| `workflow_dispatch` with `run_heavy_qemu=false` (default) | 0 – 6 (`qemu-smoke` only for QEMU layer) |
-| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 13) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` |
+| `pull_request` | 0 – 12 (full CI workflow in `ci.yml`) |
+| `push` to `main` | 0 – 12 |
+| `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 12 |
+| `workflow_dispatch` with `run_heavy_qemu=false` (default) | 0 – 5 (`qemu-smoke` only for QEMU layer) |
+| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 12) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` |
 
 PR runs use `cancel-in-progress: true` so a new push automatically cancels the previous run. Pushes to `main` never cancel (a heavy failover run mid-flight must finish).
 
@@ -58,18 +58,18 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | --- | --- | --- | --- | --- |
 | 0 | `lint` | `cargo fmt --check`, `cargo clippy -D warnings`, `npm run lint`, prettier check | ubuntu-24.04 | < 2 min |
 | 1 | `unit` | `cargo test --lib` + `npm test` (vitest/jsdom) | ubuntu-24.04 | 2-4 min |
-| 2 | `coverage` | `cargo llvm-cov` + `npm run test:coverage` artifact upload (non-gating) | ubuntu-24.04 | 4-8 min |
-| 3 | `rust-integration-fast` | CLI + split API integration binaries + core integration tests (except `scaling_100k`) | ubuntu-24.04 | 4-7 min |
-| 4 | `rust-integration-heavy` | `cargo test --test scaling_100k` (100k rows, 3 s/query budgets) | ubuntu-24.04 | 2-4 min |
-| 5 | `build-artifacts` | `npm ci && npm run build && cargo deb` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
-| 6 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
-| 7 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
-| 8 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
-| 9 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. alpha1 → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
-| 10 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
-| 11 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
-| 12 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |
-| 13 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
+| — | `coverage` | `cargo llvm-cov` + `npm run test:coverage` artifact upload (non-gating) | ubuntu-24.04 | 4-8 min |
+| 2 | `rust-integration-fast` | CLI + split API integration binaries + core integration tests (except `scaling_100k`) | ubuntu-24.04 | 4-7 min |
+| 3 | `rust-integration-heavy` | `cargo test --test scaling_100k` (100k rows, 3 s/query budgets) | ubuntu-24.04 | 2-4 min |
+| 4 | `build-artifacts` | `npm ci && npm run build && cargo deb` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
+| 5 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
+| 6 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
+| 7 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
+| 8 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. alpha1 → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
+| 9 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
+| 10 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
+| 11 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |
+| 12 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
 
 Nightly-only jobs in `nightly.yml` also run `qemu-scale`, `qemu-scale-lowmem`, and `qemu-scheduled-load` (all matrixed across Ubuntu 24.04 + 26.04).
 
@@ -197,7 +197,7 @@ This script calls cargo/npm/bash directly — no containers. The layer definitio
 
 ### npm cache
 
-`actions/setup-node@v4` caches `frontend/node_modules` keyed on `frontend/package-lock.json`. After the first run, `npm ci` time is near-zero.
+`actions/setup-node@v5` installs Node.js 24 and caches the npm cache keyed on `frontend/package-lock.json`. After the first run, `npm ci` time is near-zero.
 
 ### Cloud images
 

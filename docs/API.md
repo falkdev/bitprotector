@@ -126,13 +126,15 @@ List all configured drive pairs.
         "primary_state": "active",
         "secondary_state": "active",
         "active_role": "primary",
+        "primary_media_type": "hdd",
+        "secondary_media_type": "hdd",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z"
     }
 ]
 ```
 
-`primary_state` and `secondary_state` are one of `active`, `quiescing`, `failed`, or `rebuilding`. `active_role` is either `primary` or `secondary`.
+`primary_state` and `secondary_state` are one of `active`, `quiescing`, `failed`, or `rebuilding`. `active_role` is either `primary` or `secondary`. `primary_media_type` and `secondary_media_type` are one of `hdd` or `ssd`.
 
 ---
 
@@ -146,9 +148,14 @@ Create a new drive pair.
 {
     "name": "mybackup",
     "primary_path": "/mnt/primary",
-    "secondary_path": "/mnt/mirror"
+    "secondary_path": "/mnt/mirror",
+    "primary_media_type": "hdd",
+    "secondary_media_type": "ssd",
+    "skip_validation": false
 }
 ```
+
+`primary_media_type` and `secondary_media_type` are optional (default: `"hdd"`). Only `"hdd"` and `"ssd"` are accepted. `skip_validation` is optional (default: `false`); when `true`, the server skips the filesystem reachability check for both paths.
 
 **Response `201`:** Created drive pair object.  
 **Errors:** `400 Bad Request`, `409 Conflict` (name already in use)
@@ -174,7 +181,9 @@ Update a drive pair. All fields are optional.
 {
     "name": "renamed",
     "primary_path": "/new/primary",
-    "secondary_path": "/new/mirror"
+    "secondary_path": "/new/mirror",
+    "primary_media_type": "ssd",
+    "secondary_media_type": "hdd"
 }
 ```
 
@@ -271,6 +280,8 @@ Assign a new mounted path to a failed slot and queue rebuild work.
         "primary_state": "rebuilding",
         "secondary_state": "active",
         "active_role": "secondary",
+        "primary_media_type": "hdd",
+        "secondary_media_type": "hdd",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:05:00Z"
     },
@@ -1132,20 +1143,22 @@ List all configured schedules.
 **Response `200`:**
 
 ```json
-[
-    {
-        "id": 1,
-        "task_type": "sync",
-        "cron_expr": null,
-        "interval_seconds": 3600,
-        "max_duration_seconds": null,
-        "enabled": true,
-        "last_run": "2026-03-29T02:00:00Z",
-        "next_run": "2026-03-29T03:00:00Z",
-        "created_at": "2026-01-01T00:00:00Z",
-        "updated_at": "2026-01-01T00:00:00Z"
-    }
-]
+{
+    "schedules": [
+        {
+            "id": 1,
+            "task_type": "sync",
+            "cron_expr": null,
+            "interval_seconds": 3600,
+            "max_duration_seconds": null,
+            "enabled": true,
+            "last_run": "2026-03-29T02:00:00Z",
+            "next_run": "2026-03-29T03:00:00Z",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }
+    ]
+}
 ```
 
 `task_type` is `sync` or `integrity_check`.

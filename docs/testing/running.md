@@ -20,7 +20,7 @@ This document covers how to run every test category locally. For CI pipeline det
 | Requirement | Minimum version / notes |
 | --- | --- |
 | Rust toolchain | Stable, with `cargo` |
-| Node.js | 20.19 or later (required by the Vite/Vitest stack) |
+| Node.js | 24 or later (required by the Vite/Vitest stack) |
 | QEMU tools | Only needed for installation tests — see [installation/README.md](installation/README.md) |
 
 ---
@@ -84,7 +84,7 @@ cargo test -- --test-threads=1
 
 ## Frontend Tests
 
-The frontend toolchain requires Node.js 20.19 or later.
+The frontend toolchain requires Node.js 24 or later.
 
 ### Install dependencies and verify a clean build
 

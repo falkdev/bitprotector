@@ -1,5 +1,7 @@
 # Configuration Reference
 
+BitProtector is configured through a TOML file, CLI flags, and environment variables. This document covers all available settings: the HTTP server and TLS setup, database location, checksum parallelism tuning, logging, and the scheduler. It also explains which settings are config-file-only versus controllable via CLI flags, and calls out keys that appear in example config files but are not yet wired up in the code.
+
 BitProtector reads `/etc/bitprotector/config.toml` at startup. Settings are resolved in this order:
 
 1. CLI flag (highest priority)
@@ -20,6 +22,7 @@ The file is optional — a missing or unreadable config silently falls back to d
 
 - [Section: \[server\]](#section-server)
 - [Section: \[database\]](#section-database)
+- [Section: \[checksum\]](#section-checksum)
 - [Logging](#logging)
 - [Scheduler](#scheduler)
 - [Virtual Paths](#virtual-paths)
@@ -35,7 +38,7 @@ Controls the HTTP listener, TLS, and authentication. All keys in this section ar
 
 | Key / CLI flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. |
+| `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. When installed via the Debian package the default config sets `"127.0.0.1"` (loopback-only); `"0.0.0.0"` is the hardcoded fallback used only if no config file is present. |
 | `port` / `--port` | integer | `8443` | TCP port for the HTTPS API. |
 | `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address. |
 | `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
@@ -79,6 +82,23 @@ path = "/var/lib/bitprotector/bitprotector.db"
 
 ---
 
+## Section: [checksum]
+
+Tunes parallelism during integrity checks. These settings are **config-file only** — there are no equivalent CLI flags. Defaults are reasonable for most hardware; change them only if you experience I/O contention or want to limit resource use.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `hdd_max_parallel` | integer | `2` | Maximum files checked simultaneously for drive pairs where at least one drive is an HDD. High parallelism causes seek contention on spinning disks; keep this low. |
+| `ssd_max_parallel` | integer | `0` | Maximum files checked simultaneously for SSD-only drive pairs. `0` = auto: `num_logical_cpus / 2`, minimum 2. |
+
+```toml
+[checksum]
+hdd_max_parallel = 2
+ssd_max_parallel = 0   # 0 = auto (num_logical_cpus / 2, min 2)
+```
+
+---
+
 ## Logging
 
 Log level and output file are **not** currently read from the config file. Control them via environment variable:
@@ -93,11 +113,15 @@ RUST_LOG=debug bitprotector serve ...
 
 Structured output goes to the journal when running under systemd.
 
+> **Note:** The `[logging]` section (with `level` and `file` keys) that appears in the example `config/default.toml` is **silently ignored** at runtime. The code does not parse it. Only `RUST_LOG` is effective.
+
 ---
 
 ## Scheduler
 
 Scheduled tasks (periodic sync and integrity checks) are managed via the API or CLI — not the config file.
+
+> **Note:** The `[scheduler]` section (with `enabled`, `sync_interval_seconds`, and `integrity_interval_seconds` keys) that appears in the example `config/default.toml` is **silently ignored** at runtime. The code does not parse it. Use the API or CLI to manage schedules.
 
 Use `bitprotector scheduler` subcommands or `POST /api/v1/scheduler/schedules` to create and manage schedules. See [API.md](API.md) and the scheduler CLI help:
 
