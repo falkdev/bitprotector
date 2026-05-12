@@ -13,8 +13,8 @@ runs:
     - name: Install QEMU and cloud-image utilities
       shell: bash
       run: |
-        sudo apt-get update -q
-        sudo apt-get install -y -q \
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 update -q
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 install -y -q \
           qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
 
     - name: Enable KVM access
