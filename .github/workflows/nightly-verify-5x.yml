@@ -1,0 +1,42 @@
+name: Nightly Verify (5x)
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  run-1:
+    name: Nightly Run 1/5
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
+
+  run-2:
+    name: Nightly Run 2/5
+    needs: run-1
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
+
+  run-3:
+    name: Nightly Run 3/5
+    needs: run-2
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
+
+  run-4:
+    name: Nightly Run 4/5
+    needs: run-3
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
+
+  run-5:
+    name: Nightly Run 5/5
+    needs: run-4
+    uses: ./.github/workflows/ci.yml
+    with:
+      run_heavy_qemu: true
