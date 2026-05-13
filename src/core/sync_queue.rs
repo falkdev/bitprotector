@@ -19,6 +19,24 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 
     let result = match item.action.as_str() {
         "mirror" => mirror::mirror_file(&pair, &file.relative_path).map(|_| ()),
+        "adopt_mirror" => {
+            use anyhow::Context as _;
+            let standby_path =
+                std::path::PathBuf::from(pair.standby_path()).join(&file.relative_path);
+            if drive::path_is_available(pair.standby_path()) && standby_path.exists() {
+                let standby_checksum = crate::core::checksum::checksum_file(
+                    &standby_path,
+                    crate::core::checksum::ChecksumStrategy::Streaming,
+                )
+                .context("Failed to checksum standby file")?;
+                if standby_checksum != file.checksum {
+                    mirror::mirror_file(&pair, &file.relative_path).map(|_| ())?;
+                }
+            } else {
+                mirror::mirror_file(&pair, &file.relative_path).map(|_| ())?;
+            }
+            Ok(())
+        }
         "restore_master" => mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum),
         "restore_mirror" => {
             mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum)
@@ -44,14 +62,14 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
             repo.update_sync_queue_status(item.id, "completed", None)?;
             if matches!(
                 item.action.as_str(),
-                "mirror" | "restore_master" | "restore_mirror"
+                "mirror" | "adopt_mirror" | "restore_master" | "restore_mirror"
             ) {
                 repo.update_tracked_file_mirror_status(file.id, true)?;
                 let _ = drive::maybe_finalize_rebuild_for_action(repo, pair.id, &item.action);
             }
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             let _ = event_logger::log_sync_completed(repo, file.id, &item.action, &full_path);
-            if item.action == "mirror" {
+            if item.action == "mirror" || item.action == "adopt_mirror" {
                 let _ = event_logger::log_file_mirrored(repo, file.id, &full_path, &file.checksum);
             }
         }
@@ -231,6 +249,13 @@ pub fn create_from_integrity_failure(
 pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
     repo.create_sync_queue_item_dedup(file_id, "mirror")?
         .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{}", file_id))
+}
+
+/// Create a sync queue item for a newly tracked file.
+/// Uses `adopt_mirror` so the processor will verify before copying.
+pub fn create_for_new_tracking(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
+    repo.create_sync_queue_item_dedup(file_id, "adopt_mirror")?
+        .ok_or_else(|| anyhow::anyhow!("adopt_mirror action already pending for file #{}", file_id))
 }
 
 #[cfg(test)]
@@ -596,5 +621,110 @@ mod tests {
         let past = Instant::now() - Duration::from_secs(1);
         let processed = process_all_pending(&repo, Some(past)).unwrap();
         assert_eq!(processed, 0, "Expired deadline should prevent processing");
+    }
+
+    #[test]
+    fn test_process_adopt_mirror_standby_matches() {
+        let (primary, secondary, repo) = setup();
+        let content = b"identical content";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("f.txt"), content).unwrap();
+        fs::write(secondary.path().join("f.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        let item = repo
+            .create_sync_queue_item(file.id, "adopt_mirror")
+            .unwrap();
+
+        process_item(&repo, &item).unwrap();
+
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        let updated_file = repo.get_tracked_file(file.id).unwrap();
+        assert!(updated_file.is_mirrored, "File should be marked mirrored");
+        assert_eq!(
+            fs::read(secondary.path().join("f.txt")).unwrap(),
+            content,
+            "Secondary content should be unchanged (no copy needed)"
+        );
+    }
+
+    #[test]
+    fn test_process_adopt_mirror_standby_stale() {
+        let (primary, secondary, repo) = setup();
+        let content_primary = b"primary content";
+        let content_stale = b"stale content";
+        let hash = checksum::checksum_bytes(content_primary);
+        fs::write(primary.path().join("f.txt"), content_primary).unwrap();
+        fs::write(secondary.path().join("f.txt"), content_stale).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, content_primary.len() as i64, None)
+            .unwrap();
+        let item = repo
+            .create_sync_queue_item(file.id, "adopt_mirror")
+            .unwrap();
+
+        process_item(&repo, &item).unwrap();
+
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        let updated_file = repo.get_tracked_file(file.id).unwrap();
+        assert!(updated_file.is_mirrored);
+        assert_eq!(
+            fs::read(secondary.path().join("f.txt")).unwrap(),
+            content_primary,
+            "Secondary should now hold primary content after full copy"
+        );
+    }
+
+    #[test]
+    fn test_process_adopt_mirror_standby_missing() {
+        let (primary, secondary, repo) = setup();
+        let content = b"new file content";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("f.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        let item = repo
+            .create_sync_queue_item(file.id, "adopt_mirror")
+            .unwrap();
+
+        process_item(&repo, &item).unwrap();
+
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        let updated_file = repo.get_tracked_file(file.id).unwrap();
+        assert!(updated_file.is_mirrored);
+        assert!(
+            secondary.path().join("f.txt").exists(),
+            "Secondary file should now exist"
+        );
+        assert_eq!(fs::read(secondary.path().join("f.txt")).unwrap(), content);
     }
 }

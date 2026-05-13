@@ -24,6 +24,7 @@
 #   #10  smoke-12-reboot-persistence
 #   #17  smoke-13-database-backup-repair-restore
 #   #30  smoke-16-scheduled-sync-integrity-db-backup
+#        smoke-17-adopt-mirror-adoption
 #
 # Prerequisites:
 #   - qemu-system-x86_64, qemu-img, cloud-localds, ssh, ssh-keygen
@@ -232,6 +233,10 @@ run_scenario "smoke-13-database-backup-repair-restore" smoke_13_database_backup_
 # shellcheck source=tests/installation/scenarios/smoke/smoke-16-scheduled-sync-integrity-db-backup.sh
 source "${SCENARIOS_DIR}/smoke-16-scheduled-sync-integrity-db-backup.sh"
 run_scenario "smoke-16-scheduled-sync-integrity-db-backup" smoke_16_scheduled_sync_integrity_db_backup
+
+# shellcheck source=tests/installation/scenarios/smoke/smoke-17-adopt-mirror-adoption.sh
+source "${SCENARIOS_DIR}/smoke-17-adopt-mirror-adoption.sh"
+run_scenario "smoke-17-adopt-mirror-adoption" smoke_17_adopt_mirror_adoption
 
 run_scenario "journal-error-scraper" journal_error_scraper
 

@@ -1724,7 +1724,7 @@ impl Repository {
                  error_message=NULL,
                  completed_at=datetime('now')
              WHERE tracked_file_id=?1
-               AND action='mirror'
+               AND action IN ('mirror', 'adopt_mirror')
                AND status IN ('pending', 'in_progress')",
             rusqlite::params![tracked_file_id],
         )?;

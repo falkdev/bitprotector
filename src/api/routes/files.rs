@@ -58,7 +58,7 @@ pub async fn track_file(
             }
         };
     if !existed_before && pair.standby_accepts_sync() {
-        if let Err(e) = repo.create_sync_queue_item_dedup(tracked.id, "mirror") {
+        if let Err(e) = repo.create_sync_queue_item_dedup(tracked.id, "adopt_mirror") {
             return HttpResponse::InternalServerError()
                 .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
         }

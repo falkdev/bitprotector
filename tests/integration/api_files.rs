@@ -40,7 +40,7 @@ async fn test_files_track() {
     );
     let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total, 1);
-    assert_eq!(queue_items[0].action, "mirror");
+    assert_eq!(queue_items[0].action, "adopt_mirror");
 }
 
 #[actix_rt::test]
@@ -771,4 +771,68 @@ async fn test_files_mirror_via_api() {
     assert!(secondary.path().join("m.txt").exists());
     let updated = repo.get_sync_queue_item(queue_item.id).unwrap();
     assert_eq!(updated.status, "completed");
+}
+
+#[actix_rt::test]
+async fn test_files_track_pre_existing_matching_mirror() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let content = b"matching content";
+    fs::write(primary.path().join("match.txt"), content).unwrap();
+    fs::write(secondary.path().join("match.txt"), content).unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-match",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "match.txt"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(
+        queue_items[0].action, "adopt_mirror",
+        "Track should enqueue adopt_mirror, not mirror"
+    );
+}
+
+#[actix_rt::test]
+async fn test_files_track_pre_existing_stale_mirror() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::write(primary.path().join("stale.txt"), b"content A").unwrap();
+    fs::write(secondary.path().join("stale.txt"), b"content B").unwrap();
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-stale",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri("/api/v1/files")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "drive_pair_id": pair.id,
+            "relative_path": "stale.txt"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(queue_items[0].action, "adopt_mirror");
 }

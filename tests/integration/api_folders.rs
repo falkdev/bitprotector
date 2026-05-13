@@ -261,7 +261,7 @@ async fn test_folders_scan() {
     assert!(!files[0].is_mirrored);
     let (queue, total_queue) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total_queue, 1);
-    assert_eq!(queue[0].action, "mirror");
+    assert_eq!(queue[0].action, "adopt_mirror");
 }
 
 #[actix_rt::test]
@@ -307,4 +307,40 @@ async fn test_folders_mirror_endpoint_processes_unmirrored_files_under_folder() 
     assert!(secondary.path().join("docs/b.txt").exists());
     assert_eq!(repo.get_sync_queue_item(q1.id).unwrap().status, "completed");
     assert_eq!(repo.get_sync_queue_item(q2.id).unwrap().status, "completed");
+}
+
+#[actix_rt::test]
+async fn test_folders_scan_pre_existing_mirror_queues_adopt_mirror() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let sub_primary = primary.path().join("scandir");
+    let sub_secondary = secondary.path().join("scandir");
+    fs::create_dir(&sub_primary).unwrap();
+    fs::create_dir(&sub_secondary).unwrap();
+    let content = b"same content";
+    fs::write(sub_primary.join("a.txt"), content).unwrap();
+    fs::write(sub_secondary.join("a.txt"), content).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "sp-adopt",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo
+        .create_tracked_folder(pair.id, "scandir", None)
+        .unwrap();
+    let app = make_app!(repo.clone()).await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/scan", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let (queue, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(queue[0].action, "adopt_mirror");
 }

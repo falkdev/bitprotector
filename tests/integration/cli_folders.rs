@@ -118,7 +118,7 @@ fn test_folders_scan_auto_tracks_new_files() {
     );
     let (queue_items, total_queue) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total_queue, 2);
-    assert!(queue_items.iter().all(|item| item.action == "mirror"));
+    assert!(queue_items.iter().all(|item| item.action == "adopt_mirror"));
 }
 
 #[test]

@@ -158,7 +158,7 @@ pub fn auto_track_folder_files(
             let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
             let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
             if drive_pair.standby_accepts_sync() {
-                let _ = sync_queue::create_from_change(repo, file.id)?;
+                let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
             } else {
                 repo.update_tracked_file_mirror_status(file.id, false)?;
             }
@@ -367,6 +367,24 @@ mod tests {
         assert!(
             relative_paths.contains(&"photos/a/b/c/verydeep.jpg"),
             "a/b/c/verydeep.jpg must be tracked"
+        );
+    }
+
+    #[test]
+    fn test_auto_track_folder_queues_adopt_mirror() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        fs::create_dir(primary.path().join("photos")).unwrap();
+        fs::write(primary.path().join("photos/img.jpg"), b"photo content").unwrap();
+
+        let folder = track_folder(&repo, &pair, "photos", None).unwrap();
+        auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        let (queue, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(
+            queue[0].action, "adopt_mirror",
+            "Folder scan should enqueue adopt_mirror, not mirror"
         );
     }
 }
