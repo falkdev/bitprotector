@@ -13,6 +13,11 @@ runs:
     - name: Install QEMU and cloud-image utilities
       shell: bash
       run: |
+        # GitHub Actions runners on Azure have azure.archive.ubuntu.com as the default
+        # apt mirror, which is intermittently unreachable. Redirect it to the canonical
+        # archive.ubuntu.com so apt-get does not hang when the Azure mirror is down.
+        sudo sed -i 's|http://azure\.archive\.ubuntu\.com|https://archive.ubuntu.com|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
         sudo apt-get update -q
         sudo apt-get install -y -q \
           qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
