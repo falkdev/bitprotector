@@ -13,11 +13,48 @@ runs:
     - name: Install QEMU and cloud-image utilities
       shell: bash
       run: |
-        # GitHub Actions runners on Azure have azure.archive.ubuntu.com as the default
-        # apt mirror, which is intermittently unreachable. Redirect it to the canonical
-        # archive.ubuntu.com so apt-get does not hang when the Azure mirror is down.
-        sudo sed -i 's|http://azure\.archive\.ubuntu\.com|https://archive.ubuntu.com|g' \
-          /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+        # Probe a prioritised list of apt mirrors and use the first one that responds
+        # on its expected port. The Azure mirror is tried first so it is used whenever
+        # it is up; the others are fallbacks for when it is unreachable.
+        # Only base host URLs — the /ubuntu path already present in sources.list is kept.
+        MIRRORS=(
+          "http://azure.archive.ubuntu.com"
+          "https://archive.ubuntu.com"
+          "https://mirrors.edge.kernel.org"
+          "http://ftp.ubuntu.com"
+        )
+
+        pick_mirror() {
+          for mirror in "${MIRRORS[@]}"; do
+            host=$(echo "$mirror" | sed -E 's|https?://||;s|/.*||')
+            port=443
+            echo "$mirror" | grep -q "^http://" && port=80
+            if timeout 5 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
+              echo "$mirror"
+              return 0
+            fi
+            echo "::warning::apt mirror ${host} unreachable, trying next..." >&2
+          done
+          # All mirrors failed — return the first one and let apt-get surface the error.
+          echo "${MIRRORS[0]}"
+        }
+
+        CHOSEN=$(pick_mirror)
+        echo "Using apt mirror: ${CHOSEN}"
+        # Collect all apt source files; use nullglob so the glob expands to nothing
+        # when /etc/apt/sources.list.d/ has no .list files (avoids passing a literal
+        # glob pattern to sed).
+        shopt -s nullglob
+        LIST_FILES=(/etc/apt/sources.list.d/*.list)
+        shopt -u nullglob
+        # Replace any existing Ubuntu archive mirror entries (azure or otherwise).
+        # Use extended regex (-E) so https? correctly matches the optional 's'.
+        # The patterns match only the base host so the /ubuntu path in each sources.list
+        # entry is preserved as-is.
+        sudo sed -i -E \
+          -e "s|https?://azure\.archive\.ubuntu\.com|${CHOSEN}|g" \
+          -e "s|https?://archive\.ubuntu\.com|${CHOSEN}|g" \
+          /etc/apt/sources.list "${LIST_FILES[@]}" 2>/dev/null || true
         sudo apt-get update -q
         sudo apt-get install -y -q \
           qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
