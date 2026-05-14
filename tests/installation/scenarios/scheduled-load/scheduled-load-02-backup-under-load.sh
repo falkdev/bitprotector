@@ -74,7 +74,7 @@ test -f '${backup_b}/bitprotector.db'
 
     verify_sqlite "${backup_a}/bitprotector.db"
     verify_sqlite "${backup_b}/bitprotector.db"
-
+    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":false,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
     ssh_vm "printf 'not sqlite\\n' | sudo tee '${backup_b}/bitprotector.db' >/dev/null"
 
     local repair_watch_start
@@ -90,6 +90,8 @@ echo "\$RESP" | jq -e --arg b "${backup_b}" '
 CHECK
 )"
     poll_until "scheduled-load-02 backup repaired" 360 "${repair_condition}"
+
+    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":true,"backup_interval_seconds":5,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
 
     local repair_seconds
     repair_seconds=$(( $(date +%s) - repair_watch_start ))

@@ -106,7 +106,7 @@ jobs:
           fi
 
       - name: Rust coverage
-        run: cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov
+        run: cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov --no-clean
 
       - name: Rust coverage summary
         run: cargo llvm-cov report --summary-only
