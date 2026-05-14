@@ -1,51 +1,75 @@
 # Configuration Reference
 
-BitProtector is configured through a TOML file, CLI flags, and environment variables. This document covers all available settings: the HTTP server and TLS setup, database location, checksum parallelism tuning, logging, and the scheduler. It also explains which settings are config-file-only versus controllable via CLI flags, and calls out keys that appear in example config files but are not yet wired up in the code.
+This document is the single source of truth for configuring BitProtector.
+It covers how settings are loaded and resolved, every supported config key,
+and common setup patterns for development and production.
 
-BitProtector reads `/etc/bitprotector/config.toml` at startup. Settings are resolved in this order:
+## How configuration works
 
-1. CLI flag (highest priority)
-2. Config file value
-3. Hardcoded default
+BitProtector reads `/etc/bitprotector/config.toml` at startup and resolves
+each setting in the following order of priority:
 
-Use the global `--config` flag to specify a custom config file path:
-
-```bash
-bitprotector --config /path/to/custom.toml serve ...
+```text
+CLI flag  >  config file value  >  hardcoded default
 ```
 
-The file is optional — a missing or unreadable config silently falls back to defaults.
+This means you can always override any file setting with a CLI flag on the
+command line, which is handy for quick experiments or CI scripts.
+
+> **Config file is optional.** A missing or unreadable file is silently
+> ignored — BitProtector falls back to hardcoded defaults and any CLI flags
+> you provide.
+
+Use the global `--config` flag to point at a non-default file:
+
+```bash
+bitprotector --config /etc/bitprotector/staging.toml serve
+```
+
+### Which sections are actually parsed?
+
+Only three sections in the config file are read by the application:
+`[server]`, `[database]`, and `[checksum]`.
+
+The `[logging]` and `[scheduler]` sections that appear in
+`config/default.toml` are **silently ignored** — see [Logging](#logging)
+and [Scheduler](#scheduler) below for how to control those features.
 
 ---
 
 ## Table of Contents
 
+- [Quick-start configurations](#quick-start-configurations)
 - [Section: \[server\]](#section-server)
 - [Section: \[database\]](#section-database)
 - [Section: \[checksum\]](#section-checksum)
 - [Logging](#logging)
 - [Scheduler](#scheduler)
-- [Virtual Paths](#virtual-paths)
-- [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate)
+- [Virtual paths](#virtual-paths)
+- [Generating a self-signed certificate](#generating-a-self-signed-certificate)
 - [CLI global flags](#cli-global-flags)
-- [Example — complete serve invocation](#example--complete-serve-invocation)
+- [Full serve invocation example](#full-serve-invocation-example)
 
 ---
 
-## Section: [server]
+## Quick-start configurations
 
-Controls the HTTP listener, TLS, and authentication. All keys in this section are supported in the config file **and** as CLI flags to `bitprotector serve`.
+### Minimal development setup (no TLS)
 
-| Key / CLI flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. When installed via the Debian package the default config sets `"127.0.0.1"` (loopback-only); `"0.0.0.0"` is the hardcoded fallback used only if no config file is present. |
-| `port` / `--port` | integer | `8443` | TCP port for the HTTPS API. |
-| `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address. |
-| `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | **Must be changed before deploying.** Secret used to sign and verify JWT tokens. Use a randomly generated string of at least 32 characters. |
-| `tls_cert` / `--tls-cert` | string | *(none)* | Path to the PEM-encoded TLS certificate (or full chain). |
-| `tls_key` / `--tls-key` | string | *(none)* | Path to the PEM-encoded private key. |
+When both `tls_cert` and `tls_key` are omitted the server starts on plain
+HTTP. This is useful for local development or testing behind a TLS-terminating
+reverse proxy.
 
-Both files must be present before the service can start. See [Generating a Self-Signed Certificate](#generating-a-self-signed-certificate).
+```bash
+bitprotector serve \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --jwt-secret "dev-only-secret"
+```
+
+### Production setup via config file
+
+Create `/etc/bitprotector/config.toml`, then just run `bitprotector serve`.
 
 ```toml
 [server]
@@ -55,25 +79,58 @@ rate_limit_rps = 100
 jwt_secret    = "replace-with-a-random-64-char-string"
 tls_cert      = "/etc/bitprotector/tls/cert.pem"
 tls_key       = "/etc/bitprotector/tls/key.pem"
+
+[database]
+path = "/var/lib/bitprotector/bitprotector.db"
 ```
 
-> **Security note:** The JWT secret must be kept confidential. Anyone with this value can forge valid tokens for any user. Generate a strong secret with:
->
-> ```bash
-> openssl rand -hex 32
-> ```
+Generate a strong JWT secret with:
 
-The JWT token lifetime is fixed at **86400 seconds (24 hours)** and is not configurable.
+```bash
+openssl rand -hex 32
+```
+
+---
+
+## Section: [server]
+
+Controls the HTTP listener, TLS, and authentication. Every key in this section
+can also be passed as a CLI flag to `bitprotector serve`.
+
+| Key / CLI flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `host` / `--host` | string | `"0.0.0.0"` | IP address to bind. The Debian package default config sets `"127.0.0.1"` (loopback-only); `"0.0.0.0"` is the hardcoded fallback used when no config file is present. |
+| `port` / `--port` | integer | `8443` | TCP port for the API. |
+| `rate_limit_rps` / `--rate-limit-rps` | integer | `100` | Maximum requests per second per IP address (sliding 1-second window). |
+| `jwt_secret` / `--jwt-secret` | string | `"change-me-in-production"` | Secret used to sign and verify JWT tokens. **Must be changed before deploying.** |
+| `tls_cert` / `--tls-cert` | string | *(none)* | Path to the PEM-encoded TLS certificate (or full chain). |
+| `tls_key` / `--tls-key` | string | *(none)* | Path to the PEM-encoded private key. |
+
+**TLS is optional.** When both `tls_cert` and `tls_key` are provided the server
+uses HTTPS; if either is absent the server starts on plain HTTP. For production
+you should always enable TLS — see
+[Generating a self-signed certificate](#generating-a-self-signed-certificate).
+
+> **Security note:** Anyone who knows the JWT secret can forge tokens for any
+> user. Keep this value confidential and rotate it if it is ever exposed.
+
+The JWT token lifetime is fixed at **86 400 seconds (24 hours)** and is not
+configurable.
 
 ---
 
 ## Section: [database]
 
-Supported in the config file and overridden by the global `--db` flag.
-
 | Key / CLI flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `path` / `--db` | string | `"/var/lib/bitprotector/bitprotector.db"` | Absolute path to the SQLite database file. The directory must be writable by the service user. |
+
+The `--db` flag is global (available to every subcommand, not just `serve`):
+
+```bash
+# Use a separate database for testing
+bitprotector --db /tmp/test.db drives list
+```
 
 ```toml
 [database]
@@ -84,12 +141,16 @@ path = "/var/lib/bitprotector/bitprotector.db"
 
 ## Section: [checksum]
 
-Tunes parallelism during integrity checks. These settings are **config-file only** — there are no equivalent CLI flags. Defaults are reasonable for most hardware; change them only if you experience I/O contention or want to limit resource use.
+Tunes parallelism during integrity checks. These keys are **config-file only** —
+there are no equivalent CLI flags.
+
+The defaults work well for most hardware. Adjust them only if you observe I/O
+contention or want to cap resource usage.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `hdd_max_parallel` | integer | `2` | Maximum files checked simultaneously for drive pairs where at least one drive is an HDD. High parallelism causes seek contention on spinning disks; keep this low. |
-| `ssd_max_parallel` | integer | `0` | Maximum files checked simultaneously for SSD-only drive pairs. `0` = auto: `num_logical_cpus / 2`, minimum 2. |
+| `hdd_max_parallel` | integer | `2` | Maximum files checked simultaneously on drive pairs that include at least one HDD. High parallelism hurts throughput on spinning disks because of seek latency; keep this low. |
+| `ssd_max_parallel` | integer | `0` | Maximum files checked simultaneously on SSD-only drive pairs. `0` = auto: `num_logical_cpus / 2`, minimum 2. |
 
 ```toml
 [checksum]
@@ -101,49 +162,64 @@ ssd_max_parallel = 0   # 0 = auto (num_logical_cpus / 2, min 2)
 
 ## Logging
 
-Log level and output file are **not** currently read from the config file. Control them via environment variable:
+Log level is controlled by an environment variable, **not** the config file.
 
-| Environment variable | Default | Description |
+| Variable | Default | Values |
 | --- | --- | --- |
-| `RUST_LOG` | `info` | Minimum log level. One of: `trace`, `debug`, `info`, `warn`, `error`. |
+| `RUST_LOG` | `info` | `trace`, `debug`, `info`, `warn`, `error` |
 
 ```bash
-RUST_LOG=debug bitprotector serve ...
+RUST_LOG=debug bitprotector serve
 ```
 
-Structured output goes to the journal when running under systemd.
+Under systemd, output is forwarded to the journal automatically.
 
-> **Note:** The `[logging]` section (with `level` and `file` keys) that appears in the example `config/default.toml` is **silently ignored** at runtime. The code does not parse it. Only `RUST_LOG` is effective.
+> **Note:** The `[logging]` section (`level`, `file`) in `config/default.toml`
+> is **silently ignored** at runtime. Only `RUST_LOG` is effective.
 
 ---
 
 ## Scheduler
 
-Scheduled tasks (periodic sync and integrity checks) are managed via the API or CLI — not the config file.
-
-> **Note:** The `[scheduler]` section (with `enabled`, `sync_interval_seconds`, and `integrity_interval_seconds` keys) that appears in the example `config/default.toml` is **silently ignored** at runtime. The code does not parse it. Use the API or CLI to manage schedules.
-
-Use `bitprotector scheduler` subcommands or `POST /api/v1/scheduler/schedules` to create and manage schedules. See [API.md](API.md) and the scheduler CLI help:
+Scheduled tasks (periodic sync and integrity checks) are **not** configured
+in the config file. Manage them through the API or CLI:
 
 ```bash
 bitprotector scheduler --help
+POST /api/v1/scheduler/schedules
 ```
 
-Database-backup automation is configured separately from the generic scheduler through the Database Backups web page, `bitprotector database settings`, or `/api/v1/database/backups/settings`. Automatic backups and automatic backup integrity checks are disabled by default. In the web UI, manual `Run Backup Now` and `Check Integrity Now` actions are enabled only when at least one backup destination is enabled.
+See [API.md](API.md) for the full scheduler API reference.
+
+> **Note:** The `[scheduler]` section (`enabled`, `sync_interval_seconds`,
+> `integrity_interval_seconds`) in `config/default.toml` is **silently ignored**
+> at runtime.
+
+**Database backup schedules** are separate. Configure them through the web UI
+(Database Backups page), `bitprotector database settings`, or
+`/api/v1/database/backups/settings`. Automatic backups and integrity checks are
+disabled by default; in the web UI the manual *Run Backup Now* and
+*Check Integrity Now* actions require at least one backup destination to be
+enabled.
 
 ---
 
-## Virtual Paths
+## Virtual paths
 
-BitProtector no longer uses a global virtual root such as `symlink_base`. Each file or folder virtual path is the exact absolute filesystem path where BitProtector will create a symlink.
+Each virtual path is the exact absolute filesystem path where BitProtector
+will create a symlink. There is no global virtual root — every file and folder
+gets its own explicit path.
 
-Make sure the service user has permission to create parent directories and symlinks at whatever virtual paths you assign through the CLI, API, or web UI.
+Make sure the service user has write permission to the parent directories of
+any virtual paths you configure through the CLI, API, or web UI.
 
 ---
 
-## Generating a Self-Signed Certificate
+## Generating a self-signed certificate
 
-For development or an internal network where a certificate authority is not available:
+Use this for development or an internal network where a CA is not available.
+For production prefer a trusted CA certificate (e.g. via Let's Encrypt /
+`certbot`).
 
 ```bash
 sudo mkdir -p /etc/bitprotector/tls
@@ -158,13 +234,14 @@ sudo openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
 sudo chmod 600 /etc/bitprotector/tls/key.pem
 ```
 
-For production, use a certificate from a trusted CA (e.g., Let's Encrypt via `certbot`) and update `tls_cert` and `tls_key` accordingly.
+Then set `tls_cert` and `tls_key` in your config file or pass them as CLI flags.
 
 ---
 
 ## CLI global flags
 
-These flags are available to all subcommands and override the corresponding config file values.
+These flags are accepted by every subcommand and take precedence over the
+config file.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -173,12 +250,15 @@ These flags are available to all subcommands and override the corresponding conf
 
 ```bash
 bitprotector --db /tmp/scratch.db drives list
-bitprotector --config /etc/bitprotector/staging.toml serve ...
+bitprotector --config /etc/bitprotector/staging.toml serve
 ```
 
 ---
 
-## Example — complete serve invocation
+## Full serve invocation example
+
+CLI flags for every setting — useful when you do not want a config file (e.g.
+in a container or CI environment):
 
 ```bash
 bitprotector \
@@ -192,4 +272,7 @@ bitprotector \
   --rate-limit-rps 100
 ```
 
-When deployed via the systemd unit, these flags are set in the `ExecStart` line of the service file at `/lib/systemd/system/bitprotector.service`. Alternatively, set them in `/etc/bitprotector/config.toml` so the service file only needs `bitprotector serve`.
+When deployed via the systemd unit, these flags live in the `ExecStart` line of
+`/lib/systemd/system/bitprotector.service`. Alternatively, put everything in
+`/etc/bitprotector/config.toml` so the service file only needs
+`bitprotector serve`.

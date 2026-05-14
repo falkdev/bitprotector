@@ -201,7 +201,7 @@ This script calls cargo/npm/bash directly — no containers. The layer definitio
 
 ### Cloud images
 
-Each Ubuntu image (~650 MB) is cached under `~/images/` via `actions/cache@v4` with a per-guest monthly key (`ubuntu-24.04-YYYYMM`, `ubuntu-26.04-YYYYMM`). The cache refreshes automatically at the start of each month. If a critical CVE lands and you need a fresh image immediately, clear the cache manually via the Actions UI (Actions → Caches).
+Each Ubuntu image (~650 MB) is cached under `~/images/` via `actions/cache@v5` with a per-guest monthly key (`ubuntu-24.04-YYYYMM`, `ubuntu-26.04-YYYYMM`). The cache refreshes automatically at the start of each month. If a critical CVE lands and you need a fresh image immediately, clear the cache manually via the Actions UI (Actions → Caches).
 
 ### .deb artifact
 

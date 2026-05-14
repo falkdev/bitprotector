@@ -158,7 +158,7 @@ Create a new drive pair.
 `primary_media_type` and `secondary_media_type` are optional (default: `"hdd"`). Only `"hdd"` and `"ssd"` are accepted. `skip_validation` is optional (default: `false`); when `true`, the server skips the filesystem reachability check for both paths.
 
 **Response `201`:** Created drive pair object.  
-**Errors:** `400 Bad Request`, `409 Conflict` (name already in use)
+**Errors:** `400 Bad Request`, `500 Internal Server Error` (database error, including duplicate name constraint violation)
 
 ---
 
@@ -197,7 +197,7 @@ Update a drive pair. All fields are optional.
 Remove a drive pair. Fails if any tracked files still reference it.
 
 **Response `204`:** No content.  
-**Errors:** `404 Not Found`, `409 Conflict`
+**Errors:** `404 Not Found`, `400 Bad Request` (tracked files still reference this pair)
 
 ---
 
@@ -216,7 +216,7 @@ Start a planned replacement workflow by moving one slot into `quiescing`.
 `role` is `primary` or `secondary`.
 
 **Response `200`:** Updated drive pair object.  
-**Errors:** `400 Bad Request`, `404 Not Found`
+**Errors:** `400 Bad Request`
 
 ---
 
@@ -233,7 +233,7 @@ Cancel a planned replacement and return a `quiescing` slot to `active`.
 ```
 
 **Response `200`:** Updated drive pair object.  
-**Errors:** `400 Bad Request`, `404 Not Found`
+**Errors:** `400 Bad Request`
 
 ---
 
@@ -250,7 +250,7 @@ Confirm that the quiesced drive is now failed. If the failed slot was active, Bi
 ```
 
 **Response `200`:** Updated drive pair object.  
-**Errors:** `400 Bad Request`, `404 Not Found`
+**Errors:** `400 Bad Request`
 
 ---
 
@@ -668,7 +668,7 @@ Tracked folders let BitProtector automatically discover and track new files adde
 Inputs that contain parent-directory traversal (`..`) or canonicalize outside the selected active root are rejected with `400 Bad Request`.
 
 **Response `201`:** Created folder object.  
-**Errors:** `400 Bad Request`, `409 Conflict`
+**Errors:** `400 Bad Request`
 
 ---
 
@@ -1204,13 +1204,14 @@ Update an existing schedule. All fields are optional.
 
 ```json
 {
+    "cron_expr": "0 2 * * *",
     "interval_seconds": 43200,
     "max_duration_seconds": 1800,
     "enabled": false
 }
 ```
 
-To clear `max_duration_seconds` (set to unlimited), send `"max_duration_seconds": null` explicitly. Omitting the field leaves the existing value unchanged.
+To clear `cron_expr`, `interval_seconds`, or `max_duration_seconds`, send the field explicitly as `null`. Omitting a field leaves the existing value unchanged. For example, send `"max_duration_seconds": null` to remove the duration cap.
 
 **Response `200`:** Updated schedule object.  
 **Errors:** `404 Not Found`
@@ -1261,7 +1262,7 @@ Changes to schedules take effect immediately — the running `Scheduler` reloads
 }
 ```
 
-Valid `event_type` values: `file_created`, `file_edited`, `file_mirrored`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`.
+Valid `event_type` values: `file_created`, `file_edited`, `file_mirrored`, `file_untracked`, `integrity_pass`, `integrity_fail`, `recovery_success`, `recovery_fail`, `both_corrupted`, `change_detected`, `sync_completed`, `sync_failed`, `folder_tracked`, `folder_untracked`, `integrity_run_started`, `integrity_run_completed`, `drive_created`, `drive_updated`, `drive_deleted`, `drive_failover`, `drive_quiescing`, `drive_quiesce_cancelled`, `drive_failure_confirmed`, `drive_replacement_assigned`, `drive_rebuild_completed`.
 
 ---
 
@@ -1495,5 +1496,5 @@ All error responses follow the same shape:
 | `400 Bad Request` | Missing or invalid request body / query parameters |
 | `401 Unauthorized` | Missing, expired, or invalid JWT |
 | `404 Not Found` | Resource does not exist |
-| `409 Conflict` | Unique constraint violated (e.g., duplicate name, path already in use) |
+| `409 Conflict` | Resource conflict (e.g., another integrity run is already active) |
 | `500 Internal Server Error` | Unexpected server-side failure |

@@ -7,7 +7,7 @@ This document covers the integration test files that do not target CLI commands 
 ## Table of Contents
 
 - [core_mirror.rs — File Mirroring Mechanics](#core_mirrorrs--file-mirroring-mechanics)
-- [core_change_detection.rs — Change Detection and Re-Mirroring](#core_change_detectionrs--change-detection-and-re-mirroring)
+- [core_change_detection.rs — Filesystem Watcher](#core_change_detectionrs--filesystem-watcher)
 - [core_scheduler.rs — Background Task Scheduling](#core_schedulerrs--background-task-scheduling)
 - [core_checksum_strategy.rs — Checksum Strategy Selection](#core_checksum_strategyrs--checksum-strategy-selection)
 - [scaling_100k.rs — 100k-Row Performance Budgets](#scaling_100krs--100k-row-performance-budgets)
@@ -137,6 +137,7 @@ This file uses only the standard library's filesystem functions — no binary in
 **Profile.d hook:** `scripts/bitprotector-status.sh` exists and its content contains both the string `bitprotector` and the string `status`, confirming it invokes the status subcommand.
 
 **QEMU wrapper scripts and bundle content:** Each wrapper is checked both for the `exec` delegation line and for the name of the bundle file it delegates to. The bundle files themselves are also read and checked for key content markers:
+
 - `tests/installation/qemu_test.sh` → delegates to `bundles/smoke.sh`; `smoke.sh` contains `qemu-system-x86_64` and `bitprotector*.deb`.
 - `tests/installation/qemu_failover_test.sh` → delegates to `bundles/failover.sh`; `failover.sh` contains `qmp`; the planned-failover scenario contains `drives replace confirm`; the emergency scenario contains `qmp_device_del`.
 - `tests/installation/qemu_uninstall_test.sh` → delegates to `bundles/uninstall.sh`; the purge scenario contains `apt-get purge -y bitprotector` and `/var/lib/bitprotector`; the create-data scenario contains `database run`.
