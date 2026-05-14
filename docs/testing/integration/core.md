@@ -7,7 +7,7 @@ This document covers the integration test files that do not target CLI commands 
 ## Table of Contents
 
 - [core_mirror.rs — File Mirroring Mechanics](#core_mirrorrs--file-mirroring-mechanics)
-- [core_change_detection.rs — Change Detection and Re-Mirroring](#core_change_detectionrs--change-detection-and-re-mirroring)
+- [core_change_detection.rs — Filesystem Watcher](#core_change_detectionrs--filesystem-watcher)
 - [core_scheduler.rs — Background Task Scheduling](#core_schedulerrs--background-task-scheduling)
 - [core_checksum_strategy.rs — Checksum Strategy Selection](#core_checksum_strategyrs--checksum-strategy-selection)
 - [scaling_100k.rs — 100k-Row Performance Budgets](#scaling_100krs--100k-row-performance-budgets)
@@ -19,37 +19,44 @@ This document covers the integration test files that do not target CLI commands 
 
 **File:** `tests/integration/core_mirror.rs`
 
-This test file exercises the mirroring module end-to-end with real files on disk, as opposed to the unit tests which verify internal logic with mocked repositories.
+This test file exercises the two mirroring functions directly with real files on disk, verifying both the happy path and all error conditions.
 
-**Basic mirror:** A file created in the primary directory is mirrored to the corresponding path in the secondary directory. After mirroring, the secondary file exists and its content matches the primary.
+**`restore_mirror_from_master` — copy primary → secondary:**
 
-**Subdirectory handling:** A file nested in a subdirectory of the primary (e.g., `docs/reports/file.txt`) is mirrored to the same relative path under the secondary root. The subdirectory is created on the secondary if it does not already exist.
+- *Happy path:* A file on the primary is copied to the matching path on the secondary. After the call the secondary file exists and its content matches the primary.
+- *Missing primary:* Attempting to mirror a file that has been removed from the primary after tracking returns an error whose message contains `does not exist`.
+- *Checksum mismatch on source:* If the primary file has been tampered with (content differs from the stored checksum), the call returns an error whose message contains `checksum mismatch`. No stale copy is written to the secondary.
+- *Subdirectory creation:* A file nested under a multi-level path (e.g. `a/b/nested.txt`) is mirrored correctly and the directory tree is created on the secondary if it does not yet exist.
+- *Secondary drive failed:* When the secondary has been put through `mark_drive_quiescing` → `confirm_drive_failure`, the call returns an error. Mirroring to a failed drive is refused.
 
-**Restore from secondary:** After a failover where the secondary becomes the active drive, `restore_from_secondary` copies a file from the secondary path back to the primary path. This is used during the rebuild phase when a replacement primary is assigned.
+**`restore_from_mirror` — copy secondary → primary:**
 
-**Mirror overwrites stale secondary:** If the secondary already contains an older version of the file, mirroring overwrites it with the current primary version. The content of the secondary matches the primary after the mirror.
+- *Happy path:* Given a secondary copy with matching content, the function restores the primary file from the mirror.
+- *Mirror missing:* If no file exists on the secondary, the call returns an error.
+- *Checksum mismatch on mirror:* If the secondary file is corrupted (content differs from the stored checksum), the call returns an error whose message contains `checksum mismatch`.
+- *Primary drive failed:* When the primary has been put through `mark_drive_quiescing` → `confirm_drive_failure`, the call returns an error.
 
-**Missing source file:** Attempting to mirror a file that does not exist on the primary returns an error. No partial file is created on the secondary.
+**`mirror_file` — standby readiness guard:**
 
-**Checksum verification after mirror:** After a mirror operation, the checksum stored in the database for the file matches the checksum of the secondary copy. This confirms the integrity of the copy operation rather than just checking that a file was created.
-
-**Large file correctness:** A test with a multi-megabyte file confirms that the mirror is complete and produces the correct checksum, guarding against truncation or partial writes.
+- When the secondary drive is in the `quiescing` state (not yet failed but no longer accepting syncs), `mirror_file` returns an error rather than attempting the copy.
 
 ---
 
-## core_change_detection.rs — Change Detection and Re-Mirroring
+## core_change_detection.rs — Filesystem Watcher
 
 **File:** `tests/integration/core_change_detection.rs`
 
-**Unchanged file is not re-queued:** A file that has been mirrored and whose on-disk content has not changed is not added to the sync queue when change detection runs. This avoids unnecessary mirror operations.
+This file tests the `watch_folder` function, which wraps the OS inotify/FSEvents interface and delivers `notify::Event` values to a caller-supplied callback. Tests use a real temporary directory and wait up to 2 seconds for events to arrive.
 
-**Modified file is detected:** A file whose content has changed since its last mirror has a different checksum than the stored value. Change detection identifies this and adds the file to the sync queue. After the queue is processed, the secondary reflects the updated content.
+**New file detected:** Writing a new file into a watched directory causes at least one event to be delivered to the callback.
 
-**Deleted file is detected:** A file that has been removed from the primary disk is detected as deleted. The tracking record is updated to reflect the deletion.
+**Modification detected:** Overwriting an existing file in the watched directory triggers an event.
 
-**Folder-level change detection:** Running change detection on a tracked folder checks all files discovered in that folder. Only the files that have changed are re-queued; unchanged files are skipped.
+**Deletion detected:** Removing a file from the watched directory triggers an event.
 
-**Re-mirror after detection:** After change detection identifies a changed file and enqueues it, processing the sync queue mirrors the updated file. The secondary then contains the new version.
+**Invalid path returns error:** Calling `watch_folder` with a path that does not exist returns an error immediately rather than silently succeeding.
+
+**Drop stops delivery:** Dropping the watcher handle (the value returned by `watch_folder`) stops event delivery cleanly without panicking, even if filesystem activity continues after the drop.
 
 ---
 
@@ -57,17 +64,23 @@ This test file exercises the mirroring module end-to-end with real files on disk
 
 **File:** `tests/integration/core_scheduler.rs`
 
-**Interval schedule triggers:** A schedule configured with `interval_seconds: 5` is triggered on the first evaluation (since it has never run) and then is not triggered again until the interval elapses. The test uses a controlled clock to advance time and verify trigger behavior at exact intervals.
+The scheduler manages a set of background threads, one per enabled schedule. Tests exercise the lifecycle of those threads through the `reload` and `stop_all` methods.
 
-**Cron schedule triggers:** A schedule with a cron expression is triggered at the next wall-clock time matching the expression. The test verifies that a `0 * * * *` schedule (top of every hour) is not triggered immediately when the current time is not at the top of the hour.
+**Lifecycle — empty database:** `reload` on a freshly initialized repo (no schedules) succeeds without starting any threads. `stop_all` on a freshly constructed scheduler (no threads) does not panic.
 
-**Disabled schedule is not triggered:** A schedule with `enabled: false` is never triggered regardless of elapsed time.
+**Lifecycle — start thread on reload:** After inserting an enabled schedule, `reload` starts exactly one background thread for it.
 
-**Multiple simultaneous schedules:** When two schedules are both due at the same instant, both are triggered in the same evaluation cycle. No schedule is skipped.
+**No duplicate threads:** Calling `reload` twice for the same active schedule does not start a second thread.
 
-**Last-run timestamp update:** After a schedule triggers, its `last_run_at` timestamp is updated. This prevents immediate re-triggering on the next evaluation cycle.
+**Reload stops thread when disabled:** If a schedule is updated to `enabled: false` in the database and `reload` is called, the running thread for that schedule is stopped.
 
-**Task type dispatch:** The scheduler dispatches to the correct handler for each task type: `sync`, `integrity_check`, and `database_backup`. The test verifies that triggering a `sync` schedule results in a sync queue being processed, not an integrity run.
+**Reload stops thread when deleted:** If a schedule is deleted from the database and `reload` is called, the thread for that schedule is cleaned up.
+
+**Thread fires and processes work:** A schedule with `interval_seconds: 1` fires after approximately 1 second. The test creates a pending mirror queue item and waits 1.5 seconds; after `stop_all` the queue item is `completed` and the file exists on the secondary drive.
+
+**Mixed enabled/disabled:** When two schedules are configured — one enabled, one disabled — `reload` starts exactly one thread (for the enabled schedule) and `stop_all` cleans up without error.
+
+**`max_duration_seconds` respected:** A schedule with a `max_duration_seconds` constraint is accepted and the thread starts and stops cleanly.
 
 ---
 
@@ -75,19 +88,17 @@ This test file exercises the mirroring module end-to-end with real files on disk
 
 **File:** `tests/integration/core_checksum_strategy.rs`
 
-BitProtector uses BLAKE3 as its checksum algorithm. This test file verifies that the correct algorithm is selected and applied consistently across different scenarios.
+BitProtector has two checksum strategies: `Streaming` (sequential read) and `MmapRayon` (memory-mapped parallel read). The strategy used for a given drive pair depends on the media types involved. These tests verify that strategy selection and the copy-with-checksum helper are correct.
 
-**Consistent output:** Computing the checksum of the same file twice in the same process produces identical results. This confirms the algorithm is deterministic and not seeded with randomtime-dependent values.
+**Strategy parity:** `checksum_file` called with `ChecksumStrategy::Streaming` and then with `ChecksumStrategy::MmapRayon` on the same file produces identical hashes. This confirms the two code paths are computing the same value.
 
-**Different files produce different checksums:** Two files with different content produce different checksums. The probability of a collision with BLAKE3 is negligible, so this is a sanity check against accidental identity.
+**`copy_with_checksum` correctness:** `copy_with_checksum` returns a `(src_hash, dst_hash)` pair. The test verifies that both values match independently-computed checksums of the source and destination files, and that source and destination hashes are equal after a copy.
 
-**Checksum matches known reference:** A fixed input produces the expected known BLAKE3 digest, confirming the algorithm is not accidentally substituted or misconfigured.
+**Pool size — HDD/HDD:** `pool_size_for_pair(Hdd, Hdd, &cfg)` returns the HDD concurrency limit from the configuration.
 
-**Empty file checksum:** An empty file produces a specific known digest. This guards against edge cases in the hashing path for zero-byte files.
+**Pool size — SSD/SSD:** `pool_size_for_pair(Ssd, Ssd, &cfg)` returns the SSD concurrency limit from the configuration.
 
-**Large file efficiency:** A large file (multiple megabytes) is checksummed within a reasonable time budget. This is not a strict performance test — it is a check that the hash does not block indefinitely or read the file repeatedly.
-
-**Binary file handling:** A file containing arbitrary binary data (including null bytes) is checksummed correctly. This confirms the hasher does not treat the data as text or stop at a null terminator.
+**Pool size — mixed pair:** When one drive is HDD and the other is SSD, `pool_size_for_pair` returns the lower HDD limit regardless of which side is HDD and which is SSD.
 
 ---
 
@@ -99,17 +110,15 @@ This test seeds 100,000 tracked file rows into an in-memory SQLite database and 
 
 **Setup:** 100,000 tracked file records are inserted into a single drive pair using a batch transaction. The records include a range of virtual paths and source types to exercise index selectivity.
 
-**Baseline list query:** `GET /api/v1/tracking/items` with no filters must return the first page within 3,000 ms. This is the most common query path and the one most likely to be hit by a full-table scan.
+**Single combined test:** All timing and correctness assertions live in one test function (`test_tracking_items_scales_to_100k_with_pagination_filters_and_budgets`). Within it, four sequential queries are timed:
 
-**Virtual path prefix filter:** Filtering by a `virtual_prefix` value that matches a subset of records must return the correct results within 3,000 ms. The test verifies both the count and the timing.
+1. **Unfiltered first page:** `GET /api/v1/tracking/items?drive_id=…&item_kind=file&page=1&per_page=500` — asserts `total` equals 100,000, `per_page` in the response is 200 (the server-side cap applied regardless of the requested value), and 200 items are returned.
 
-**Source filter:** Filtering by `source=direct` and `source=folder` separately must each return within 3,000 ms. The test verifies that the index on the source column is used effectively.
+2. **Virtual prefix + `has_virtual_path` filter:** Adding `has_virtual_path=true&virtual_prefix=/virtual/docs` — asserts 16,667 results returned and every item's `virtual_path` starts with `/virtual/docs/`.
 
-**Targeted search:** Filtering by a specific search string that matches a small number of records must return within 3,000 ms.
+3. **`has_virtual_path` + `source=folder` filter:** Adding `has_virtual_path=true&source=folder` — asserts 13,334 results returned within budget.
 
-**Pagination cap:** Requesting `per_page=500` returns at most 200 results — the server-side cap — regardless of the requested value. The test verifies the cap is enforced even when 100,000 results are available.
-
-**Why 3,000 ms:** The budget is set conservatively for the test environment (in-memory SQLite without query caching warm-up), giving headroom for CI runner variability while still catching significant regressions. A query that takes longer than 3,000 ms almost certainly indicates a missing index or a full-table scan.
+4. **Targeted text search:** `q=photo-000001` — asserts exactly 1 result returned and its `path` is `media/photo-000001.jpg`.
 
 ---
 
@@ -121,14 +130,18 @@ This file uses only the standard library's filesystem functions — no binary in
 
 **Why this exists:** The `cargo deb` build tool assembles the `.deb` from a set of declared source files. If a file is accidentally removed from the repository or its path is changed without updating the `Cargo.toml` packaging config, the package will build but the installed system will be broken. These tests catch that before the artifact is uploaded.
 
-**Systemd service file:** `packaging/bitprotector.service` exists, contains an `[Unit]` section, and references the correct binary path.
+**Systemd service file:** `packaging/bitprotector.service` exists and contains all four required sections: `[Unit]`, `[Service]`, `[Install]`, and an `ExecStart=` directive.
 
-**Default config:** `packaging/config.toml` exists and contains the expected section headers. It is the template that cloud-init installs during QEMU tests.
+**Default config:** `packaging/config.toml` exists and contains a `[server]` section, a `[database]` section, and a `jwt_secret` field.
 
-**Profile.d hook:** The shell script that sets `BITPROTECTOR_DB` in the user's environment exists and is not empty.
+**Profile.d hook:** `scripts/bitprotector-status.sh` exists and its content contains both the string `bitprotector` and the string `status`, confirming it invokes the status subcommand.
 
-**QEMU bundle scripts:** Each bundle script under `tests/installation/bundles/` exists and is non-empty. The test catches the case where a bundle script is accidentally deleted or moved to a different path.
+**QEMU wrapper scripts and bundle content:** Each wrapper is checked both for the `exec` delegation line and for the name of the bundle file it delegates to. The bundle files themselves are also read and checked for key content markers:
 
-**Wrapper scripts:** The backward-compatible wrappers (`qemu_test.sh`, `qemu_failover_test.sh`, `qemu_uninstall_test.sh`) exist and contain the expected `exec` delegation line.
+- `tests/installation/qemu_test.sh` → delegates to `bundles/smoke.sh`; `smoke.sh` contains `qemu-system-x86_64` and `bitprotector*.deb`.
+- `tests/installation/qemu_failover_test.sh` → delegates to `bundles/failover.sh`; `failover.sh` contains `qmp`; the planned-failover scenario contains `drives replace confirm`; the emergency scenario contains `qmp_device_del`.
+- `tests/installation/qemu_uninstall_test.sh` → delegates to `bundles/uninstall.sh`; the purge scenario contains `apt-get purge -y bitprotector` and `/var/lib/bitprotector`; the create-data scenario contains `database run`.
 
-**Maintainer scripts:** `packaging/scripts/postinst`, `prerm`, and `postrm` exist and contain the expected shell function signatures that the Debian packaging system calls during install and removal.
+**Cargo.toml deb metadata:** `Cargo.toml` contains a `[package.metadata.deb]` section referencing `bitprotector.service`, `bitprotector-status.sh`, `config.toml`, `frontend/dist/**/*`, and the install path `var/lib/bitprotector/frontend`.
+
+**Maintainer scripts:** `packaging/scripts/postinst` exists and contains references to the `bitprotector` user, `/var/lib/bitprotector`, and `/var/lib/bitprotector/frontend`. `packaging/scripts/postrm` exists and handles the `purge` action, removing `/var/lib/bitprotector`, `/var/log/bitprotector`, and `/etc/bitprotector`.

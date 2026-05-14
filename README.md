@@ -11,6 +11,7 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 ## Table of Contents
 
 - [How It Works](#how-it-works)
+- [Core Concepts](#core-concepts)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Install](#install)
@@ -37,6 +38,20 @@ Monitors files across redundant storage, detects bit-decay and silent corruption
 4. If the active drive fails, BitProtector can fail over to the surviving side and retarget virtual paths to it.
 5. When a replacement drive is mounted, BitProtector can queue a rebuild back onto that slot and return the pair to a fully mirrored state.
 6. A **virtual path** layer exposes tracked files and folders at exact absolute filesystem paths by creating symlinks directly at those virtual locations.
+
+---
+
+## Core Concepts
+
+Before diving into commands, it helps to understand the five building blocks that everything else is built on.
+
+| Concept | What it is |
+| --- | --- |
+| **Drive pair** | A named binding of a primary directory to a secondary (mirror) directory. All tracked files are scoped to a pair; the pair tracks which side is currently active and whether the system is mirroring, quiescing for replacement, or rebuilding. |
+| **Tracked file / folder** | A file or folder whose BLAKE3 checksum is recorded in the database. Tracking queues a mirror copy by default. A tracked folder can be scanned to discover the files inside it, and watched for live changes. |
+| **Sync queue** | A persistent work queue of pending `mirror`, `restore`, and `verify` actions. Processing the queue copies or restores files in the background. The queue can be paused and resumed at any time. |
+| **Integrity run** | An async pass that re-hashes every tracked file against the stored baseline and classifies each result (`ok`, `mirror_corrupted`, `master_corrupted`, `both_corrupted`, etc.). With recovery enabled, BitProtector automatically restores from the healthy counterpart wherever one exists. |
+| **Virtual path** | A user-defined absolute symlink that always resolves to the current active copy of a tracked file or folder. Symlinks are retargeted automatically when the active drive changes (e.g. after failover). |
 
 ---
 
@@ -116,60 +131,79 @@ sudo cp -r frontend/dist/* /var/lib/bitprotector/frontend/
 
 ## Quick Start
 
+The minimal path to protected, mirrored storage is three steps: register a drive pair, track your files, and process the mirror queue. Everything else — integrity checks, virtual paths, scheduling, and drive replacement — builds on that foundation.
+
+### 1. Register a drive pair and start tracking
+
 ```bash
-# 1. Register a drive pair (specify media type to tune checksum parallelism)
+# Register a drive pair. Specifying the media type lets BitProtector tune
+# BLAKE3 checksum parallelism (HDDs benefit from lower concurrency than SSDs).
 bitprotector drives add mybackup /mnt/primary /mnt/mirror \
   --primary-media-type hdd --secondary-media-type hdd
 
-# 2. Track a file (queues mirror work by default)
+# Track a single file. This records a BLAKE3 checksum and queues a mirror copy.
 bitprotector files track <drive-pair-id> documents/report.pdf
 
-# 3. Track a folder, then scan it to discover files (scan queues mirror work)
+# Or track a whole folder: add it, then scan to discover all files inside.
+# The scan queues mirror work for every discovered file.
 bitprotector folders add <drive-pair-id> documents
 bitprotector folders scan <folder-id>
 
-# Optional: watch a folder for live filesystem changes (runs until Ctrl+C)
+# Optional: watch a folder for live filesystem changes (runs until Ctrl+C).
+# When a tracked file changes, the checksum is updated and re-mirroring is queued.
 bitprotector folders watch <folder-id>
+```
 
-# 4. Process queued mirror/sync work
+### 2. Mirror and verify
+
+```bash
+# Process the queue: copies every pending file from the active drive to the standby.
 bitprotector sync process
 
-# Optional: pause or resume automatic queue processing
+# Optional: pause or resume the automatic queue processing at any time.
 bitprotector sync pause
 bitprotector sync resume
 
-# 5. Optional: mirror immediately without waiting for queue processing
+# Optional: bypass the queue and mirror a single file immediately.
 bitprotector files mirror <file-id>
 
-# 6. Optional: mirror all unmirrored tracked files under one folder now
+# Optional: mirror all unmirrored files under a folder right now.
 bitprotector folders mirror <folder-id>
 
-# 7. Run an integrity check (persisted run summary/results)
+# Run an integrity check. Re-hashes all tracked files against stored baselines.
+# Results are persisted and can be polled while the run is in progress.
 bitprotector integrity check all
 
-# 8. Show overall status
+# Show a one-screen summary of drive health, mirror coverage, and recent events.
 bitprotector status
+```
 
-# 9. Assign a virtual path (creates a symlink exactly at this absolute path)
+### 3. Optional: virtual paths, drive replacement, backups, and scheduling
+
+```bash
+# Assign a virtual path: BitProtector creates a symlink exactly at this
+# absolute location. The symlink retargets automatically after a failover.
 bitprotector virtual-paths set <file-id> /docs/report.pdf
 
-# Recreate all virtual path symlinks (e.g. after manual cleanup)
+# Recreate all virtual path symlinks (e.g. after manual cleanup).
 bitprotector virtual-paths refresh
 
-# 10. Planned primary replacement workflow
+# Planned primary replacement workflow.
+# Use mark→confirm so you can quiesce external I/O before BitProtector switches over.
 bitprotector drives replace mark <drive-pair-id> --role primary
 # (optional) cancel if you change your mind:
 bitprotector drives replace cancel <drive-pair-id> --role primary
 bitprotector drives replace confirm <drive-pair-id> --role primary
 bitprotector drives replace assign <drive-pair-id> --role primary /mnt/new-primary
-bitprotector sync process
+bitprotector sync process   # rebuilds tracked files onto the replacement drive
 
-# 11. Database backup destinations
+# Register backup destinations for the SQLite database itself.
 bitprotector database add /mnt/mirror/bitprotector.db --drive-label "mirror-drive"
 bitprotector database run               # back up now to all enabled destinations
 bitprotector database check-integrity   # verify backup copies, repair where possible
 
-# 12. Scheduler (cron expression or fixed interval; optional max run duration)
+# Automate recurring work with the scheduler.
+# Use a fixed interval (seconds) or a cron expression; --max-duration caps run time.
 bitprotector scheduler add --task-type sync --interval 3600
 bitprotector scheduler add --task-type integrity_check --cron "0 2 * * *" --max-duration 3600
 bitprotector scheduler list

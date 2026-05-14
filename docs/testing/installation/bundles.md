@@ -37,19 +37,19 @@ Verifies the `bitprotector` binary is on the PATH and responds to `--version`. C
 Confirms the `bitprotector.service` systemd unit is `active` (running) and that the HTTPS endpoint responds to a health check. This is the foundation for all API-based scenarios.
 
 **smoke-03 — CLI smoke**  
-Runs basic CLI commands (`drives list`, `files list`) against the service database to confirm the CLI is functional and the database was initialized correctly by the service.
+Runs basic CLI commands (`drives list`, `status`) against the service database to confirm the CLI is functional and the database was initialized correctly by the service.
 
 **smoke-04 — Profile.d installed**  
 Verifies the `profile.d` hook script that sets `BITPROTECTOR_DB` is installed at the expected path. This script is what makes the CLI usable without passing `--db` on every invocation.
 
 **smoke-05 — Profile.d execution**  
-Sources the profile hook in a login shell and confirms that `BITPROTECTOR_DB` is set to the correct database path in the resulting environment.
+Sources the profile hook and checks its conditional output behavior: confirms it produces no output when the database file is absent, and produces status output when the database file exists.
 
 **smoke-06 — ldd version sanity**  
-Runs `ldd` against the binary and confirms it links against the expected glibc version. This guards against accidental cross-compilation to an incompatible glibc version.
+Runs `ldd` against the binary and confirms there are no missing shared libraries. Verifies the PAM library is among the linked libraries. Also checks that the binary's `--version` output matches the upstream version recorded in the installed package.
 
 **smoke-07 — Journald integration**  
-Triggers a service action that produces a structured log entry and then reads it back from the system journal via `journalctl`. Confirms that the service writes to journald and the log entry has the expected fields.
+Restarts the `bitprotector.service` unit and then queries `journalctl` for output from the bitprotector unit. Confirms that at least one log line appears in the system journal, verifying basic journald integration.
 
 **smoke-08 — PAM login**  
 Authenticates against the API using the PAM-backed credentials (`testauth` / `hunter2`) that were provisioned via cloud-init. Confirms that the PAM module is correctly installed and the service correctly delegates password validation to PAM.
@@ -58,7 +58,7 @@ Authenticates against the API using the PAM-backed credentials (`testauth` / `hu
 Issues a JWT via the login endpoint, restarts the `bitprotector.service` unit, and then uses the same JWT to make an authenticated API request. Confirms that JWTs are valid based on the secret key in the config file rather than in-memory state.
 
 **smoke-10 — TLS cert rotation**  
-Replaces the TLS certificate and key files on disk and sends `SIGHUP` (or restarts the service) to reload the TLS configuration. Confirms the new certificate is served without requiring a full reboot.
+Retrieves the current TLS fingerprint, regenerates the certificate and key files in place, and runs `systemctl restart bitprotector` to reload the TLS configuration. Confirms the new fingerprint differs from the original, verifying the certificate was rotated.
 
 **smoke-11 — Path traversal rejected**  
 Sends API requests with paths containing `..` components designed to escape the drive root. Confirms all such requests are rejected with `400 Bad Request` rather than being resolved to a path outside the intended root.
@@ -67,7 +67,7 @@ Sends API requests with paths containing `..` components designed to escape the 
 Reboots the VM and waits for the SSH server to return. After reboot, confirms that the service is running, tracked data is still present in the database, and the database file is at the expected path. This catches data stored in non-persistent locations such as `/tmp`.
 
 **smoke-13 — Database backup, repair, and staged restore**  
-Creates a drive pair and tracks a file, then runs a manual database backup. Verifies the backup file exists at the configured destination. Checks the backup integrity. Stages a restore from the backup file and confirms the staged-restore indicator is visible in the API response.
+Adds two backup destinations and runs a manual `database run`. Verifies backup files exist at both destinations. Corrupts one destination's backup file, then runs `database check-integrity` and verifies the corrupted file was repaired (validated via SQLite `integrity_check`). Stages a restore from the repaired backup, restarts the service, and waits for the health API to return `ok`. Confirms the staged restore is reflected in `bitprotector status` and `database list`.
 
 **smoke-16 — Scheduled sync, integrity, and database backup sweep**  
 Configures schedules for sync, integrity check, and database backup with short intervals, then waits for all three to trigger and complete. Confirms the scheduler correctly dispatches each task type and that results are visible in the respective API endpoints afterward.
@@ -89,7 +89,7 @@ Configures schedules for sync, integrity check, and database backup with short i
 The complete planned replacement lifecycle: track files, mirror them, mark the primary for quiescing, confirm failure, assign a replacement, and verify the tracked files are rebuilt on the replacement. Confirms data integrity is maintained throughout.
 
 **failover-02 — Emergency failover via QMP**  
-Simulates an unplanned disk loss by using the QEMU Machine Protocol to disconnect the primary disk device while the service is running. Confirms the service detects the loss, switches to the secondary as the active drive, and continues to serve reads from the secondary.
+Simulates an unplanned disk loss by using the QEMU Machine Protocol to hot-remove the replacement-primary disk (the active drive at this point, after failover-01). Runs `bitprotector integrity check 1` to trigger detection of the missing device. Confirms the active role switches to the secondary drive and the virtual path resolves to `/mnt/mirror`.
 
 **failover-03 — Bit-flip corruption and auto-repair**  
 Corrupts a single byte in the secondary copy of a tracked file. Runs an integrity check with auto-recovery enabled. Confirms the service detects the mismatch, re-mirrors from the primary, and the repaired secondary file matches the primary.
@@ -98,10 +98,10 @@ Corrupts a single byte in the secondary copy of a tracked file. Runs an integrit
 Corrupts both the primary and secondary copies of a tracked file. Runs an integrity check. Confirms the service reports the file as unrecoverable (both copies differ from the stored checksum) rather than silently re-mirroring a corrupted file.
 
 **failover-05 — Large file streaming**  
-Tracks and mirrors a large file (multiple gigabytes). Confirms the mirror completes correctly, the checksum matches, and the service does not run out of memory or timeout during the operation.
+Tracks and mirrors a 200 MB file allocated with `fallocate`. Runs `integrity check-all --recover` to confirm the file is consistent. Optionally reads the running service's RSS from `/proc/[pid]/status` and asserts it stays below 350 MB, guarding against memory growth on large files.
 
 **failover-06 — Integrity-triggered auto-recovery**  
-Configures an integrity schedule to run automatically. Corrupts a secondary file and waits for the scheduled integrity run to execute. Confirms the auto-recovery triggered by the schedule repairs the file without manual intervention.
+Corrupts the primary copy of a tracked file (simulating a bad write to the primary). Runs `integrity check-all --drive-id 1 --recover` manually. Confirms the service detects the mismatch, restores the primary from the mirror copy, and `cmp` verifies both copies are identical.
 
 **failover-07 — Virtual-path folder retarget after failover**  
 A folder with a virtual path is tracked on the primary. After failover to the secondary, the folder's virtual path retarget is verified: files exposed at the virtual path now read from the secondary.
@@ -116,10 +116,10 @@ Creates two separate drive pairs where the secondary of each pair is on the same
 Configures primary and secondary drives on filesystems of different types (ext4 and xfs). Confirms that mirroring works correctly regardless of whether the source and destination filesystems are the same type.
 
 **failover-11 — Device add / hot-insert**  
-Uses QMP to hot-insert a new disk device into the running VM. Registers the new device as a replacement drive via the API. Confirms the hot-inserted device is correctly recognized and can be used as a replacement without rebooting.
+First uses QMP to hot-remove the replacement-primary device, then confirms that `drives replace assign` correctly fails when the target path is absent. Re-inserts the device via QMP, remounts it, and completes the assignment via the CLI. Runs `sync process` and confirms the tracked file is present on the hot-inserted device.
 
 **failover-12 — QMP hot-remove secondary**  
-Uses QMP to hot-remove the secondary disk while a mirror operation is in progress. Confirms the service handles the removal gracefully — the in-progress mirror fails cleanly and the sync queue item is marked for retry rather than leaving the service in a broken state.
+Uses QMP to hot-remove the secondary (mirror) disk. Runs `integrity check-all --drive-id 1 --recover` after the removal and confirms the output signals that the secondary drive is unavailable. Also confirms `drives show` still reports the active role as `primary`, verifying the service continues to operate in a degraded-but-alive state.
 
 ---
 
@@ -134,10 +134,10 @@ Uses QMP to hot-remove the secondary disk while a mirror operation is in progres
 ### Scenarios
 
 **uninstall-01 — Package install verification**  
-Confirms the package is correctly installed before any removal steps. Verifies the binary, service, config, and profile hook are all present.
+Confirms the package is correctly installed before any removal steps. Verifies the binary is on the PATH and `bitprotector --version` succeeds.
 
 **uninstall-02 — Package-owned data creation**  
-Creates a tracked drive pair, some tracked files, and a database backup configuration. This establishes user data that should survive the purge.
+Stops the service, adds a backup destination, and runs `database run` to produce a backup file at the configured path. Verifies the backup file exists. Also creates a user-owned file under `/mnt/primary/docs/` to serve as drive data that must survive the subsequent purge.
 
 **uninstall-03 — Full purge of package-owned assets**  
 Runs `apt-get purge bitprotector` and then verifies that all package-owned files are removed: the binary, systemd unit, PAM config, profile hook, default config, and systemd socket. The service is no longer running.
@@ -162,7 +162,7 @@ Seeds several hundred files, configures sync and integrity schedules, and waits 
 Continuously writes new files and modifies existing ones while a backup is in progress. Confirms the backup completes successfully and is consistent even under active write load.
 
 **application-workflows-03 — Scheduled backup-integrity repair**  
-Creates a backup, corrupts the backup file, and triggers a scheduled integrity check on the backup. Confirms the check detects the corruption and reports the backup as invalid.
+Corrupts one of the two backup files from app-02 (or bootstraps a fresh backup if needed). Enables the backup integrity schedule with a short interval and polls for `last_integrity_status == "repaired"` on the corrupted destination. Verifies the repaired file passes SQLite `integrity_check` and that a `.blake3` hash file is present alongside it.
 
 **application-workflows-04 — Restart schedule persistence**  
 Configures several schedules, restarts the service, and confirms the schedules are still present and correctly timed after the restart.
@@ -172,7 +172,7 @@ Configures several schedules, restarts the service, and confirms the schedules a
 ## Resilience
 
 **Entry point:** `tests/installation/bundles/resilience.sh`  
-**Scenarios:** `tests/installation/scenarios/resilience/` (8 scenarios)  
+**Scenarios:** `tests/installation/scenarios/resilience/` (7 scenarios)  
 **Purpose:** Validates that the service handles filesystem-level errors and process signals gracefully rather than crashing or corrupting data.
 
 ### Scenarios
@@ -181,25 +181,25 @@ Configures several schedules, restarts the service, and confirms the schedules a
 Fills the secondary disk to capacity and then triggers a mirror operation. Confirms the service returns an appropriate error rather than hanging, crashing, or silently producing a truncated file.
 
 **resilience-02 — Read-only mirror**  
-Makes the secondary directory read-only (`chmod -R a-w`) and triggers a mirror. Confirms the service correctly reports a permission error for each affected file and does not crash.
+Remounts the secondary filesystem as read-only (`mount -o remount,ro`) and triggers a mirror. Confirms the mirror fails cleanly. After remounting the filesystem as read-write, confirms a subsequent mirror succeeds and `cmp` verifies both copies are identical.
 
-**resilience-03 — Permission errors**  
-Removes execute permission from a directory on the primary drive, making subdirectory listing impossible. Confirms the service handles the permission error during a folder scan without crashing.
+**resilience-03 — Permission errors on a tracked file**  
+Removes read permission from an already-tracked file on the primary drive. Runs an integrity check and confirms the service reports the file as unavailable rather than crashing. After `chmod 644` restores the permission, re-running the integrity check with `--recover` succeeds.
 
 **resilience-04 — Symlink loop**  
-Creates a symlink loop in a tracked folder (a symlink pointing to a parent directory). Triggers a folder scan. Confirms the service detects the loop, skips the problematic entry, and does not hang or run indefinitely.
+Creates a symlink that points to `.` (the current directory) inside a tracked folder, creating a traversal loop. Runs `folders scan` under `timeout 10`. Confirms the scan exits within the time limit rather than hanging indefinitely.
 
 **resilience-05 — SIGTERM recovery**  
-Sends `SIGTERM` to the service process while a long-running mirror is in progress. Confirms the service shuts down cleanly, the partial mirror does not corrupt the secondary file, and the sync queue item is correctly marked for retry on next start.
+Sends `SIGTERM` to the CLI `bitprotector sync process` subprocess while it is processing a large sync queue. Confirms the subprocess exits cleanly and the queue remains consistent — a subsequent `sync process` call completes all remaining items without errors.
 
 **resilience-06 — SIGKILL recovery**  
-Sends `SIGKILL` to the service process (no chance for cleanup). Confirms the service restarts successfully via systemd, detects any partially completed operations, and continues from a consistent state.
+Sends `SIGKILL` to the CLI `bitprotector sync process` subprocess (no chance for cleanup). Confirms the database is left in a consistent state and a subsequent `sync process` call completes all remaining items with no pending or in-progress items left in the queue.
 
 **resilience-07 — Panic recovery**  
-Triggers an internal panic (via a test-only debug endpoint). Confirms systemd restarts the service and the database is intact after the restart.
+Sends `SIGSEGV` directly to the running bitprotector service process. Confirms systemd detects the crash, restarts the service, and the service returns to the `active` state. The expected crash signal is whitelisted so the subsequent journal scrape step does not flag it as an unexpected error.
 
-**resilience-08 — Journal scrape**  
-After running several scenarios that produce errors, scrapes the system journal and confirms that each expected error event was logged with the correct severity level and message. This validates the logging infrastructure under error conditions.
+**Journal scrape (shared step)**  
+After all resilience scenarios have run, calls the shared `journal_error_scraper` helper from `tests/installation/lib/scenarios.sh`. Asserts that no unexpected error-level journal entries from the service exist since the bundle started, confirming that only the intentional errors produced by each scenario were logged.
 
 ---
 
@@ -228,11 +228,11 @@ Installs and configures the package, then reinstalls (not upgrade — same versi
 
 ### Scenarios
 
-**degraded-boot-01 — Missing mount points at boot**  
-Boots the VM without the drive mount points that the tracked drive pairs expect. Confirms the service starts successfully and reports the missing mounts in the API status rather than failing to start.
+**degraded-boot-01 — Fake mount point**  
+Registers a drive pair whose primary path is a plain directory (not backed by a mounted filesystem). Marks the primary as failed through the CLI replacement workflow. Confirms that `drives show` reports the primary state as `failed` and that `bitprotector status` reports a degraded system.
 
-**degraded-boot-02 — Fake mount points at boot**  
-Creates the expected mount point directories but does not mount actual filesystems on them. Confirms the service starts and correctly identifies that the drives are not properly mounted.
+**degraded-boot-02 — Absent device at boot**  
+Registers a drive pair whose primary path does not exist on disk (simulating a missing device that was never mounted). Marks the primary as failed through the CLI. Confirms the service is still active and `bitprotector status` reports a degraded system, demonstrating that the service starts and operates correctly when a registered drive path is absent.
 
 ---
 
@@ -244,8 +244,8 @@ Creates the expected mount point directories but does not mount actual filesyste
 
 This bundle reuses existing smoke scenarios rather than adding new scenario files. It provisions the VM identically to the smoke bundle and then executes the two media-type-specific scenarios.
 
-**Scenario 14 — Media type API and CLI coverage**  
-Creates drive pairs with explicit `primary_media_type` and `secondary_media_type` values. Verifies the API returns the correct types, the CLI displays them, and the types are persisted correctly when updated.
+**Scenario 14 — Media type API coverage**  
+Creates a drive pair via the CLI with explicit `--primary-media-type ssd` and `--secondary-media-type hdd` flags. Verifies the API returns the correct types. Updates the primary media type via a `PUT` request and confirms the updated value is returned by the API.
 
 **Scenario 15 — Parallel integrity `active_workers`**  
 Starts an integrity run on a drive pair with many files so it takes time to complete. While the run is in progress, polls `GET /api/v1/integrity/runs/active` and confirms the `active_workers` field reflects the number of concurrent integrity workers processing files.
@@ -261,11 +261,11 @@ Starts an integrity run on a drive pair with many files so it takes time to comp
 
 ### Scenarios
 
-**scale-01 — 100k file scan**  
-Creates 100,000 files in a tracked folder and runs a folder scan. Verifies the scan completes within a reasonable time budget, all files are discovered, and the tracking endpoint correctly serves paginated results across the full dataset.
+**scale-01 — 100k file scan, sync, and integrity**  
+Creates 100,000 files in a tracked folder. Runs a folder scan, then `sync process`, then `integrity check-all --recover`, capturing wall-clock seconds for each phase. Verifies all three operations complete without error, providing a timing baseline that guards against performance regressions at scale.
 
 **scale-02 — Inotify saturation**  
-Exceeds the default `inotify.max_user_watches` limit to verify the service handles inotify exhaustion gracefully rather than crashing or silently stopping to watch files.
+Creates 5,000 subdirectories each containing a file, adds them under a tracked folder, and runs a folder scan. Reads the current `inotify.max_user_watches` kernel parameter as a diagnostic, then confirms the service unit is still active after the scan completes.
 
 ---
 
@@ -277,8 +277,8 @@ Exceeds the default `inotify.max_user_watches` limit to verify the service handl
 **VM memory:** 1 GB (reduced from the standard 2 GB)  
 **Purpose:** Validates that the service can process a large dataset on a memory-constrained host.
 
-**scale-lowmem-01 — Large dataset under 1 GB RAM**  
-Seeds a large number of tracked files and runs sync and integrity operations. Verifies these operations complete correctly without triggering the OOM killer. Monitors memory usage during the run and confirms it stays within the 1 GB limit.
+**scale-lowmem-01 — 4 GB dataset under 1 GB RAM**  
+Seeds 8 × 512 MB files (4 GB total) using `fallocate` and tracks each one. Runs `sync process` and `integrity check-all --recover`. Verifies that no `Killed process` OOM event appears in `dmesg`. Optionally checks the running service's RSS from `/proc/[pid]/status` and asserts it stays below 300 MB.
 
 ---
 
@@ -291,8 +291,8 @@ Seeds a large number of tracked files and runs sync and integrity operations. Ve
 
 ### Scenarios
 
-**scheduled-load-01 — 10k+ scheduler load timing**  
-Configures a large number of schedules (10,000+) and measures how long the scheduler takes to evaluate all schedules in a single cycle. Verifies the evaluation time stays within a reasonable budget, guarding against O(n) or worse scheduler complexity.
+**scheduled-load-01 — 12k+ file load with sync and integrity timing**  
+Seeds 12,000+ files (100 files across 120 subdirectories), adds a sync schedule and an integrity schedule, and measures wall-clock time for scan, sync, and integrity phases. Verifies all phases complete without error, providing a timing baseline for scheduler and integrity throughput under realistic file counts.
 
 **scheduled-load-02 — Backup and repair under load**  
 Triggers backup and integrity repair operations while the scheduler is processing a high volume of concurrent tasks. Verifies that the repair and backup operations complete correctly and within a reasonable time even under scheduler pressure.

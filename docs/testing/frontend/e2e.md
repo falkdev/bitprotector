@@ -133,7 +133,11 @@ This spec tests an integrity run against a real tracked file. Because the file i
 
 **Delete the schedule:** Clicking "Delete" and confirming the alert dialog removes the schedule. The row disappears from the table.
 
-**Create a cron-based Integrity Check schedule:** The test creates a second schedule: "Integrity Check" task type, "Cron Schedule" timing method, and a "Daily at 02:00" preset. After creation, the row shows "Integrity Check" and the human-readable description of the cron preset. The schedule is deleted at the end of the test as cleanup.
+**Create a cron-based Integrity Check schedule:** The test creates a second schedule: "Integrity Check" task type, "Cron Schedule" timing method, and a "Daily at" preset (the last button matching that label). After creation, the row shows "Integrity Check" and a human-readable description matching `/Daily at/`. The schedule is deleted at the end of the test as cleanup.
+
+**Create a schedule with a custom cron expression:** Switching to "Cron Schedule" and clicking "Custom…" reveals a text input. The expression `15 3 * * 1-5` is typed, and after creation the row displays `Cron: 15 3 * * 1-5`. The schedule is deleted as cleanup.
+
+**Toggle a schedule between enabled and disabled:** A 6-hour interval File Sync schedule is created. Clicking the "Enabled" toggle button shows a "Schedule disabled" toast and the button label changes to "Disabled". Clicking "Disabled" shows a "Schedule enabled" toast and the label reverts to "Enabled". The schedule is deleted as cleanup.
 
 ---
 
@@ -151,4 +155,4 @@ This spec validates the complete backup management workflow against a live guest
 
 **Check backup integrity:** Clicking "Check Integrity Now" verifies the most recent backup file. A toast confirms the check completed. The "Latest Integrity Check" section becomes visible on the page.
 
-**Stage a restore:** Clicking "Restore Older Backup" opens the restore form. The Browse button opens the file picker and the backup file path is entered. After clicking "Stage Restore" and confirming, a toast confirms the restore is staged. The "Restore Staged" indicator becomes visible, confirming the UI reflects the staged state.
+**Stage a restore:** Clicking "Restore Older Backup" opens the restore form. The Browse button opens the file picker and the backup file path is entered into the "Selected Path" field, then confirmed with "Use Backup File". Clicking "Stage Restore" shows a "Restore staged; restart BitProtector to apply it" toast. The "Restore Staged" indicator becomes visible, confirming the UI reflects the staged state.

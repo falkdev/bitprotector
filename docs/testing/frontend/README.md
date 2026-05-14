@@ -77,6 +77,7 @@ The `QemuContext` (in `frontend/tests/e2e/support/qemu.ts`) provides:
 
 - `seedDriveFixture()`: Creates the directory structure and test files on the guest that a test will use. Returns a fixture object with all the paths pre-computed as typed fields. This is called at the start of tests that need drive pairs and tracked files to already exist.
 - `runBitProtector(args)`: Runs a CLI command on the guest over SSH and returns stdout/stderr.
+- `resolvePath(path)`: Resolves a path on the guest filesystem using `readlink -f` and returns the canonical absolute path. Used when tests need to normalise symlinked or relative paths before asserting.
 - `pathExists(path)`: Checks whether a path exists on the guest filesystem. Used after mirror operations to confirm the file was actually written.
 - `readFile(path)`: Reads the content of a file on the guest. Used to verify the content of mirrored files.
 - `diagnostics()`: Returns service logs and status information from the guest. Automatically attached to failed test results for debugging.
