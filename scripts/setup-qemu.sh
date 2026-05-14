@@ -8,7 +8,7 @@
 #
 # GUEST may be:
 #   24.04   — download Ubuntu 24.04 Noble only
-#   26.04   — download Ubuntu 26.04 Plucky only
+#   26.04   — download Ubuntu 26.04 Resolute only
 #   all     — download both (default)
 
 set -euo pipefail
@@ -21,9 +21,9 @@ IMAGES_DIR="${HOME}/images"
 NOBLE_IMAGE="${IMAGES_DIR}/noble-server-cloudimg-amd64.img"
 NOBLE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 
-# 26.04 LTS codename is "Plucky Puffin". Image URL follows the standard pattern.
-PLUCKY_IMAGE="${IMAGES_DIR}/plucky-server-cloudimg-amd64.img"
-PLUCKY_URL="https://cloud-images.ubuntu.com/plucky/current/plucky-server-cloudimg-amd64.img"
+# 26.04 LTS codename is "Resolute Raccoon". Image URL follows the standard pattern.
+RESOLUTE_IMAGE="${IMAGES_DIR}/resolute-server-cloudimg-amd64.img"
+RESOLUTE_URL="https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img"
 
 echo "=== Installing system packages ==="
 
@@ -80,11 +80,11 @@ case "${GUEST}" in
         download_image "${NOBLE_IMAGE}" "${NOBLE_URL}"
         ;;
     26.04)
-        download_image "${PLUCKY_IMAGE}" "${PLUCKY_URL}"
+        download_image "${RESOLUTE_IMAGE}" "${RESOLUTE_URL}"
         ;;
     all)
         download_image "${NOBLE_IMAGE}" "${NOBLE_URL}"
-        download_image "${PLUCKY_IMAGE}" "${PLUCKY_URL}"
+        download_image "${RESOLUTE_IMAGE}" "${RESOLUTE_URL}"
         ;;
     *)
         echo "ERROR: unknown GUEST '${GUEST}'. Use 24.04, 26.04, or all." >&2
