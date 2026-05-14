@@ -21,6 +21,7 @@ DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
 SSH_PORT="${SSH_PORT:-2224}"
 API_PORT="${API_PORT:-18445}"
 TIMEOUT="${TIMEOUT:-900}"
+export SSH_VM_TIMEOUT="${SSH_VM_TIMEOUT:-120}"
 
 require_commands qemu-system-x86_64 qemu-img cloud-localds socat ssh ssh-keygen
 SSH_KEY="$(resolve_ssh_key)"
