@@ -235,14 +235,16 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     )?;
 
     // Idempotent migration: rebuild sync_queue if it doesn't allow 'adopt_mirror'.
-    let needs_migration: bool = conn
-        .query_row(
-            "SELECT CASE WHEN instr(sql, 'adopt_mirror') = 0 THEN 1 ELSE 0 END \
-             FROM sqlite_master WHERE type='table' AND name='sync_queue'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(false);
+    let needs_migration: bool = match conn.query_row(
+        "SELECT CASE WHEN instr(sql, 'adopt_mirror') = 0 THEN 1 ELSE 0 END \
+         FROM sqlite_master WHERE type='table' AND name='sync_queue'",
+        [],
+        |row| row.get(0),
+    ) {
+        Ok(needs_migration) => needs_migration,
+        Err(rusqlite::Error::QueryReturnedNoRows) => false,
+        Err(err) => return Err(err),
+    };
     if needs_migration {
         conn.execute_batch(
             "BEGIN;
