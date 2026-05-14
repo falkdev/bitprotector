@@ -120,7 +120,7 @@ Virtual paths are symlinks or aliases that expose tracked files at an applicatio
 
 ### core/tracker.rs
 
-The tracker module handles file and folder registration on the active drive (metadata capture, source provenance, and optional virtual-path linking). Queueing for initial mirroring is covered by API/CLI handlers and by `auto_track_folder_files`.
+The tracker module handles file and folder registration on the active drive (metadata capture and optional virtual-path linking). Queueing for initial mirroring is covered by API/CLI handlers and by `auto_track_folder_files`.
 
 **What is tested:**
 
