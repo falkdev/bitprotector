@@ -120,11 +120,11 @@ Virtual paths are symlinks or aliases that expose tracked files at an applicatio
 
 ### core/tracker.rs
 
-The tracker module handles the queue-first semantics for file and folder tracking: when a file or folder is added, it is recorded and enqueued for mirroring, but the mirror does not happen synchronously.
+The tracker module handles file and folder registration on the active drive (metadata capture, source provenance, and optional virtual-path linking). Queueing for initial mirroring is covered by API/CLI handlers and by `auto_track_folder_files`.
 
 **What is tested:**
 
-- `track_file`: creates a database record with the correct relative path, BLAKE3 checksum, and file size; `is_mirrored` is initially false; an `adopt_mirror` entry is added to the sync queue. Providing a virtual path simultaneously calls `set_virtual_path` and creates the symlink. Attempting to track a nonexistent file returns an error. Attempting to track the same file twice returns an error and does not add a duplicate queue entry.
+- `track_file`: creates a database record with the correct relative path, BLAKE3 checksum, and file size; `is_mirrored` is initially false. Providing a virtual path simultaneously calls `set_virtual_path` and creates the symlink. Attempting to track a nonexistent file returns an error.
 - `track_folder`: creates the folder record and returns it with no `last_scanned_at` timestamp. Providing a virtual path creates the directory symlink. Attempting to track a nonexistent directory returns an error.
 - `auto_track_folder_files`: discovers all files in a folder tree recursively (verified for files nested at arbitrary depth), creates tracked file records, enqueues an `adopt_mirror` item for each, and stamps `last_scanned_at` on the folder. Files that are already tracked are skipped without creating duplicate records or queue entries. A dedicated test (`test_auto_track_folder_queues_adopt_mirror`) confirms the action is `adopt_mirror` and not `mirror`, ensuring files already present on the standby are not unnecessarily re-copied.
 
