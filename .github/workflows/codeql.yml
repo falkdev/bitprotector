@@ -1,0 +1,44 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-24.04
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libpam0g-dev libclang-dev llvm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: manual
+
+      - name: Build
+        run: cargo build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:rust
