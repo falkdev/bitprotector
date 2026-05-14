@@ -63,7 +63,7 @@ This isolation means every test is independent and can run in any order, in para
 
 The `tests/integration/common/` module provides helpers shared across API test files:
 
-- A macro that initializes a full actix-web `App` with the configured routes, JWT middleware, and an in-memory repository injected as application state. This keeps each test file free of boilerplate.
+- Two macros that initialize a full actix-web `App` with the configured routes, JWT middleware, and an in-memory repository injected as application state. `make_app!(repo)` is used by most API tests and passes a hardcoded `/tmp` path for the `DatabasePath` parameter. `make_app_with_db_path!(repo, path)` is the underlying form and is used directly by `api_database.rs` tests that need a real filesystem path (e.g. for backup write/restore operations). Both keep each test file free of boilerplate.
 - A `make_repo()` function that returns a fresh `Repository` backed by an in-memory SQLite pool with the schema already initialized.
 - A `bearer()` helper that issues a pre-signed JWT for a test user, so tests that need an authenticated request can get a valid `Authorization: Bearer` header without calling the login endpoint.
 

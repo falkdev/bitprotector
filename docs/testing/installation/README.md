@@ -96,8 +96,8 @@ Provides functions for VM lifecycle management:
 - **`log`**: Structured logging with optional GitHub Actions annotation output (group markers, error annotations, warning annotations).
 - **`require_commands`**: Verifies that all listed commands are available on the host. Exits with a descriptive error if any are missing.
 - **`resolve_ssh_key`**: Finds the SSH public key to inject into the VM. Checks `BITPROTECTOR_QEMU_SSH_KEY` first, then falls back to `~/.ssh/id_ed25519.pub` and `~/.ssh/id_rsa.pub`.
-- **`resolve_guest_image`**: Finds the Ubuntu cloud image. Checks `UBUNTU_IMAGE` first, then `GUEST_IMAGE`, then the default path `~/images/noble-server-cloudimg-amd64.img`.
-- **`wait_for_ssh`**: Polls the SSH port until the guest accepts connections, with a configurable timeout and fail-fast behavior if the QEMU process exits.
+- **`resolve_guest_image`**: Finds the Ubuntu cloud image. Checks `GUEST_IMAGE` first; accepts an absolute path or the shorthands `ubuntu-24.04` and `ubuntu-26.04`. Falls back to `UBUNTU_IMAGE` (deprecated alias) and defaults to `ubuntu-24.04` if neither is set.
+- **`wait_for_vm`**: Polls over SSH until the cloud-init sentinel file `/tmp/install-done` exists on the guest, with a configurable timeout and fail-fast behavior if the QEMU process exits. Streams serial console progress lines to the terminal while waiting.
 
 ### `tests/installation/lib/scenarios.sh`
 
@@ -105,17 +105,22 @@ Provides helpers used inside scenario scripts:
 
 - **`ssh_vm`**: Runs a command on the guest over SSH with a configurable timeout. Handles `StrictHostKeyChecking=no` and keepalive settings.
 - **`make_pair`**: Registers a drive pair via the CLI and returns the assigned pair ID. Used by scenarios that need to set up a drive configuration before testing a feature.
-- **`make_file`**: Creates a file of a specified size on the guest (using `/dev/urandom` or a pattern). Used to set up test data for mirroring and integrity tests.
-- **`api_post`**, **`api_get`**, **`api_delete`**: Curl wrappers for the guest HTTPS API with authentication headers and JSON content type pre-configured.
-- **`assert_eq`**, **`assert_contains`**: Assertion helpers that print a diagnostic and exit with a non-zero status on failure.
+- **`seed_file`**: Creates a file of a specified size on the guest using `dd if=/dev/urandom`. Used to set up test data for mirroring and integrity tests.
+- **`api_login`**: Logs in through the API and returns a bearer token. Retries for up to 60 seconds to accommodate service startup races.
+- **`api_json`**: Generic API call wrapper. Takes a method, path, token, and optional JSON body. Returns the response body on success (2xx) and exits non-zero on HTTP error, with retries for transient connectivity failures.
+- **`assert_no_journal_errors`**: Queries `journalctl` for error-level entries from the bitprotector unit since a given timestamp and fails if any unexpected entries are found.
+- **`expect_journal_error`**: Registers a pattern as an expected error, suppressing it from the `assert_no_journal_errors` check. Used by resilience scenarios that deliberately trigger errors.
+- **`journal_error_scraper`**: Final-scenario wrapper that calls `assert_no_journal_errors` using the bundle's `BUNDLE_START_TIME`. Run as the last scenario in every bundle.
 
 ### `tests/installation/lib/snapshots.sh`
 
-Provides QEMU snapshot management for the failover bundle. The failover bundle saves a VM snapshot after initial provisioning so it can restore to a known-good state between scenarios that modify disk topology, without reprovisioning the VM.
+Provides QEMU snapshot management and device hotplug helpers. The failover bundle saves a VM snapshot after initial provisioning so it can restore to a known-good state between scenarios that modify disk topology, without reprovisioning the VM.
 
-- **`snapshot_save`**: Saves the current VM state to a named snapshot using the QEMU monitor.
-- **`snapshot_restore`**: Restores a named snapshot.
-- **`qmp_command`**: Sends a QEMU Machine Protocol command to the VM's QMP socket. Used for hotplug and hot-remove operations.
+- **`qmp_savevm`**: Saves the current VM state to a named snapshot via QMP `savevm`.
+- **`qmp_loadvm`**: Restores a named VM state snapshot via QMP `loadvm`.
+- **`qmp_delvm`**: Deletes a named VM snapshot via QMP `delvm`.
+- **`qmp_device_add`**: Hot-adds a virtual device by sending a QMP `device_add` command with a JSON device descriptor.
+- **`qmp_device_del`**: Hot-removes a virtual device by ID by sending a QMP `device_del` command.
 
 ---
 
@@ -144,7 +149,7 @@ wget -O ~/images/noble-server-cloudimg-amd64.img \
   https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 ```
 
-The scripts look for the image at `~/images/noble-server-cloudimg-amd64.img` by default. Override this with the `UBUNTU_IMAGE` environment variable.
+The scripts look for the image at `~/images/noble-server-cloudimg-amd64.img` by default. Override this with the `GUEST_IMAGE` environment variable.
 
 ### 2. Build the `.deb` package
 
@@ -195,7 +200,8 @@ These exist so that CI configuration and documentation written before the bundle
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `UBUNTU_IMAGE` | `~/images/noble-server-cloudimg-amd64.img` | Path to the Ubuntu cloud image |
+| `GUEST_IMAGE` | `ubuntu-24.04` | Path to the guest image, or a shorthand (`ubuntu-24.04`, `ubuntu-26.04`). Preferred over `UBUNTU_IMAGE`. |
+| `UBUNTU_IMAGE` | — | Deprecated alias for `GUEST_IMAGE`. Accepted when `GUEST_IMAGE` is unset. |
 | `BITPROTECTOR_QEMU_SSH_KEY` | Auto-detected | SSH public key content to inject into the VM |
 | `SSH_PORT` | Bundle-specific (2222, 2223, etc.) | Host port for SSH forwarding |
 | `API_PORT` | Bundle-specific (18443, 18444, etc.) | Host port for HTTPS forwarding |

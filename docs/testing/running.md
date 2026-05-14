@@ -181,7 +181,7 @@ The `run-tests.sh` script mirrors the CI layer structure without Docker:
 ```bash
 ./scripts/run-tests.sh fast    # lint + unit + Rust integration
 ./scripts/run-tests.sh smoke   # fast + .deb build + QEMU smoke
-./scripts/run-tests.sh full    # smoke + application_workflows + failover + uninstall + resilience + upgrade + degraded-boot
+./scripts/run-tests.sh full    # smoke + application_workflows + failover + uninstall + resilience + upgrade + degraded-boot + drive-media-type
 ```
 
 To run through `act` (Docker-based, uses the same GitHub Actions YAML as CI):

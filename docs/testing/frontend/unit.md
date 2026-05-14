@@ -47,11 +47,15 @@ The dashboard displays system status metrics and quick-action buttons for sync, 
 
 **File:** `frontend/src/pages/DatabaseBackupsPage.test.tsx`
 
-**Create destination using path picker:** The test opens the "Add Destination" form, clicks the Browse button (which opens the `PathPickerDialog`), selects a path through a mock picker, fills in the drive label field, and submits. It verifies that the creation request body contains the correct `backup_path` and `drive_label` values. This test is important because the path comes from a dialog rather than a text field typed by the user, so the wiring between the picker and the form field must be correct.
+**Create destination and run backup:** The test opens the "Add Destination" form, clicks Browse (which invokes the `PathPickerDialog` mock), fills in the drive label field, and submits. It verifies that the creation request body contains `backup_path`, `drive_label`, and `enabled: true`. After creation it clicks "Run Backup Now" and verifies the success toast and the backup file path in the result.
 
-**Run backup immediately:** After a destination exists, clicking "Run Backup Now" calls the run-backup endpoint and a success toast appears. The path written to is displayed in the result.
+**Save backup settings:** The settings form (automatic backup interval, automatic integrity check interval) is filled and submitted. The test verifies the settings body contains `backup_enabled`, `backup_interval_seconds`, `integrity_enabled`, and `integrity_interval_seconds`, sent via `PUT /database/backups/settings`.
 
-**Save backup settings:** The settings form (automatic backup interval, automatic integrity check interval) is filled and submitted. The test verifies the settings are sent to the correct endpoint with the correct body shape.
+**Disables manual actions when no enabled destinations:** When the only configured destination has `enabled: false`, the "Run Backup Now" and "Check Integrity Now" buttons are disabled and a hint is shown.
+
+**Integrity check and staged restore:** Clicking "Check Integrity Now" calls the integrity-check endpoint and renders the result status. Clicking "Restore Older Backup" opens a form with a Browse button; selecting a file path and clicking "Stage Restore" calls the restore endpoint and shows a "Restore staged; restart BitProtector to apply it" toast, and the "Restore Staged" label appears.
+
+**Backup form validation:** Submitting the "Add Destination" form without a backup path shows "Backup path is required." rather than sending the request.
 
 The `PathPickerDialog` is mocked in this test file to return a pre-set path, keeping the test focused on the backup page logic rather than the picker's own behavior (which is tested in `PathPickerDialog.test.tsx`).
 
@@ -77,9 +81,9 @@ The integrity page has several states: idle (showing latest results), running (s
 
 **No drives — button disabled with hint:** When no drive pairs exist, the "Run Check" button is disabled and a helper text element is visible. Clicking the disabled button does not open the start-run modal.
 
-**Start and stop flow through dialog:** The full modal flow is tested: click "Run Check" → modal opens → select a drive pair and toggle auto-recovery → click "Start" → start endpoint is called → running banner appears → click "Stop" → stop endpoint is called → banner disappears. This covers the complete UI state machine for an integrity run without requiring a real backend.
+**Start and stop flow through dialog:** The full modal flow is tested: click "Run Check" → modal opens → click "Start" → start endpoint is called → "Integrity run started" toast and running banner ("Integrity check running...") appear → click "Stop" → stop endpoint is called → "Stop requested for run #301" toast appears.
 
-**Loading state during initial fetch:** While the latest run data is being fetched (the mock response is not yet resolved), the page shows a loading indicator. This confirms the bootstrap loading state is rendered correctly.
+**Active workers card:** When an active run is in `running` status with `active_workers: 4`, a card reading "Files checking in parallel" with the worker count `4` is displayed.
 
 ---
 
@@ -111,9 +115,15 @@ This test is intentionally minimal. The login interaction logic lives in the `us
 
 **Validation feedback for empty interval:** If the interval value field is cleared before submission, the form displays a validation error ("Interval must be a positive number.") rather than sending an invalid request.
 
-**Create cron-based schedule:** The test switches to the "Cron Schedule" timing method, clicks a daily preset, and submits. The created schedule row in the table shows the human-readable description corresponding to the preset.
+**Create cron-based schedule:** The test switches to the "Cron Schedule" timing method, clicks a daily preset ("Daily at 02:00"), and submits. The request body contains `cron_expr: '0 2 * * *'`.
 
-**Local time display:** Schedule times are rendered in the user's local time zone, not UTC. The test uses a locale-aware time formatter to generate the expected string and compares it against what the page renders, ensuring localization is applied consistently.
+**Create custom cron schedule:** The test switches to "Cron Schedule", clicks "Custom…", types `30 4 * * 1-5`, and submits. The request body contains the typed `cron_expr`.
+
+**Cron validation — no expression:** Switching to "Cron Schedule", clicking "Custom…", and submitting without entering anything shows "Select a preset or enter a custom cron expression."
+
+**Interval unit conversion:** Entering 2 in the interval field and selecting "hours" submits `interval_seconds: 7200`.
+
+**Human-friendly descriptions in the table:** Three schedules are loaded — a cron sync at 02:00, an hourly integrity-check, and a 2-minute sync interval. The rows show "File Sync" / "Daily at 02:00" (time formatted to the user's locale via `toLocaleTimeString`), "Integrity Check" / "Every hour", and "Every 2 minutes" respectively.
 
 ---
 
@@ -127,7 +137,23 @@ This test is intentionally minimal. The login interaction logic lives in the `us
 
 **Empty state:** When the queue is empty, the "No queue items" message is rendered.
 
-**Process and pause buttons visible:** When queue items exist, both the "Process Queue" and "Pause Queue" buttons are present.
+**Buttons present with queue items:** "Process Queue", "Clear Completed", and "Pause Queue" are all present. "Run Sync Task" and "Run Integrity Task" are absent.
+
+**Disables process queue when no drive pairs:** "Process Queue" is disabled and a hint is shown; "Clear Completed" remains enabled.
+
+**Clear Completed button state:** Disabled when no completed items exist; enabled when at least one completed item exists.
+
+**Clear completed removes items:** Clicking "Clear Completed" calls `DELETE /sync/queue/completed`, shows a "Cleared 1 completed queue item(s)" toast, and the completed row disappears while pending rows remain.
+
+**Clear completed error:** When the delete endpoint returns 500, a "Failed to clear completed queue items" toast appears and the row is still visible.
+
+**Paused banner:** When `queue_paused: true` is returned, a pause banner is shown and the button label changes to "Resume Queue". Clicking "Resume Queue" calls the resume endpoint and the banner is removed.
+
+**Hidden paused banner:** When `queue_paused: false`, the pause banner is absent and the "Pause Queue" button is visible.
+
+**Pause queue:** Clicking "Pause Queue" calls the pause endpoint and the paused banner appears.
+
+**Resume queue:** Clicking "Resume Queue" calls the resume endpoint and the "Sync queue processing resumed" toast appears, with the banner removed.
 
 ---
 
@@ -137,21 +163,45 @@ This test is intentionally minimal. The login interaction logic lives in the `us
 
 This page is the most complex in the application. It renders a unified list of both tracked files and tracked folders, with filters, a virtual-path tree, and per-item action buttons.
 
-**Unified mixed list with source badges:** When the tracking list endpoint returns a mix of files and folders, each item's row is rendered with the correct source badge ("Direct" for directly tracked files, "Folder" for folder-origin items). Folder rows also display their aggregate status badge.
+**Unified mixed list with source badges:** Files show a "Direct" badge; folder rows show "Folder" and their aggregate status badge ("Partial (2/4)" in the mixed-list test).
 
-**Folder status badge variants:** The test verifies that each of the four folder status values renders the correct badge:
+**Folder status badge variants:** Five status values are tested:
 
-- `not_scanned` — the folder has been added but never scanned
-- `empty` — the folder was scanned but no files were found
-- `tracked` — files have been found but not mirrored
-- `mirrored` — all files are mirrored
-- `partial` — some but not all files are mirrored, with the count displayed as "Partial (N/M)"
+- `not_scanned` → "Not scanned" (no file count displayed)
+- `empty` → "Empty" (no file count displayed)
+- `tracked` → "Tracked (10/10)"
+- `partial` → "Partial (4/10)"
+- `mirrored` → "Mirrored (10/10)"
 
-**Source dropdown does not include "Both":** The source filter dropdown offers "Direct", "Folder", and "All" as options. The "Both" option that the API rejects with `400` is not present in the dropdown. This prevents a class of client-caused API errors.
+**Source dropdown does not include "Both":** The legacy "Both" option is absent. The API rejects `source=both` with 400, so removing it prevents a class of client-caused errors.
 
-**Virtual-path tree selection:** Clicking a node in the left-pane virtual-path tree triggers a new tracking list request with the corresponding `virtual_prefix` query parameter. This confirms the tree drives server-side filtering rather than client-side filtering of already-loaded data.
+**No drive pairs — actions disabled:** When no drive pairs exist, the "Track File" and "Add Folder" buttons are disabled and a hint is shown. Clicking them does not open any modal.
 
-**Left-pane collapse and expand:** Clicking the collapse control hides the virtual-path tree. Clicking again reveals it. The tracking table expands to fill the available space when the tree is collapsed.
+**Filter dropdowns send correct params:** Selecting drive, kind, source, and has_virtual_path from the four filter dropdowns causes the tracking list request to include the matching query parameters.
+
+**Redundant virtual prefix text field removed:** There is no free-text "Virtual path prefix (/docs)" filter input — filtering by virtual path is done exclusively via the tree pane.
+
+**Bulk action bar — multi-select and deselect:** Clicking row checkboxes shows the bulk action bar with a selected-count label ("1 selected (1 file, 0 folders)", "2 selected (2 files, 0 folders)"). Clicking the deselect control hides the bar.
+
+**Bulk action bar — mirror:** Selecting one file row and one folder row and clicking "Mirror" calls `POST /files/{id}/mirror` and `POST /folders/{id}/mirror` for each.
+
+**Bulk action bar — delete:** Selecting mixed items and confirming deletion via the alert dialog calls `DELETE /files/{id}` and `DELETE /folders/{id}` and removes the rows.
+
+**Detail panel navigates after delete:** Deleting the open file while its detail panel is visible moves the panel to the next file. Deleting the last remaining file closes the panel entirely.
+
+**Virtual-path tree drives server-side filtering:** Clicking a tree node sends a new `tracking/items` request with the `virtual_prefix` matching the selected path. Files not matching the prefix disappear from the table.
+
+**Folder set-path flow shows browse control:** Clicking "Set Path" on a folder row opens a "Set Folder Virtual Path" dialog containing a "Browse" button.
+
+**Folder Scan → Mirror button transition:** After clicking "Scan" on a `not_scanned` folder the button changes to "Mirror" (status becomes `tracked`). After clicking "Mirror" the button returns to "Scan" (status becomes `mirrored`).
+
+**Virtual tree refreshes after folder scan:** After a successful scan, the virtual-paths tree is re-fetched (tree call count increases).
+
+**Virtual paths pane collapse and expand:** The pane starts collapsed (tree nodes not present). Clicking the toggle reveals the tree; clicking again hides it; clicking a third time reveals it again.
+
+**File detail panel — BLAKE3 checksum:** Clicking a file row opens the detail panel showing the full BLAKE3 checksum string, the "Primary Mirror" label, and the "Last integrity check" field.
+
+**File detail panel — effective virtual path from list data:** When the files endpoint returns `virtual_path: null` but the tracking list item had a non-null `virtual_path`, the detail panel shows the effective virtual path from the list data.
 
 ---
 
@@ -161,9 +211,13 @@ This page is the most complex in the application. It renders a unified list of b
 
 **File:** `frontend/src/components/layout/AppLayout.test.tsx`
 
-**No top header chrome on authenticated pages:** The application uses a sidebar layout without a traditional top navigation bar on authenticated pages. The test verifies that no `<header>` landmark element is rendered, which would indicate the wrong layout component is being used.
+**No top header chrome on authenticated pages:** The application uses a sidebar layout without a traditional top navigation bar on authenticated pages. The test verifies that no element with the `banner` ARIA role is rendered.
 
 **Sidebar user menu and logout:** The sidebar footer contains the logged-in username and a user menu trigger. The test opens the user menu, verifies the username is displayed in the footer, and clicks "Logout". After logout, the login page is rendered and the auth store reflects the unauthenticated state.
+
+**Sidebar collapse persists across remounts:** Clicking the sidebar toggle collapses the sidebar from `w-56` to `w-16`, stores `'1'` in `localStorage` under the collapse key, and nav items switch to icon-only mode with `title` attributes. After unmounting and re-rendering, the sidebar is still collapsed and nav items still show their `title` attributes.
+
+**Dark mode toggle in user menu:** Opening the user menu and clicking the theme toggle adds the `dark` class to the document root. Clicking it again removes the class.
 
 ---
 
@@ -174,6 +228,8 @@ This page is the most complex in the application. It renders a unified list of b
 **Redirect unauthenticated users:** When the auth hook reports `isAuthenticated: false`, rendering a protected route redirects to `/login` rather than rendering the protected content.
 
 **Render children when valid:** When the auth hook reports `isAuthenticated: true` and token validation succeeds, the protected content is rendered.
+
+**Redirect when validation fails:** When `isAuthenticated: true` but `validate()` resolves to `false`, the component redirects to `/login`.
 
 ---
 
@@ -225,6 +281,8 @@ This page is the most complex in the application. It renders a unified list of b
 
 **Conditional mounting:** When the parent component does not render `ModalLayer` (because a condition is false), no overlay appears. When the condition becomes true, the overlay appears. This verifies that the portal correctly tracks the component lifecycle.
 
+**Toast actions work through the overlay:** When a `ModalLayer` is visible and a `sonner` toast with an action button is triggered, clicking the toast action button calls its callback. This confirms the overlay does not block pointer events on toasts rendered outside it.
+
 ---
 
 ### PathPickerDialog.test.tsx
@@ -233,10 +291,12 @@ This page is the most complex in the application. It renders a unified list of b
 
 The path picker dialog is a lazy-loading tree browser that communicates with the filesystem browse API. It is used in several places: drive configuration, file tracking, folder tracking, and backup destination creation.
 
-**Lazy loading of children:** When the dialog opens, the root directory entries are loaded. Expanding a directory node triggers a new API request for that directory's children rather than loading everything up front.
+**Root directory loaded on open:** When the dialog opens, `filesystemApi.children` is called with `{ path: '/', include_hidden: false, directories_only: true }` and the root entries are rendered.
 
-**Tree selection calls onPick:** Clicking a directory in the tree selects it and calls the `onPick` callback with the selected path when the user confirms.
+**Constrained root via `rootPath` prop:** When `rootPath="/mnt/primary"` is passed, the initial request uses `path: '/mnt/primary'` instead of `/`.
 
-**Directory-only filtering:** When opened in `mode: "directory"` mode, file entries are visually absent from the tree. Only directories are shown and selectable.
+**Lazy loading on expand:** Expanding a directory node triggers a second `children` call for that directory's path. The child entries appear in the tree after loading.
 
-**Hidden file toggle:** The "Show hidden files" toggle triggers a new request with `show_hidden=true` and hidden entries appear in the tree.
+**File-mode directory selection disables confirmation:** When opened in `mode: "file"`, clicking a directory entry shows "Select a file, not a folder" and the "Use Path" button is disabled.
+
+**Unavailable endpoint shows recovery hint:** When the API call rejects with the "filesystem browser endpoint not yet available" error message, that message is displayed alongside "You can still type a path above and confirm it manually."

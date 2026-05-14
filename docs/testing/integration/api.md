@@ -34,7 +34,7 @@ For an explanation of the harness and isolation strategy, see [README.md](README
 
 **`DELETE /api/v1/drives/{id}`** — Deletes an empty drive pair and returns `204 No Content`. Deleting a pair that has tracked files returns `409 Conflict` to prevent accidental data loss.
 
-**Drive state endpoints** — `POST /api/v1/drives/{id}/mark`, `/cancel`, `/confirm`, and `/assign` are covered by inline unit tests in `src/api/server.rs`. The integration file covers the happy-path `mark → confirm → assign` sequence to verify the state machine through the HTTP layer.
+**Drive state endpoints** — `POST /api/v1/drives/{id}/mark`, `/cancel`, `/confirm`, and `/assign` are covered by inline unit tests in `src/api/server.rs`. The integration file covers the `mark → cancel` path to verify the replacement workflow state machine through the HTTP layer. Sending an invalid replacement role returns `400 Bad Request`.
 
 **Media type update** — `PUT /api/v1/drives/{id}` with `primary_media_type: "ssd"` persists the change, and a subsequent `GET` returns the updated type. This guards against media type being silently discarded.
 
@@ -152,13 +152,13 @@ This file covers the asynchronous integrity run lifecycle, which is more complex
 
 **`GET /api/v1/sync/queue`** — Returns pending items with their file ID, action, and status. Includes the `queue_paused` boolean.
 
-**`POST /api/v1/sync/queue/process`** — Processes all pending items. The response reports how many items were completed. After processing, the queue is empty.
+**`POST /api/v1/sync/process`** — Processes all pending items. The response reports how many items were completed. After processing, the queue is empty.
 
-**Pause and resume:** `POST /api/v1/sync/queue/pause` sets `queue_paused: true`. A subsequent process call returns immediately with zero items processed. `POST /api/v1/sync/queue/resume` re-enables processing.
+**Pause and resume:** `POST /api/v1/sync/pause` sets `queue_paused: true`. A subsequent process call returns immediately with zero items processed. `POST /api/v1/sync/resume` re-enables processing.
 
 **Manual action resolution:** Items in `user_action_required` status are not automatically processed. `POST /api/v1/sync/queue/{id}/resolve` with `{ "resolution": "keep_master" }` or `"keep_mirror"` marks the item resolved and returns the updated item.
 
-**`DELETE /api/v1/sync/queue/{id}`** — Removes a specific queue item without processing it.
+**`DELETE /api/v1/sync/queue/completed`** — Bulk-removes all completed items from the queue. The response body contains a `deleted` count. Items with other statuses (pending, failed, etc.) are not affected.
 
 ---
 
@@ -166,9 +166,13 @@ This file covers the asynchronous integrity run lifecycle, which is more complex
 
 **File:** `tests/integration/api_logs.rs`
 
-**`GET /api/v1/logs`** — Returns log entries in reverse chronological order. Each entry has an ID, message, optional file ID, and timestamp.
+**`GET /api/v1/logs`** — Returns log entries in reverse chronological order inside a `logs` array. Each entry has an `event_type`, ID, optional file ID, and timestamp. The `event_type` discriminates entries (e.g. `sync_completed`, `file_created`, `recovery_success`).
 
-**`file_id` filter:** `GET /api/v1/logs?file_id=N` returns only entries associated with the specified file. Entries for other files are excluded.
+**`event_type` filter:** `GET /api/v1/logs?event_type=sync_completed` returns only entries with the given event type. Entries with other types are excluded.
+
+**Date range filter:** `GET /api/v1/logs?from=<ISO-8601>` returns only entries created on or after the given timestamp. Passing a future date returns an empty array.
+
+**Single entry lookup:** `GET /api/v1/logs/{id}` returns one entry by ID. An unknown ID returns `404 Not Found`.
 
 **Pagination:** The `page` and `per_page` parameters control which slice of entries is returned. The response includes `total` so callers can compute the number of pages.
 
@@ -190,9 +194,9 @@ This file covers the asynchronous integrity run lifecycle, which is more complex
 
 **`POST /api/v1/database/backups/run`** — Runs an immediate backup to all enabled destinations. The response is an array of per-destination results, each with the path written and success status.
 
-**`POST /api/v1/database/backups/check`** — Verifies the integrity of the most recent backup at each destination. The response includes a result per destination.
+**`POST /api/v1/database/backups/integrity-check`** — Verifies the integrity of the most recent backup at each destination. Each destination result carries a `status` of either `repaired` (corrupt backup replaced from a healthy peer) or `corrupt` (no healthy peer available). The response is an array of per-destination results.
 
-**`POST /api/v1/database/backups/restore`** — Stages a specific backup file for restore on next service restart. The response confirms the restore is staged. A subsequent `GET` of the status endpoint reflects the staged restore.
+**`POST /api/v1/database/backups/restore`** — Stages a specific backup file for restore on next service restart. The response includes `restart_required: true` and a `safety_backup_path` field giving the path of the safety copy made of the live database before staging. Passing a corrupt file is rejected before staging occurs.
 
 **`GET /api/v1/database/backups/settings`** — Returns the automatic backup settings (interval, enabled, integrity check interval).
 
@@ -206,13 +210,7 @@ This file covers the asynchronous integrity run lifecycle, which is more complex
 
 This file catches coverage that does not fit neatly into any single feature area.
 
-**`GET /api/v1/status`** — Returns the system health summary: drive pair count, tracked file count, pending sync queue count, active integrity run status, and whether the service is healthy. The shape of the response is verified, including all expected fields.
-
-**404 for unknown routes:** Requesting a path that does not match any configured route returns `404 Not Found` with a JSON error body rather than an HTML page or a crash.
-
-**Method not allowed:** Requesting a valid route with the wrong HTTP method (e.g., `DELETE /api/v1/status`) returns `405 Method Not Allowed`.
-
-**Auth required on all protected routes:** A sample of routes from each feature area is tested without an `Authorization` header to confirm the JWT middleware is applied universally.
+**`GET /api/v1/status`** — Returns a system health summary. The shape of the response is verified: `files_tracked`, `drive_pairs`, `degraded_pairs`, `active_secondary_pairs`, `rebuilding_pairs`, and `quiescing_pairs`. The value of `degraded_pairs` increases when a pair is placed in a degraded state, confirming the field reflects live data.
 
 ---
 
@@ -222,14 +220,14 @@ This file catches coverage that does not fit neatly into any single feature area
 
 This file covers the read-only endpoint that powers the path picker dialog in the web UI. The endpoint allows the user to browse the server's filesystem to select drive roots and backup destinations.
 
-**Default root browsing:** `GET /api/v1/filesystem/browse` without parameters returns the top-level directory entries visible to the service user. The response is an array of entries with `name`, `path`, and `kind` fields.
+**Default root browsing:** `GET /api/v1/filesystem/children` without parameters returns the top-level directory entries visible to the service user. The response has a `path` field and an `entries` array. Each entry has `name` and `kind` fields; hidden entries additionally carry `is_hidden: true` and selectable entries carry `is_selectable: true`.
 
-**Nested directory loading:** `GET /api/v1/filesystem/browse?path=/some/directory` returns the children of the specified directory. This is how the path picker lazily loads subdirectories.
+**Nested directory loading:** `GET /api/v1/filesystem/children?path=/some/directory` returns the children of the specified directory. This is how the path picker lazily loads subdirectories.
 
-**Hidden-file toggle:** `GET /api/v1/filesystem/browse?show_hidden=true` includes entries whose names start with `.`. The default (without the parameter) excludes them. The test verifies both behaviors against a directory containing hidden entries.
+**Hidden-file toggle:** `GET /api/v1/filesystem/children?include_hidden=true` includes entries whose names start with `.`. The default (without the parameter) excludes them. The test verifies both behaviors against a directory containing hidden entries.
 
 **Invalid path handling:** Requesting a path that does not exist returns `400 Bad Request` with an error message rather than a `500` or an empty array.
 
 **Unreadable path handling:** Requesting a path for which the service user has no read permission returns an error response rather than crashing.
 
-**Directory-only filtering:** `GET /api/v1/filesystem/browse?dirs_only=true` returns only entries where `kind` is `directory`. File entries are excluded. This is used by the drive path picker, which must select a directory rather than a file.
+**Directory-only filtering:** `GET /api/v1/filesystem/children?directories_only=true` returns only entries where `kind` is `directory`. File entries are excluded. This is used by the drive path picker, which must select a directory rather than a file.

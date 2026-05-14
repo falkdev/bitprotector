@@ -31,19 +31,20 @@ This file covers the full lifecycle of drive pairs through the CLI, including th
 
 **Add and list:** `drives add` with a name, primary path, and secondary path creates a drive pair. The output contains the assigned ID. A subsequent `drives list` shows the pair by name.
 
-**Path validation:** `drives add` with paths that do not exist on disk is rejected with a descriptive error. Tests create real temporary directories to satisfy this validation.
+**Path validation:** `drives add` with paths that do not exist on disk is rejected with a descriptive error. The `--no-validate` flag bypasses this check. Passing the same path for both primary and secondary is also rejected.
 
-**Rename:** `drives rename` changes the name visible in `drives list`.
+**Show a drive pair:** `drives show <id>` prints the full details of one drive pair, including `Primary media:` and `Secondary media:` labels. Requesting an unknown ID exits with failure.
 
-**Delete — empty pair:** Deleting a drive pair with no tracked files succeeds.
+**Media type:** `drives add --primary-media-type ssd` sets the media type label. Passing an unsupported value (e.g. `nvme`) fails at parse time.
 
-**Delete — non-empty pair:** Deleting a drive pair that has tracked files is rejected. This ensures the user cannot accidentally lose the only record of which files were tracked.
+**Update name:** `drives update --name` changes the name visible in `drives list`.
 
-**Planned replacement workflow:** The sequence `drives mark`, `drives confirm`, `drives assign` is exercised in order, with assertions at each step on the displayed drive state (`quiescing` → `failed` → `rebuilding`). This is the primary CLI coverage for the drive replacement state machine.
+**Delete:** Deleting a drive pair with no tracked files succeeds.
 
-**Cancel quiescing:** `drives cancel` on a quiescing pair restores it to `active`. The test verifies the state is correctly reset before the pair would be treated as failed.
+**Planned replacement workflow:** Two full end-to-end replacement tests cover the complete `drives replace mark --role <role>` → `drives replace confirm --role <role>` → `drives replace assign --role <role> <new-path>` sequence:
 
-**Rebuild completion:** After a `drives assign`, the sync queue is processed and `drives list` is asserted to show the rebuilt pair in the active state. This confirms the end-to-end rebuild path from CLI trigger to completed state.
+- *Primary replacement:* After `confirm`, virtual path symlinks are retargeted from the failed primary to the secondary. After `assign` and `sync process`, files are rebuilt onto the replacement drive and symlinks are retargeted again to the new primary path.
+- *Secondary replacement:* After `assign` and `sync process`, files are rebuilt onto the replacement secondary. `drives show` confirms `Active Role: primary` and `Secondary State: active` — the active role is unchanged.
 
 ---
 
@@ -61,9 +62,7 @@ Covers the file tracking commands: adding files to tracking, mirroring them, ins
 
 **Absolute path input:** `files track` accepts an absolute path that resolves under the drive pair's active root and converts it to the stored relative path. An absolute path outside the active root is rejected.
 
-**Remove a file:** `files remove` untracks a file. It no longer appears in `files list`.
-
-**Integrity check result on a file:** The `files list` output includes the `last_integrity_check_at` timestamp for files that have been integrity-checked.
+**Remove a file:** `files untrack` untracks a file. It no longer appears in `files list`.
 
 ---
 
@@ -95,13 +94,13 @@ Covers the folder tracking commands, including the queue-first scan behavior and
 
 Covers setting and clearing virtual paths on directly tracked files.
 
-**Set a virtual path:** `virtual-paths set` associates an absolute virtual path with a tracked file. The path is visible in `files list`.
+**Set a virtual path:** `virtual-paths set` associates a virtual path with a tracked file and creates a symlink on disk at that path pointing to the actual file. The stored path is persisted to the database.
 
-**Clear a virtual path:** `virtual-paths clear` removes the virtual path association from a file.
+**Remove a virtual path:** `virtual-paths remove` clears the virtual path association from the database and removes the symlink from disk. Calling `remove` on a file that has no virtual path set returns an error.
 
-**Effective path derivation:** For files discovered through folder scans, the effective virtual path is derived from the folder's virtual root plus the file's relative sub-path. This derivation is confirmed by listing files after setting a virtual path on the parent folder.
+**List virtual paths:** `virtual-paths list` prints all tracked files that have a virtual path set.
 
-**Invalid path format:** Setting a virtual path that does not start with `/` is rejected.
+**Refresh symlinks:** `virtual-paths refresh` scans all tracked files with a stored virtual path and recreates any symlinks that are missing on disk. This handles cases where symlinks were deleted outside the application.
 
 ---
 
@@ -109,19 +108,15 @@ Covers setting and clearing virtual paths on directly tracked files.
 
 **File:** `tests/integration/cli_integrity.rs`
 
-Covers the integrity check commands and result inspection.
+Covers the per-file and bulk integrity check commands.
 
-**Run an integrity check on all pairs:** `integrity run` triggers a full integrity sweep. The output confirms the run completed and reports the total count of files checked and any issues found.
+**Check a specific file:** `integrity check <file_id>` performs an immediate synchronous check on one file. When the primary and mirror match, the output contains `OK` and the command exits successfully. When the mirror is absent, the output contains `MIRROR_MISSING` and the command exits with a failure code.
 
-**Run on a specific pair:** `integrity run --pair-id N` checks only the specified drive pair.
+**Check all files:** `integrity check-all` checks every tracked file and reports the total count (e.g. `2 checked`). Clean files do not generate `integrity_pass` log events.
 
-**Results listing:** `integrity results` shows the outcome for each file, including the status (`ok`, `mirror_corrupted`, `mirror_missing`, etc.) and the timestamp.
+**Simulated corruption:** Before calling `integrity check`, tests write different bytes to the secondary copy to trigger the `mirror_corrupted` condition.
 
-**Issues-only filter:** `integrity results --issues-only` omits passing files and shows only those that need attention.
-
-**Simulated corruption:** Tests write a different byte sequence to the secondary copy of a file before running integrity. The result for that file is `mirror_corrupted`.
-
-**Auto-recovery:** When `integrity run --recover` is passed and a `mirror_corrupted` file is found, the secondary is re-mirrored from the primary. The subsequent result for that file is `ok`.
+**Auto-recovery:** `integrity check --recover <file_id>` re-mirrors the file from the primary when corruption is detected. The output contains `Recovery: successful`, the mirror is restored to match the primary, any pending mirror queue item is reconciled to `completed` status, and both `recovery_success` and `sync_completed` log entries are written for the file.
 
 ---
 
@@ -135,9 +130,13 @@ Covers the sync queue management commands.
 
 **Process queue:** `sync process` processes all pending items in the queue, mirroring files to the standby. The output reports the number of items processed.
 
-**Pause and resume:** `sync pause` prevents new items from being processed. `sync resume` re-enables processing. Tests verify that `sync process` respects the paused state.
+**Add to queue:** `sync add <file_id> <action>` enqueues a file with a specified action (e.g. `verify`). The item appears in `sync list`.
 
-**Manual action items:** Items in `user_action_required` status are listed but not automatically processed. The test verifies the item appears in `sync list` with the correct status.
+**Run a named task:** `sync run sync` triggers a full sync pass and mirrors pending files. `sync run integrity-check` runs a full integrity sweep and persists the run results, including per-file issue rows for files with `mirror_missing` status.
+
+**Manual conflict resolution:** The `resolve_queue_item` helper is tested directly for all three resolution strategies: `keep_master` (restores the mirror from the primary), `keep_mirror` (restores the primary from the mirror), and `provide_new` (copies a supplied file to both sides). Passing a non-existent path with `provide_new` returns an error. Passing an unknown resolution string returns an error. Calling resolve on an item whose action is not `user_action_required` returns an error.
+
+**Process skips manual items:** `process_all_pending` skips `user_action_required` items, returning zero processed, and leaves those items pending.
 
 ---
 
@@ -147,13 +146,15 @@ Covers the sync queue management commands.
 
 Covers reading the event log from the CLI.
 
-**List all entries:** `logs list` returns recent log entries with timestamps, messages, and associated file IDs where applicable.
+**List entries:** `logs list` returns log entries. Supported filters include `--event-type <type>`, `--file-id <id>`, `--from <ISO-8601>`, and `--to <ISO-8601>`. Pagination is controlled by `--page` and `--per-page`.
 
-**Filter by file ID:** `logs list --file-id N` returns only entries associated with the specified tracked file.
+**Show a single entry:** `logs show <id>` prints one log entry by ID.
 
-**Pagination:** `logs list --limit N --offset M` returns the correct page of results. Tests verify both the returned entries and the total count.
+**Filter by event type:** `logs list --event-type integrity_pass` returns only entries with that type, confirmed against a log containing multiple event types.
 
-**Empty log:** On a fresh database, `logs list` returns the "no entries" message and exits cleanly.
+**Automatic log creation:** Tracking a file via `tracker::track_file` automatically creates a `file_created` log entry containing the file name. Processing a sync item automatically creates a `sync_completed` entry. These side-effects are verified in dedicated tests.
+
+**File ID filter:** `logs list --file-id <id>` returns only entries associated with the specified tracked file, confirmed after a sync operation that logs a `sync_completed` event against a known file ID.
 
 ---
 
@@ -163,17 +164,19 @@ Covers reading the event log from the CLI.
 
 Covers the database backup management commands.
 
-**Add a backup destination:** `database add` registers a backup path and drive label. The destination appears in `database list`.
+**Add a backup destination:** `database add` registers a backup path with an optional drive label. The destination appears in `database list` with `priority: 0` and `enabled: true`.
 
-**List destinations:** `database list` shows all configured backup destinations with their paths and labels.
+**List and show destinations:** `database list` shows all configured backup destinations. `database show <id>` shows one destination by ID.
 
 **Remove a destination:** `database remove` deletes the configuration. The destination no longer appears in `database list`.
 
-**Run a backup:** `database backup` copies the current database file to all enabled destinations. The output reports the paths written.
+**Run a backup:** `database run` copies the current database file to all enabled destinations as the canonical file `bitprotector.db`. Repeated runs overwrite the single canonical file rather than accumulating copies.
 
-**Check integrity:** `database check` verifies the integrity of the most recent backup at each destination. The output reports the status per destination.
+**Check integrity:** `database check-integrity` verifies the integrity of each destination's backup. When one copy is corrupt and another is valid, the corrupt copy is repaired from the healthy peer, confirmed by SQLite's `PRAGMA integrity_check` returning `ok`.
 
-**Stage a restore:** `database restore --file /path/to/backup.db` stages a backup file for restore on next service restart. The output confirms the restore is staged.
+**Stage a restore:** `database restore <path>` stages a backup file for restore on next service restart. Passing a corrupt file is rejected before staging occurs.
+
+**Update settings:** `database settings` updates the automatic backup and integrity check configuration (enabled flags and interval seconds). The changes are persisted and verified by reading them back.
 
 ---
 
@@ -183,11 +186,11 @@ Covers the database backup management commands.
 
 Covers the SSH status display subcommand, which is used by the `bitprotector-status.sh` script to display system health in SSH login banners.
 
-**Basic output:** The status command produces a text summary of system health including drive pair states, tracked file counts, recent sync activity, and any active integrity runs.
+**Basic output:** The `status` subcommand produces output headed with `BitProtector Status` and containing lines for `Drives: N`, `Files: N`, `Sync queue empty` (when nothing is pending), `No integrity failures`, and `No backups configured` (when none are set up). Each of these strings is asserted individually.
 
-**No drives registered:** The output on a fresh database indicates no drive pairs are configured rather than erroring.
+**With a drive pair:** After adding a real drive pair, the output shows `Drives: 1`.
 
-**Formatting:** The output is plain text suitable for display in a terminal banner. The test verifies it does not contain any ANSI escape codes that would corrupt a minimal SSH environment.
+**No drives registered:** On a fresh database the output shows `Drives: 0` and `Files: 0` rather than erroring.
 
 ---
 
@@ -203,10 +206,6 @@ This file uses the in-process actix-web test harness rather than spawning the bi
 
 **Malformed token rejected:** A request with a token that has been tampered with (altered signature) is rejected with `401`.
 
-**Expired token rejected:** A token with an `exp` claim in the past is rejected with `401`. The test constructs a token with a very short expiry and waits for it to elapse.
+**Expired token rejected:** A token constructed with a negative TTL (already past its expiry at creation time) is rejected with `401`.
 
-**Token issued for login:** The `POST /api/v1/auth/login` endpoint issues a valid JWT when correct credentials are provided. The issued token can be used to authenticate subsequent requests.
-
-**Logout:** After a `POST /api/v1/auth/logout` with a valid token, the same token is rejected for subsequent requests. This verifies the server-side revocation list.
-
-**Token survives service restart:** A token issued before a service restart remains valid after restart, because validity is derived from the cryptographic secret in the config file rather than in-memory state.
+**Full lifecycle:** The `test_full_token_lifecycle` test calls `issue_token` and `validate_token` from the library directly, confirming that the `sub` claim matches the input, that `exp > iat`, that a token verified with the wrong secret fails, and that an expired token fails validation.
