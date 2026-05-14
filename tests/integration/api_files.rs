@@ -799,11 +799,40 @@ async fn test_files_track_pre_existing_matching_mirror() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 201);
+    let tracked: serde_json::Value = test::read_body_json(resp).await;
+    let tracked_id = tracked["id"].as_i64().unwrap();
+
     let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total, 1);
     assert_eq!(
         queue_items[0].action, "adopt_mirror",
         "Track should enqueue adopt_mirror, not mirror"
+    );
+
+    // Matching standby copy should be adopted without writing.
+    let mut permissions = fs::metadata(secondary.path().join("match.txt"))
+        .unwrap()
+        .permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(secondary.path().join("match.txt"), permissions).unwrap();
+
+    let process_req = test::TestRequest::post()
+        .uri("/api/v1/sync/process")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let process_resp = test::call_service(&app, process_req).await;
+    assert_eq!(process_resp.status(), 200);
+
+    let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
+    assert!(
+        tracked_after.is_mirrored,
+        "adopt_mirror should mark matching standby as mirrored"
+    );
+    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+    assert_eq!(queue_after.status, "completed");
+    assert_eq!(
+        fs::read(secondary.path().join("match.txt")).unwrap(),
+        content
     );
 }
 
@@ -832,7 +861,29 @@ async fn test_files_track_pre_existing_stale_mirror() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 201);
+    let tracked: serde_json::Value = test::read_body_json(resp).await;
+    let tracked_id = tracked["id"].as_i64().unwrap();
+
     let (queue_items, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total, 1);
     assert_eq!(queue_items[0].action, "adopt_mirror");
+
+    let process_req = test::TestRequest::post()
+        .uri("/api/v1/sync/process")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let process_resp = test::call_service(&app, process_req).await;
+    assert_eq!(process_resp.status(), 200);
+
+    let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
+    assert!(
+        tracked_after.is_mirrored,
+        "adopt_mirror should mark stale standby as mirrored after copy"
+    );
+    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+    assert_eq!(queue_after.status, "completed");
+    assert_eq!(
+        fs::read(secondary.path().join("stale.txt")).unwrap(),
+        b"content A"
+    );
 }
