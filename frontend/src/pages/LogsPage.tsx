@@ -89,22 +89,27 @@ function StructuredDetails({ details }: { details: string | null }) {
     return <p className="mt-3 text-xs text-muted-foreground italic">No additional details</p>
   }
 
+  let parsedObject: Record<string, unknown> | null = null
   try {
-    const parsed = JSON.parse(details) as Record<string, unknown>
+    const parsed: unknown = JSON.parse(details)
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return (
-        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md bg-muted p-3 text-xs">
-          {Object.entries(parsed).map(([key, value]) => (
-            <div key={key} className="contents">
-              <dt className="font-medium text-muted-foreground">{key.replace(/_/g, ' ')}</dt>
-              <dd className="font-mono break-all">{value === null ? '—' : String(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      )
+      parsedObject = parsed as Record<string, unknown>
     }
   } catch {
     // Not JSON — fall through to raw display
+  }
+
+  if (parsedObject !== null) {
+    return (
+      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md bg-muted p-3 text-xs">
+        {Object.entries(parsedObject).map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt className="font-medium text-muted-foreground">{key.replace(/_/g, ' ')}</dt>
+            <dd className="font-mono break-all">{value === null ? '—' : String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    )
   }
 
   return <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">{details}</pre>

@@ -14,7 +14,10 @@ export function usePolling<T>(fetchFn: () => Promise<T>, options: UsePollingOpti
   const [paused, setPaused] = useState(!enabled)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fetchFnRef = useRef(fetchFn)
-  fetchFnRef.current = fetchFn
+
+  useEffect(() => {
+    fetchFnRef.current = fetchFn
+  })
 
   const runFetch = useCallback(async () => {
     setLoading(true)
