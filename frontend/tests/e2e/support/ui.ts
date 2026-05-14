@@ -4,7 +4,9 @@ const QEMU_WEB_USER = process.env.QEMU_WEB_USER ?? 'testuser'
 const QEMU_WEB_PASSWORD = process.env.QEMU_WEB_PASSWORD ?? 'bitprotector'
 
 export async function expectToast(page: Page, message: string | RegExp) {
-  await expect(page.locator('[data-sonner-toast]').filter({ hasText: message }).first()).toBeVisible()
+  await expect(
+    page.locator('[data-sonner-toast]').filter({ hasText: message }).first()
+  ).toBeVisible()
 }
 
 export async function loginThroughUi(page: Page) {
