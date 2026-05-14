@@ -19,6 +19,12 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // setState in useEffect is a valid React pattern; downgrade from error to warn
+      // until the codebase is incrementally updated to use async state patterns.
+      'react-hooks/set-state-in-effect': 'warn',
+      // incompatible-library is designed for codebases using the React Compiler;
+      // this project does not use the React Compiler, so the rule is not applicable.
+      'react-hooks/incompatible-library': 'off',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

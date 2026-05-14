@@ -49,7 +49,6 @@ export function Sidebar() {
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0')
-    setUserMenuOpen(false)
   }, [collapsed])
 
   useEffect(() => {
@@ -128,7 +127,10 @@ export function Sidebar() {
       <div className={cn('flex px-2 pb-1', collapsed ? 'justify-center' : 'justify-end')}>
         <button
           type="button"
-          onClick={() => setCollapsed((current) => !current)}
+          onClick={() => {
+            setCollapsed((current) => !current)
+            setUserMenuOpen(false)
+          }}
           className="flex p-1.5 text-muted-foreground transition-colors hover:text-accent-foreground"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
