@@ -254,8 +254,15 @@ pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<Syn
 /// Create a sync queue item for a newly tracked file.
 /// Uses `adopt_mirror` so the processor will verify before copying.
 pub fn create_for_new_tracking(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
-    repo.create_sync_queue_item_dedup(file_id, "adopt_mirror")?
-        .ok_or_else(|| anyhow::anyhow!("adopt_mirror action already pending for file #{}", file_id))
+    let (item, created) = repo.create_sync_queue_item_dedup_with_created(file_id, "adopt_mirror")?;
+    if created {
+        Ok(item)
+    } else {
+        Err(anyhow::anyhow!(
+            "adopt_mirror action already pending for file #{}",
+            file_id
+        ))
+    }
 }
 
 #[cfg(test)]
