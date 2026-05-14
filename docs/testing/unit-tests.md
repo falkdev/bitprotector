@@ -120,13 +120,25 @@ Virtual paths are symlinks or aliases that expose tracked files at an applicatio
 
 ### core/tracker.rs
 
-The tracker module handles the queue-first semantics for file and folder tracking: when a file or folder is added, it is recorded and enqueued for mirroring, but the mirror does not happen synchronously.
+The tracker module handles file and folder registration on the active drive (metadata capture and optional virtual-path linking). Queueing for initial mirroring is covered by API/CLI handlers and by `auto_track_folder_files`.
 
 **What is tested:**
 
 - `track_file`: creates a database record with the correct relative path, BLAKE3 checksum, and file size; `is_mirrored` is initially false. Providing a virtual path simultaneously calls `set_virtual_path` and creates the symlink. Attempting to track a nonexistent file returns an error.
 - `track_folder`: creates the folder record and returns it with no `last_scanned_at` timestamp. Providing a virtual path creates the directory symlink. Attempting to track a nonexistent directory returns an error.
-- `auto_track_folder_files`: discovers all files in a folder tree recursively (verified for files nested at arbitrary depth), creates tracked file records, enqueues a sync item for each, and stamps `last_scanned_at` on the folder. Files that are already tracked are skipped without creating duplicate records or queue entries.
+- `auto_track_folder_files`: discovers all files in a folder tree recursively (verified for files nested at arbitrary depth), creates tracked file records, enqueues an `adopt_mirror` item for each, and stamps `last_scanned_at` on the folder. Files that are already tracked are skipped without creating duplicate records or queue entries. A dedicated test (`test_auto_track_folder_queues_adopt_mirror`) confirms the action is `adopt_mirror` and not `mirror`, ensuring files already present on the standby are not unnecessarily re-copied.
+
+### core/sync_queue.rs
+
+The sync queue module processes queue items, dispatching to the appropriate core action (mirror, restore, verify, etc.) and updating item status and file mirror state afterwards.
+
+**What is tested (adopt_mirror behaviour):**
+
+- **Standby already matches** (`test_process_adopt_mirror_standby_matches`): when the standby file exists and its BLAKE3 checksum matches the stored master checksum, `adopt_mirror` marks the item completed and sets `is_mirrored = true` without overwriting the secondary file.
+- **Standby is stale** (`test_process_adopt_mirror_standby_stale`): when the standby file exists but has different content, `adopt_mirror` performs a full copy from primary to secondary and marks the file mirrored. The secondary content matches the primary after processing.
+- **Standby is missing** (`test_process_adopt_mirror_standby_missing`): when no file exists at the standby path, `adopt_mirror` copies the primary file to the secondary and marks the file mirrored.
+
+---
 
 ### core/change_detection.rs
 

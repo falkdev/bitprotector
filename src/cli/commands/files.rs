@@ -73,7 +73,7 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Checksum:  {}", tracked.checksum);
             println!("  Size:      {} bytes", tracked.file_size);
             if !existed_before && pair.standby_accepts_sync() {
-                repo.create_sync_queue_item_dedup(tracked.id, "mirror")?;
+                repo.create_sync_queue_item_dedup(tracked.id, "adopt_mirror")?;
                 println!("  Mirror queued: yes");
             } else {
                 println!("  Mirror queued: no");
@@ -231,7 +231,7 @@ mod tests {
         assert!(!files[0].is_mirrored);
         let (queue_items, total_queue) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
         assert_eq!(total_queue, 1);
-        assert_eq!(queue_items[0].action, "mirror");
+        assert_eq!(queue_items[0].action, "adopt_mirror");
     }
 
     #[test]

@@ -103,7 +103,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             tracked_file_id INTEGER NOT NULL REFERENCES tracked_files(id),
             action          TEXT NOT NULL CHECK(action IN (
                                 'mirror', 'restore_master', 'restore_mirror',
-                                'verify', 'user_action_required'
+                                'verify', 'user_action_required', 'adopt_mirror'
                             )),
             status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
                                 'pending', 'in_progress', 'completed', 'failed'
@@ -234,6 +234,50 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
          ON db_backup_config(priority, id);",
     )?;
 
+    // Idempotent migration: rebuild sync_queue if it doesn't allow 'adopt_mirror'.
+    let needs_migration: bool = match conn.query_row(
+        "SELECT CASE WHEN instr(sql, 'adopt_mirror') = 0 THEN 1 ELSE 0 END \
+         FROM sqlite_master WHERE type='table' AND name='sync_queue'",
+        [],
+        |row| row.get(0),
+    ) {
+        Ok(needs_migration) => needs_migration,
+        Err(rusqlite::Error::QueryReturnedNoRows) => false,
+        Err(err) => return Err(err),
+    };
+    if needs_migration {
+        conn.execute_batch("BEGIN;")?;
+
+        let migration_result = (|| -> Result<()> {
+            conn.execute_batch(
+                "ALTER TABLE sync_queue RENAME TO sync_queue_old;
+                 CREATE TABLE sync_queue (
+                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                     tracked_file_id INTEGER NOT NULL REFERENCES tracked_files(id),
+                     action          TEXT NOT NULL CHECK(action IN (
+                                         'mirror', 'restore_master', 'restore_mirror',
+                                         'verify', 'user_action_required', 'adopt_mirror'
+                                     )),
+                     status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
+                                         'pending', 'in_progress', 'completed', 'failed'
+                                     )),
+                     error_message   TEXT,
+                     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                     completed_at    TEXT
+                 );
+                 INSERT INTO sync_queue SELECT * FROM sync_queue_old;
+                 DROP TABLE sync_queue_old;",
+            )?;
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        })();
+
+        if let Err(err) = migration_result {
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(err);
+        }
+    }
+
     Ok(())
 }
 
@@ -355,6 +399,13 @@ mod tests {
             result.is_err(),
             "Invalid action check constraint should fail"
         );
+
+        // Valid action should succeed
+        conn.execute(
+            "INSERT INTO sync_queue (tracked_file_id, action) VALUES (?1, 'adopt_mirror')",
+            rusqlite::params![file_id],
+        )
+        .unwrap();
     }
 
     #[test]
