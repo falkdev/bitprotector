@@ -25,10 +25,7 @@ export default tseslint.config(
       // incompatible-library is designed for codebases using the React Compiler;
       // this project does not use the React Compiler, so the rule is not applicable.
       'react-hooks/incompatible-library': 'off',
-      'react-refresh/only-export-components': [
-        'warn',
-        { allowConstantExport: true },
-      ],
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
-  },
+  }
 )

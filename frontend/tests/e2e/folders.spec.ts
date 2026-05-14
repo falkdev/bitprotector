@@ -19,7 +19,10 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await page.getByRole('button', { name: 'Add Folder' }).last().click()
   await expectToast(page, 'Folder added')
 
-  const row = page.locator('[data-testid^="folder-row-"]').filter({ hasText: fixture.folderRelativePath }).first()
+  const row = page
+    .locator('[data-testid^="folder-row-"]')
+    .filter({ hasText: fixture.folderRelativePath })
+    .first()
   await expect(row).toBeVisible()
 
   await row.getByRole('button', { name: 'Scan' }).click()
@@ -33,6 +36,8 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await row.getByRole('button', { name: 'Mirror' }).click()
   await expectToast(page, /Mirror complete:/)
   await expect(await qemu.pathExists(fixture.secondaryFilePath)).toBe(true)
-  await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(`report for ${fixture.runId}`)
+  await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(
+    `report for ${fixture.runId}`
+  )
   await expect(row.getByRole('button', { name: 'Scan' })).toBeVisible()
 })
