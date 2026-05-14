@@ -246,27 +246,36 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         Err(err) => return Err(err),
     };
     if needs_migration {
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE sync_queue RENAME TO sync_queue_old;
-             CREATE TABLE sync_queue (
-                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                 tracked_file_id INTEGER NOT NULL REFERENCES tracked_files(id),
-                 action          TEXT NOT NULL CHECK(action IN (
-                                     'mirror', 'restore_master', 'restore_mirror',
-                                     'verify', 'user_action_required', 'adopt_mirror'
-                                 )),
-                 status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
-                                     'pending', 'in_progress', 'completed', 'failed'
-                                 )),
-                 error_message   TEXT,
-                 created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                 completed_at    TEXT
-             );
-             INSERT INTO sync_queue SELECT * FROM sync_queue_old;
-             DROP TABLE sync_queue_old;
-             COMMIT;",
-        )?;
+        conn.execute_batch("BEGIN;")?;
+
+        let migration_result = (|| -> Result<()> {
+            conn.execute_batch(
+                "ALTER TABLE sync_queue RENAME TO sync_queue_old;
+                 CREATE TABLE sync_queue (
+                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                     tracked_file_id INTEGER NOT NULL REFERENCES tracked_files(id),
+                     action          TEXT NOT NULL CHECK(action IN (
+                                         'mirror', 'restore_master', 'restore_mirror',
+                                         'verify', 'user_action_required', 'adopt_mirror'
+                                     )),
+                     status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
+                                         'pending', 'in_progress', 'completed', 'failed'
+                                     )),
+                     error_message   TEXT,
+                     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                     completed_at    TEXT
+                 );
+                 INSERT INTO sync_queue SELECT * FROM sync_queue_old;
+                 DROP TABLE sync_queue_old;",
+            )?;
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        })();
+
+        if let Err(err) = migration_result {
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(err);
+        }
     }
 
     Ok(())
