@@ -121,7 +121,7 @@ run_qemu_smoke() {
     echo "--- Layer 5: QEMU smoke (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_test.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 smoke (run ./scripts/setup-qemu.sh 26.04 first)"
@@ -133,7 +133,7 @@ run_qemu_application_workflows() {
     echo "--- Layer 6: QEMU application workflows (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh
     else
         echo "WARN: 26.04 image not found - skipping 26.04 application workflows"
@@ -145,7 +145,7 @@ run_qemu_failover() {
     echo "--- Layer 7: QEMU failover (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_failover_test.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_failover_test.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 failover"
@@ -157,7 +157,7 @@ run_qemu_uninstall() {
     echo "--- Layer 8: QEMU uninstall (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_uninstall_test.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_uninstall_test.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 uninstall"
@@ -169,7 +169,7 @@ run_qemu_resilience() {
     echo "--- Layer 9: QEMU resilience (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/resilience.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/resilience.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 resilience"
@@ -185,7 +185,7 @@ run_qemu_upgrade() {
         return 0
     fi
     GUEST_IMAGE=ubuntu-24.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 upgrade"
@@ -197,7 +197,7 @@ run_qemu_degraded_boot() {
     echo "--- Layer 11: QEMU degraded-boot (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/degraded_boot.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/degraded_boot.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 degraded-boot"
@@ -209,7 +209,7 @@ run_qemu_drive_media_type() {
     echo "--- Layer 12: QEMU drive media type (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
     GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/drive_media_type.sh
-    if [[ -f "${HOME}/images/plucky-server-cloudimg-amd64.img" ]]; then
+    if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
         GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/drive_media_type.sh
     else
         echo "WARN: 26.04 image not found — skipping 26.04 drive-media-type"

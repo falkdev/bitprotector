@@ -79,8 +79,7 @@ resolve_ssh_key() {
 # GUEST_IMAGE accepts:
 #   - an absolute path (used as-is)
 #   - "ubuntu-24.04" -> ~/images/noble-server-cloudimg-amd64.img
-#   - "ubuntu-26.04" -> ~/images/oracular-server-cloudimg-amd64.img
-#     (codename "oracular" is provisional; update once 26.04 LTS name is final)
+#   - "ubuntu-26.04" -> ~/images/resolute-server-cloudimg-amd64.img
 # UBUNTU_IMAGE still works as a deprecated alias when GUEST_IMAGE is unset.
 # ---------------------------------------------------------------------------
 
@@ -92,7 +91,7 @@ resolve_guest_image() {
             echo "${HOME}/images/noble-server-cloudimg-amd64.img"
             ;;
         ubuntu-26.04)
-            echo "${HOME}/images/plucky-server-cloudimg-amd64.img"
+            echo "${HOME}/images/resolute-server-cloudimg-amd64.img"
             ;;
         /*)
             echo "${guest}"
