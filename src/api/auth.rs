@@ -136,14 +136,15 @@ pub fn validate_token(token: &str, secret: &[u8]) -> anyhow::Result<Claims> {
 
 /// Authenticate a user via PAM. Returns true on success.
 pub fn authenticate_user(username: &str, password: &str) -> bool {
-    let mut client = match pam::Client::with_password("bitprotector") {
+    let mut context = match pam_client2::Context::new(
+        "bitprotector",
+        None,
+        pam_client2::conv_mock::Conversation::with_credentials(username, password),
+    ) {
         Ok(c) => c,
         Err(_) => return false,
     };
-    client
-        .conversation_mut()
-        .set_credentials(username, password);
-    client.authenticate().is_ok()
+    context.authenticate(pam_client2::Flag::NONE).is_ok()
 }
 
 #[cfg(test)]
