@@ -3,6 +3,9 @@ name: Nightly Verify (5x)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
