@@ -64,7 +64,6 @@ jobs:
   # ---------------------------------------------------------------------------
   unit:
     name: Unit Tests
-    needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -104,9 +103,7 @@ jobs:
       - name: Install cargo-llvm-cov
         run: |
           rustup component add llvm-tools-preview
-          if ! cargo llvm-cov --version &>/dev/null; then
-            cargo install cargo-llvm-cov --locked
-          fi
+          cargo binstall cargo-llvm-cov --no-confirm
 
       - name: Rust coverage
         run: cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov --no-clean
@@ -136,7 +133,7 @@ jobs:
   # ---------------------------------------------------------------------------
   rust-integration-fast:
     name: Rust Integration (fast)
-    needs: unit
+    needs: [lint, unit]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -250,10 +247,7 @@ jobs:
         run: npm run build
 
       - name: Install cargo-deb
-        run: |
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
+        run: cargo binstall cargo-deb --no-confirm
 
       - name: Compute dev version
         run: |
@@ -477,12 +471,6 @@ jobs:
             deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-rust
-
-      - uses: ./.github/actions/setup-frontend
 
       - uses: ./.github/actions/setup-qemu
         with:
@@ -494,26 +482,18 @@ jobs:
           name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
-      - name: Build alpha1 .deb
+      - name: Download alpha1 .deb from GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          git fetch --tags --force
-          TMP_WORKTREE="$(mktemp -d)"
-          git worktree add "${TMP_WORKTREE}" v1.0.0-alpha1
-          pushd "${TMP_WORKTREE}"
-          pushd frontend
-          npm ci
-          npm run build
-          popd
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
-          cargo deb --deb-version "1.0.0~alpha1-0ubuntu1~${{ matrix.deb_suffix }}"
-          mkdir -p "${GITHUB_WORKSPACE}/target/debian/alpha1"
-          cp target/debian/bitprotector_*.deb "${GITHUB_WORKSPACE}/target/debian/alpha1/"
-          popd
-          git worktree remove "${TMP_WORKTREE}" --force
-          echo "ALPHA1_DEB=$(ls -1 ${GITHUB_WORKSPACE}/target/debian/alpha1/bitprotector_*.deb | head -1)" >> "$GITHUB_ENV"
+          # Prerequisite: the v1.0.0-alpha1 GitHub Release must have a .deb asset
+          # matching "*${{ matrix.deb_suffix }}*.deb" uploaded for each Ubuntu version
+          # (one-time manual step: gh release upload v1.0.0-alpha1 <deb-file>).
+          mkdir -p target/debian/alpha1
+          gh release download v1.0.0-alpha1 \
+            --pattern "*${{ matrix.deb_suffix }}*.deb" \
+            --dir target/debian/alpha1
+          echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
 
       - name: QEMU upgrade test
         env:

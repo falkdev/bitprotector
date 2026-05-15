@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install QEMU and cloud-image utilities
+    - name: Configure apt mirror
       shell: bash
       run: |
         # Probe a prioritised list of apt mirrors and use the first one that responds
@@ -55,9 +55,12 @@ runs:
           -e "s|https?://azure\.archive\.ubuntu\.com|${CHOSEN}|g" \
           -e "s|https?://archive\.ubuntu\.com|${CHOSEN}|g" \
           /etc/apt/sources.list "${LIST_FILES[@]}" 2>/dev/null || true
-        sudo apt-get update -q
-        sudo apt-get install -y -q \
-          qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
+
+    - name: Install QEMU, cloud-image utilities, and libguestfs-tools
+      uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+      with:
+        packages: qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client libguestfs-tools
+        version: 1.0
 
     - name: Enable KVM access
       shell: bash
@@ -85,16 +88,16 @@ runs:
             exit 1
             ;;
         esac
-        echo "cache-key=${{ inputs.guest }}-$(date -u '+%Y%m')" >> "$GITHUB_OUTPUT"
+        echo "prebaked-cache-key=${{ inputs.guest }}-prebaked-$(date -u '+%Y%m')" >> "$GITHUB_OUTPUT"
 
-    - name: Cache cloud image
+    - name: Cache pre-baked cloud image
       id: image-cache
       uses: actions/cache@v5
       with:
         path: ~/images/${{ steps.image-meta.outputs.filename }}
-        key: ${{ steps.image-meta.outputs.cache-key }}
+        key: ${{ steps.image-meta.outputs.prebaked-cache-key }}
 
-    - name: Download cloud image (cache miss)
+    - name: Download and pre-bake cloud image (cache miss)
       if: steps.image-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
@@ -102,6 +105,14 @@ runs:
         wget --show-progress \
           -O ~/images/${{ steps.image-meta.outputs.filename }}.tmp \
           ${{ steps.image-meta.outputs.url }}
+        # Pre-bake jq, openssl, curl, xfsprogs into the image so cloud-init
+        # runcmd can skip apt-get update and those installs on every VM boot.
+        # Reset cloud-init state so each test's seed ISO triggers a fresh run.
+        sudo virt-customize \
+          -a ~/images/${{ steps.image-meta.outputs.filename }}.tmp \
+          --install jq,openssl,curl,xfsprogs \
+          --run-command 'apt-get clean' \
+          --run-command 'cloud-init clean --logs --seed'
         mv ~/images/${{ steps.image-meta.outputs.filename }}.tmp \
            ~/images/${{ steps.image-meta.outputs.filename }}
 

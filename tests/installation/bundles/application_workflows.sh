@@ -115,8 +115,7 @@ write_files:
 runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
-  - apt-get update -q
-  - apt-get install -y -q jq openssl curl /mnt/debpkg/bitprotector*.deb
+  - apt-get install -y -q /mnt/debpkg/bitprotector*.deb
   - /usr/local/bin/bitprotector-app-workflow-storage.sh
   - mkdir -p /etc/bitprotector/tls
   - openssl req -x509 -nodes -newkey rsa:2048 -days 365 -subj '/CN=localhost' -keyout /etc/bitprotector/tls/key.pem -out /etc/bitprotector/tls/cert.pem

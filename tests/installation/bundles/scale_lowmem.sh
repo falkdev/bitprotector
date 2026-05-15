@@ -100,8 +100,7 @@ write_files:
 runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
-  - apt-get update -q
-  - apt-get install -y -q jq /mnt/debpkg/bitprotector*.deb
+  - apt-get install -y -q /mnt/debpkg/bitprotector*.deb
   - /usr/local/bin/bitprotector-lowmem-storage.sh
   - touch /tmp/install-done
 CLOUDINIT
