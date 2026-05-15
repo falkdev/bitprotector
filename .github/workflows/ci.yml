@@ -219,15 +219,19 @@ jobs:
   build-artifacts:
     name: Build Artifacts (ubuntu-${{ matrix.ubuntu }})
     needs: rust-integration-heavy
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       matrix:
         include:
           - ubuntu: "24.04"
             deb_suffix: "24.04.1"
+            runner: ubuntu-24.04
           - ubuntu: "26.04"
             deb_suffix: "26.04.1"
+            # TODO: switch to ubuntu-26.04 once GA
+            # Track: https://github.com/actions/runner-images/issues/13964
+            runner: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
