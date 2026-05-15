@@ -260,12 +260,20 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
     for item in health {
         if item.is_healthy() {
             let checksum = item.checksum.clone();
-            repo.update_db_backup_integrity_status(item.config.id, "ok", None)
+            // If the backup was previously in an error state (corrupt/missing/failed)
+            // but is now healthy, it was repaired. This catches the case where a prior
+            // repair run physically fixed the file but failed to persist the "repaired"
+            // status to the database (e.g., due to transient DB contention).
+            let status = match item.config.last_integrity_status.as_deref() {
+                Some("corrupt") | Some("missing") | Some("failed") => "repaired",
+                _ => "ok",
+            };
+            repo.update_db_backup_integrity_status(item.config.id, status, None)
                 .ok();
             results.push(BackupIntegrityResult {
                 backup_config_id: item.config.id,
                 backup_path: item.path.to_string_lossy().to_string(),
-                status: "ok".to_string(),
+                status: status.to_string(),
                 checksum,
                 repaired_from_id: None,
                 error: None,
@@ -275,6 +283,21 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
 
         if let Some((source_id, source_path)) = &repair_source {
             if *source_id != item.config.id {
+                // Persist the detected error state BEFORE attempting the physical repair.
+                // If the post-repair "repaired" status write later fails under DB contention,
+                // the next integrity run will see this "corrupt"/"missing" marker, find the
+                // file healthy, and correctly write "repaired" via the is_healthy() branch above.
+                let pre_status = if item.path.exists() {
+                    "corrupt"
+                } else {
+                    "missing"
+                };
+                repo.update_db_backup_integrity_status(
+                    item.config.id,
+                    pre_status,
+                    item.error.as_deref(),
+                )
+                .ok();
                 match copy_backup_atomically(source_path, &item.path)
                     .and_then(|_| checksum_file(&item.path))
                 {
@@ -312,8 +335,13 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
                             }
                         }
                         if !write_ok {
-                            bail!(
-                                "Could not persist repaired status for backup #{}",
+                            // Physical repair succeeded but status write failed.
+                            // The pre-repair "corrupt"/"missing" marker written above ensures
+                            // the next integrity check will see a healthy file with a prior
+                            // error status and write "repaired" correctly.
+                            tracing::error!(
+                                "Could not persist repaired status for backup #{} after retries; \
+                                 it will be reflected on the next integrity check",
                                 item.config.id
                             );
                         }
