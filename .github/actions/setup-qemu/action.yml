@@ -62,6 +62,16 @@ runs:
         packages: qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client libguestfs-tools
         version: 1.0
 
+    - name: Unload QEMU AppArmor profile (allows -virtfs passthrough in CI)
+      shell: bash
+      run: |
+        # libguestfs-tools can trigger a stricter AppArmor profile for QEMU that
+        # denies -virtfs security_model=passthrough.  Remove the profile from the
+        # kernel so QEMU runs unrestricted inside the ephemeral CI runner.
+        if [[ -f /etc/apparmor.d/usr.bin.qemu-system-x86_64 ]]; then
+          sudo apparmor_parser -R /etc/apparmor.d/usr.bin.qemu-system-x86_64 2>/dev/null || true
+        fi
+
     - name: Enable KVM access
       shell: bash
       run: |

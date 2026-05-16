@@ -48,7 +48,7 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-upgrade-$$"
 mkdir -p "${WORKDIR}" "${WORKDIR}/debpkg"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+trap '[[ "${CI:-}" != "1" ]] && rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
 
 cp -f "${CURRENT_DEB}" "${WORKDIR}/debpkg/"
 cp -f "${ALPHA1_DEB_FILE}" "${WORKDIR}/debpkg/"
