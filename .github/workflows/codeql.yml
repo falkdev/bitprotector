@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - language: rust
-            build-mode: manual
+            build-mode: none
           - language: javascript-typescript
             build-mode: none
           - language: actions
@@ -32,32 +32,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Rust requires system libraries for pam-client2 and aws-lc-sys (libclang).
-      # These must be present before `cargo build` so that build scripts resolve.
-      - name: Install system dependencies (Rust only)
-        if: matrix.language == 'rust'
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q libpam0g-dev libclang-dev llvm
-
-      - name: Install Rust toolchain (Rust only)
-        if: matrix.language == 'rust'
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           tools: latest
-
-      # For Rust, CodeQL must observe the actual compilation (it hooks into
-      # rustc to capture call targets and type information). The build step
-      # must sit between init and analyze. build-mode: manual means CodeQL
-      # does not run autobuild; we drive the build explicitly here.
-      - name: Build (Rust manual build for CodeQL)
-        if: matrix.build-mode == 'manual'
-        run: cargo build
+          config-file: .github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
