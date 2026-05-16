@@ -64,7 +64,6 @@ jobs:
   # ---------------------------------------------------------------------------
   unit:
     name: Unit Tests
-    needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -136,7 +135,7 @@ jobs:
   # ---------------------------------------------------------------------------
   rust-integration-fast:
     name: Rust Integration (fast)
-    needs: unit
+    needs: [lint, unit]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -219,15 +218,19 @@ jobs:
   build-artifacts:
     name: Build Artifacts (ubuntu-${{ matrix.ubuntu }})
     needs: rust-integration-heavy
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       matrix:
         include:
           - ubuntu: "24.04"
             deb_suffix: "24.04.1"
+            runner: ubuntu-24.04
           - ubuntu: "26.04"
             deb_suffix: "26.04.1"
+            # TODO: switch to ubuntu-26.04 once GA
+            # Track: https://github.com/actions/runner-images/issues/13964
+            runner: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -246,10 +249,7 @@ jobs:
         run: npm run build
 
       - name: Install cargo-deb
-        run: |
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
+        run: cargo binstall cargo-deb --no-confirm
 
       - name: Compute dev version
         run: |
@@ -473,12 +473,6 @@ jobs:
             deb_suffix: "26.04.1"
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-rust
-
-      - uses: ./.github/actions/setup-frontend
 
       - uses: ./.github/actions/setup-qemu
         with:
@@ -490,26 +484,17 @@ jobs:
           name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
-      - name: Build alpha1 .deb
+      - name: Download alpha4 .deb from GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          git fetch --tags --force
-          TMP_WORKTREE="$(mktemp -d)"
-          git worktree add "${TMP_WORKTREE}" v1.0.0-alpha1
-          pushd "${TMP_WORKTREE}"
-          pushd frontend
-          npm ci
-          npm run build
-          popd
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
-          cargo deb --deb-version "1.0.0~alpha1-0ubuntu1~${{ matrix.deb_suffix }}"
-          mkdir -p "${GITHUB_WORKSPACE}/target/debian/alpha1"
-          cp target/debian/bitprotector_*.deb "${GITHUB_WORKSPACE}/target/debian/alpha1/"
-          popd
-          git worktree remove "${TMP_WORKTREE}" --force
-          echo "ALPHA1_DEB=$(ls -1 ${GITHUB_WORKSPACE}/target/debian/alpha1/bitprotector_*.deb | head -1)" >> "$GITHUB_ENV"
+          # Prerequisite: the v1.0.0-alpha4 GitHub Release must have a .deb asset
+          # matching "*${{ matrix.deb_suffix }}*.deb" uploaded for each Ubuntu version.
+          mkdir -p target/debian/alpha1
+          gh release download v1.0.0-alpha4 \
+            --pattern "*${{ matrix.deb_suffix }}*.deb" \
+            --dir target/debian/alpha1
+          echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
 
       - name: QEMU upgrade test
         env:
@@ -752,5 +737,88 @@ jobs:
           path: |
             ${{ runner.temp }}/**/serial.log
             ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 13 — Playwright E2E tests (ubuntu-24.04 only)
+  # Boots a dedicated QEMU guest, installs the .deb, then runs the full
+  # Playwright suite against it.  The same if: condition as layers 6-12 gates
+  # this job on every PR/push/schedule and on manual runs with run_heavy_qemu.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: Playwright E2E
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ubuntu-24.04
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bitprotector-deb-ubuntu-24.04
+          path: target/debian/
+
+      - name: Boot E2E QEMU guest
+        env:
+          GUEST_IMAGE: ubuntu-24.04
+          SSH_PORT: '2280'
+          API_PORT: '18480'
+          CI: '1'
+        run: ./tests/installation/e2e-guest.sh
+
+      - name: Run Playwright E2E tests
+        env:
+          QEMU_SSH_PORT: '2280'
+          QEMU_API_PORT: '18480'
+          CI: 'true'
+        working-directory: frontend
+        run: npm run test:e2e:qemu
+
+      - name: Stop E2E QEMU guest
+        if: always()
+        run: |
+          PID_FILE="${RUNNER_TEMP}/e2e-qemu.pid"
+          if [[ -f "${PID_FILE}" ]]; then
+            kill "$(cat "${PID_FILE}")" 2>/dev/null || true
+            echo "QEMU guest stopped"
+          fi
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload QEMU logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-logs-e2e
+          path: |
+            ${{ runner.temp }}/qemu-e2e-*/serial.log
+            ${{ runner.temp }}/qemu-e2e-*/qemu.log
           retention-days: 7
           if-no-files-found: warn

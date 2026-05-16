@@ -18,66 +18,9 @@ jobs:
     with:
       run_heavy_qemu: true
 
-  build-artifacts-nightly:
-    name: Build Artifacts (nightly, ubuntu-${{ matrix.ubuntu }})
-    needs: ci
-    runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - ubuntu: "24.04"
-            deb_suffix: "24.04.1"
-          - ubuntu: "26.04"
-            deb_suffix: "26.04.1"
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-rust
-
-      - uses: ./.github/actions/setup-frontend
-
-      - name: npm install
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      - name: Install cargo-deb
-        run: |
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
-
-      - name: Compute nightly dev version
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [[ -n "${LAST_TAG}" ]]; then
-            CARGO_BASE="${LAST_TAG#v}"
-          else
-            CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          fi
-          DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~${{ matrix.deb_suffix }}+git.${SHORT_SHA}"
-          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
-
-      - name: Build .deb
-        run: cargo deb --deb-version "${DEV_VERSION}"
-
-      - name: Upload nightly .deb artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: bitprotector-deb-nightly-ubuntu-${{ matrix.ubuntu }}
-          path: target/debian/bitprotector_*.deb
-          retention-days: 7
-
   qemu-scale:
     name: QEMU Scale (nightly, ${{ matrix.guest }})
-    needs: build-artifacts-nightly
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -87,11 +30,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2282
             api_port: 19043
-            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2283
             api_port: 19044
-            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -99,7 +42,7 @@ jobs:
         with:
           guest: ${{ matrix.guest }}
 
-      - name: Download nightly .deb artifact
+      - name: Download .deb artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.deb_artifact }}
@@ -126,7 +69,7 @@ jobs:
 
   qemu-scale-lowmem:
     name: QEMU Scale Lowmem (nightly, ${{ matrix.guest }})
-    needs: build-artifacts-nightly
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -136,11 +79,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2292
             api_port: 19143
-            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2293
             api_port: 19144
-            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -148,7 +91,7 @@ jobs:
         with:
           guest: ${{ matrix.guest }}
 
-      - name: Download nightly .deb artifact
+      - name: Download .deb artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.deb_artifact }}
@@ -175,7 +118,7 @@ jobs:
 
   qemu-scheduled-load:
     name: QEMU Scheduled Load (nightly, ${{ matrix.guest }})
-    needs: build-artifacts-nightly
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -185,11 +128,11 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2312
             api_port: 19443
-            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2313
             api_port: 19444
-            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -197,7 +140,7 @@ jobs:
         with:
           guest: ${{ matrix.guest }}
 
-      - name: Download nightly .deb artifact
+      - name: Download .deb artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.deb_artifact }}
@@ -224,7 +167,7 @@ jobs:
 
   qemu-drive-media-type:
     name: QEMU Drive Media Type (nightly, ${{ matrix.guest }})
-    needs: build-artifacts-nightly
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -234,17 +177,17 @@ jobs:
           - guest: ubuntu-24.04
             ssh_port: 2294
             api_port: 19243
-            deb_artifact: bitprotector-deb-nightly-ubuntu-24.04
+            deb_artifact: bitprotector-deb-ubuntu-24.04
           - guest: ubuntu-26.04
             ssh_port: 2295
             api_port: 19244
-            deb_artifact: bitprotector-deb-nightly-ubuntu-26.04
+            deb_artifact: bitprotector-deb-ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-qemu
         with:
           guest: ${{ matrix.guest }}
-      - name: Download nightly .deb artifact
+      - name: Download .deb artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.deb_artifact }}

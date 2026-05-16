@@ -7,6 +7,13 @@ test('loads dashboard status and runs the core quick actions against the live ba
 }) => {
   const fixture = await qemu.seedDriveFixture()
   await qemu.runBitProtector([
+    'drives',
+    'add',
+    fixture.driveName,
+    fixture.primaryPath,
+    fixture.secondaryPath,
+  ])
+  await qemu.runBitProtector([
     'database',
     'add',
     fixture.backupPath,

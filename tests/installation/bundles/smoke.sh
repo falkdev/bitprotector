@@ -76,7 +76,7 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-smoke-$$"
 mkdir -p "${WORKDIR}"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+trap '[[ "${CI:-}" != "1" ]] && rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 

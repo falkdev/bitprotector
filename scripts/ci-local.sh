@@ -62,7 +62,7 @@ preflight() {
 jobs_for_lint="lint"
 jobs_for_fast="lint,unit,rust-integration-fast,rust-integration-heavy"
 jobs_for_smoke="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke"
-jobs_for_full="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke,qemu-application-workflows,qemu-failover,qemu-uninstall,qemu-resilience,qemu-upgrade,qemu-degraded-boot,qemu-drive-media-type"
+jobs_for_full="lint,unit,rust-integration-fast,rust-integration-heavy,build-artifacts,qemu-smoke,qemu-application-workflows,qemu-failover,qemu-uninstall,qemu-resilience,qemu-upgrade,qemu-degraded-boot,qemu-drive-media-type,e2e"
 
 # ---------------------------------------------------------------------------
 # Parse args

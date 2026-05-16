@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/installation/bundles/upgrade.sh
-# Upgrade bundle: alpha1 -> current package upgrade and config preservation checks.
+# Upgrade bundle: alpha4 -> current package upgrade and config preservation checks.
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ source "${LIB_DIR}/scenarios.sh"
 source "${LIB_DIR}/cloud-init-db-disk.sh"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
-ALPHA1_GLOB="${ALPHA1_DEB:-${PROJECT_ROOT}/target/debian/bitprotector_1.0.0~alpha1*.deb}"
+ALPHA1_GLOB="${ALPHA1_DEB:-${PROJECT_ROOT}/target/debian/bitprotector_1.0.0~alpha4*.deb}"
 SSH_PORT="${SSH_PORT:-2225}"
 API_PORT="${API_PORT:-18446}"
 TIMEOUT="${TIMEOUT:-900}"
@@ -27,16 +27,23 @@ require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
 SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
-CURRENT_DEB=$(ls -1 ${DEB_PATH} 2>/dev/null | grep -v 'alpha1' | head -1 || true)
 ALPHA1_DEB_FILE=$(ls -1 ${ALPHA1_GLOB} 2>/dev/null | head -1 || true)
+ALPHA1_DEB_REALPATH="$(readlink -f "${ALPHA1_DEB_FILE}" 2>/dev/null || true)"
+CURRENT_DEB=$(while IFS= read -r candidate; do
+    candidate_realpath="$(readlink -f "${candidate}" 2>/dev/null || true)"
+    if [[ "${candidate_realpath}" != "${ALPHA1_DEB_REALPATH}" ]]; then
+        echo "${candidate}"
+        break
+    fi
+done < <(ls -1 ${DEB_PATH} 2>/dev/null))
 if [[ -z "${CURRENT_DEB}" ]]; then
     log ERROR "current .deb file not found at ${DEB_PATH}"
     echo "Build with: cargo deb"
     exit 1
 fi
 if [[ -z "${ALPHA1_DEB_FILE}" ]]; then
-    log ERROR "alpha1 .deb file not found at ${ALPHA1_GLOB}"
-    echo "Provide ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha1*.deb"
+    log ERROR "alpha4 .deb file not found at ${ALPHA1_GLOB}"
+    echo "Provide ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha4*.deb"
     exit 1
 fi
 
@@ -48,7 +55,7 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-upgrade-$$"
 mkdir -p "${WORKDIR}" "${WORKDIR}/debpkg"
-trap 'rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
+trap '[[ "${CI:-}" != "1" ]] && rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
 
 cp -f "${CURRENT_DEB}" "${WORKDIR}/debpkg/"
 cp -f "${ALPHA1_DEB_FILE}" "${WORKDIR}/debpkg/"

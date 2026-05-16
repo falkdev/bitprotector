@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install QEMU and cloud-image utilities
+    - name: Configure apt mirror
       shell: bash
       run: |
         # Probe a prioritised list of apt mirrors and use the first one that responds
@@ -55,9 +55,12 @@ runs:
           -e "s|https?://azure\.archive\.ubuntu\.com|${CHOSEN}|g" \
           -e "s|https?://archive\.ubuntu\.com|${CHOSEN}|g" \
           /etc/apt/sources.list "${LIST_FILES[@]}" 2>/dev/null || true
-        sudo apt-get update -q
-        sudo apt-get install -y -q \
-          qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
+
+    - name: Install QEMU and cloud-image utilities
+      uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+      with:
+        packages: qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
+        version: 1.0
 
     - name: Enable KVM access
       shell: bash
