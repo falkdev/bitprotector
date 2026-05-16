@@ -56,11 +56,25 @@ runs:
           -e "s|https?://archive\.ubuntu\.com|${CHOSEN}|g" \
           /etc/apt/sources.list "${LIST_FILES[@]}" 2>/dev/null || true
 
-    - name: Install QEMU and cloud-image utilities
-      uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+    - name: Cache apt packages
+      id: apt-cache
+      uses: actions/cache@v5
       with:
-        packages: qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
-        version: 1.0
+        path: /var/cache/apt/archives
+        key: apt-qemu-${{ runner.os }}-v1
+
+    - name: Install QEMU and cloud-image utilities
+      shell: bash
+      run: |
+        # Skip apt-get update on cache hits — the cached .deb files in
+        # /var/cache/apt/archives are reused directly, so no mirror sync
+        # is needed. On a miss apt-get update fetches fresh metadata and
+        # downloads the packages; actions/cache@v5 then saves them above.
+        if [[ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]]; then
+          sudo apt-get update -q
+        fi
+        sudo apt-get install -y -q \
+          qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
 
     - name: Enable KVM access
       shell: bash
