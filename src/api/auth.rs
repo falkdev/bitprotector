@@ -151,11 +151,11 @@ impl PasswordConversation {
 
 impl pam_client2::ConversationHandler for PasswordConversation {
     fn prompt_echo_on(&mut self, _prompt: &CStr) -> Result<CString, pam_client2::ErrorCode> {
-        CString::new(self.username.clone()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
+        CString::new(self.username.as_str()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
     }
 
     fn prompt_echo_off(&mut self, _prompt: &CStr) -> Result<CString, pam_client2::ErrorCode> {
-        CString::new(self.password.clone()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
+        CString::new(self.password.as_str()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
     }
 
     fn text_info(&mut self, _msg: &CStr) {}
