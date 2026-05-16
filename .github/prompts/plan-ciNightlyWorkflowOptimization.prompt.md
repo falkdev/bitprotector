@@ -1,6 +1,6 @@
 ## Plan: CI/Nightly Workflow Optimization
 
-**TL;DR**: The implemented wins in this PR come from caching runner-side QEMU packages, eliminating the nightly duplicate `.deb` rebuild, parallelising lint+unit, faster tool installs, and pre-fetching the alpha `.deb` from a GitHub Release. Pre-baking the QEMU guest image was explored separately, but it is not part of the current implementation.
+**TL;DR**: The implemented wins in this PR come from caching runner-side QEMU packages, eliminating the nightly duplicate `.deb` rebuild, parallelizing lint+unit, faster tool installs, and pre-fetching the alpha `.deb` from a GitHub Release. Pre-baking the QEMU guest image was explored separately, but it is not part of the current implementation.
 
 ---
 

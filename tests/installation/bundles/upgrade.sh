@@ -28,7 +28,14 @@ SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
 ALPHA1_DEB_FILE=$(ls -1 ${ALPHA1_GLOB} 2>/dev/null | head -1 || true)
-CURRENT_DEB=$(ls -1 ${DEB_PATH} 2>/dev/null | grep -Fvx -- "${ALPHA1_DEB_FILE}" | head -1 || true)
+ALPHA1_DEB_REALPATH="$(readlink -f "${ALPHA1_DEB_FILE}" 2>/dev/null || true)"
+CURRENT_DEB=$(while IFS= read -r candidate; do
+    candidate_realpath="$(readlink -f "${candidate}" 2>/dev/null || true)"
+    if [[ "${candidate_realpath}" != "${ALPHA1_DEB_REALPATH}" ]]; then
+        echo "${candidate}"
+        break
+    fi
+done < <(ls -1 ${DEB_PATH} 2>/dev/null))
 if [[ -z "${CURRENT_DEB}" ]]; then
     log ERROR "current .deb file not found at ${DEB_PATH}"
     echo "Build with: cargo deb"
