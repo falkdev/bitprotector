@@ -49,6 +49,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          tools: latest
 
       # For Rust, CodeQL must observe the actual compilation (it hooks into
       # rustc to capture call targets and type information). The build step
