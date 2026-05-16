@@ -11,6 +11,7 @@
 #   fast   — lint + unit tests + integration tests excluding scaling_100k (Layers 0-3)
 #   smoke  — fast + build .deb + QEMU smoke on ubuntu-24.04 and ubuntu-26.04 (Layers 0-5)
 #   full   — smoke + application-workflows + failover + uninstall + resilience + upgrade + degraded-boot + drive-media-type (Layers 0-12)
+#   e2e    — boot dedicated QEMU guest + run Playwright E2E suite (Layer 13, requires Playwright browsers)
 
 set -euo pipefail
 
@@ -217,6 +218,39 @@ run_qemu_drive_media_type() {
     echo "qemu-drive-media-type: OK"
 }
 
+run_e2e() {
+    echo "--- Layer 13: Playwright E2E (ubuntu-24.04 only) ---"
+    cd "${PROJECT_ROOT}"
+
+    # Verify Playwright browsers are available; install if not.
+    if ! npx --prefix frontend playwright --version >/dev/null 2>&1; then
+        echo "Playwright not installed — running: npx playwright install --with-deps chromium"
+        (cd frontend && npx playwright install --with-deps chromium)
+    fi
+
+    local e2e_pid_file="/tmp/e2e-qemu.pid"
+    local e2e_cleanup_done=0
+
+    cleanup_e2e() {
+        if [[ "${e2e_cleanup_done}" == "1" ]]; then return; fi
+        e2e_cleanup_done=1
+        if [[ -f "${e2e_pid_file}" ]]; then
+            kill "$(cat "${e2e_pid_file}")" 2>/dev/null || true
+            echo "QEMU e2e guest stopped"
+        fi
+    }
+    trap cleanup_e2e EXIT
+
+    SSH_PORT=2280 API_PORT=18480 ./tests/installation/e2e-guest.sh
+
+    QEMU_SSH_PORT=2280 QEMU_API_PORT=18480 CI=true \
+        npm --prefix frontend run test:e2e:qemu
+
+    cleanup_e2e
+    trap - EXIT
+    echo "e2e: OK"
+}
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -253,6 +287,10 @@ case "${LAYER}" in
         run_qemu_upgrade
         run_qemu_degraded_boot
         run_qemu_drive_media_type
+        run_e2e
+        ;;
+    e2e)
+        run_e2e
         ;;
     *)
         echo "Unknown layer: ${LAYER}"

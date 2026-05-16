@@ -29,9 +29,9 @@ lint → unit → (coverage, non-gating) → rust-integration-fast → rust-inte
                                                      build-artifacts
                                                            ↓
                                                      qemu-smoke
-                  ┌──────────────────────┬────────────────────────────┬───────────────┬──────────────┬──────────────┬───────────────────────┬─────────────────────────┐
-                  ↓                      ↓                            ↓               ↓              ↓              ↓                       ↓                         ↓
-     qemu-application-workflows    qemu-failover                qemu-uninstall   qemu-resilience  qemu-upgrade  qemu-degraded-boot   qemu-drive-media-type   (nightly) qemu-scale + qemu-scale-lowmem + qemu-scheduled-load
+                  ┌──────────────────────┬────────────────────────────┬───────────────┬──────────────┬──────────────┬───────────────────────┬─────────────────────────┬──────┐
+                  ↓                      ↓                            ↓               ↓              ↓              ↓                       ↓                         ↓       ↓
+     qemu-application-workflows    qemu-failover                qemu-uninstall   qemu-resilience  qemu-upgrade  qemu-degraded-boot   qemu-drive-media-type   e2e   (nightly) qemu-scale + qemu-scale-lowmem + qemu-scheduled-load
 ```
 
 All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs use composite actions in [.github/actions/](.github/actions/) for setup.
@@ -70,6 +70,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 10 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
 | 11 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |
 | 12 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
+| 13 | `e2e` | Playwright E2E suite against a dedicated ubuntu-24.04 QEMU guest. Boots the guest via `tests/installation/e2e-guest.sh`, runs all 8 spec files (`drives`, `file-browser`, `scheduler`, `integrity`, `folders`, `auth-and-nav`, `database-backups`, `dashboard`). | ubuntu-24.04 | 10-20 min |
 
 Nightly-only jobs in `nightly.yml` also run `qemu-scale`, `qemu-scale-lowmem`, and `qemu-scheduled-load` (all matrixed across Ubuntu 24.04 + 26.04).
 
@@ -150,9 +151,11 @@ If you don't want the `act` overhead, run layers natively using the same layer s
 ./scripts/run-tests.sh lint
 ./scripts/run-tests.sh fast
 ./scripts/run-tests.sh smoke   # requires QEMU installed (run setup-qemu.sh first)
-./scripts/run-tests.sh full    # includes qemu-application-workflows
+./scripts/run-tests.sh full    # includes qemu-application-workflows + Playwright E2E
 GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
 GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/scheduled_load.sh   # nightly-style load
+# Run Playwright E2E only (boots its own VM, runs all specs, then stops VM):
+./scripts/run-tests.sh e2e
 ```
 
 This script calls cargo/npm/bash directly — no containers. The layer definitions are shared with `ci-local.sh`.
@@ -228,5 +231,7 @@ These are understood by the QEMU test scripts and are passed via `env:` blocks i
 ## Extending the Pipeline
 
 - **Add a new integration test binary**: declare it in `Cargo.toml` under `[[test]]`, add a `cargo test --test <name>` step to the `rust-integration-fast` job in `ci.yml`, and the matching call to `run_rust_integration_fast()` in `run-tests.sh`.
+- **Add a new Playwright E2E spec**: create a new `*.spec.ts` file in `frontend/tests/e2e/`. It is automatically picked up by the `e2e` CI job — no changes to `ci.yml` are required.
 - **Change the runner**: update `runs-on:` in the relevant job. For heavy QEMU, `ubuntu-latest-4-core` is the fallback if the default runner is too slow.
 - **Adjust coverage behavior**: edit the `coverage` job in `ci.yml` (it is non-gating via `continue-on-error: true`).
+- **E2E port conflicts on local runs**: the `e2e` layer in `run-tests.sh` uses SSH 2280 / API 18480 so it does not collide with the smoke layer (SSH 2222 / API 18443).

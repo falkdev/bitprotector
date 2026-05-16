@@ -738,3 +738,86 @@ jobs:
             ${{ runner.temp }}/**/qemu.log
           retention-days: 7
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Layer 13 — Playwright E2E tests (ubuntu-24.04 only)
+  # Boots a dedicated QEMU guest, installs the .deb, then runs the full
+  # Playwright suite against it.  The same if: condition as layers 6-12 gates
+  # this job on every PR/push/schedule and on manual runs with run_heavy_qemu.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: Playwright E2E
+    needs: qemu-smoke
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      inputs.run_heavy_qemu == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ubuntu-24.04
+
+      - uses: ./.github/actions/setup-frontend
+
+      - name: npm install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bitprotector-deb-ubuntu-24.04
+          path: target/debian/
+
+      - name: Boot E2E QEMU guest
+        env:
+          GUEST_IMAGE: ubuntu-24.04
+          SSH_PORT: '2280'
+          API_PORT: '18480'
+          CI: '1'
+        run: ./tests/installation/e2e-guest.sh
+
+      - name: Run Playwright E2E tests
+        env:
+          QEMU_SSH_PORT: '2280'
+          QEMU_API_PORT: '18480'
+          CI: 'true'
+        working-directory: frontend
+        run: npm run test:e2e:qemu
+
+      - name: Stop E2E QEMU guest
+        if: always()
+        run: |
+          PID_FILE="${RUNNER_TEMP}/e2e-qemu.pid"
+          if [[ -f "${PID_FILE}" ]]; then
+            kill "$(cat "${PID_FILE}")" 2>/dev/null || true
+            echo "QEMU guest stopped"
+          fi
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload QEMU logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-logs-e2e
+          path: |
+            ${{ runner.temp }}/qemu-e2e-*/serial.log
+            ${{ runner.temp }}/qemu-e2e-*/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
