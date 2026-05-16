@@ -3,6 +3,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::ffi::{CStr, CString};
 use std::future::{ready, Ready};
 use std::sync::Mutex;
 
@@ -134,16 +135,49 @@ pub fn validate_token(token: &str, secret: &[u8]) -> anyhow::Result<Claims> {
     Ok(data.claims)
 }
 
+struct PasswordConversation {
+    username: String,
+    password: String,
+}
+
+impl PasswordConversation {
+    fn new(username: &str, password: &str) -> Self {
+        Self {
+            username: username.to_string(),
+            password: password.to_string(),
+        }
+    }
+}
+
+impl pam_client2::ConversationHandler for PasswordConversation {
+    fn prompt_echo_on(&mut self, _prompt: &CStr) -> Result<CString, pam_client2::ErrorCode> {
+        CString::new(self.username.as_str()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
+    }
+
+    fn prompt_echo_off(&mut self, _prompt: &CStr) -> Result<CString, pam_client2::ErrorCode> {
+        CString::new(self.password.as_str()).map_err(|_| pam_client2::ErrorCode::CONV_ERR)
+    }
+
+    fn text_info(&mut self, _msg: &CStr) {}
+
+    fn error_msg(&mut self, _msg: &CStr) {}
+
+    fn radio_prompt(&mut self, _prompt: &CStr) -> Result<bool, pam_client2::ErrorCode> {
+        Err(pam_client2::ErrorCode::CONV_ERR)
+    }
+}
+
 /// Authenticate a user via PAM. Returns true on success.
 pub fn authenticate_user(username: &str, password: &str) -> bool {
-    let mut client = match pam::Client::with_password("bitprotector") {
+    let mut context = match pam_client2::Context::new(
+        "bitprotector",
+        None,
+        PasswordConversation::new(username, password),
+    ) {
         Ok(c) => c,
         Err(_) => return false,
     };
-    client
-        .conversation_mut()
-        .set_credentials(username, password);
-    client.authenticate().is_ok()
+    context.authenticate(pam_client2::Flag::NONE).is_ok()
 }
 
 #[cfg(test)]
