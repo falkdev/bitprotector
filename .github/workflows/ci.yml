@@ -484,25 +484,19 @@ jobs:
           name: ${{ matrix.deb_artifact }}
           path: target/debian/
 
-      - name: Download alpha1 .deb from GitHub Release
+      - name: Download alpha4 .deb from GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Prerequisite: the v1.0.0-alpha1 GitHub Release must have a .deb asset
-          # matching "*${{ matrix.deb_suffix }}*.deb" uploaded for each Ubuntu version
-          # (one-time manual step: gh release upload v1.0.0-alpha1 <deb-file>).
+          # Prerequisite: the v1.0.0-alpha4 GitHub Release must have a .deb asset
+          # matching "*${{ matrix.deb_suffix }}*.deb" uploaded for each Ubuntu version.
           mkdir -p target/debian/alpha1
-          if gh release download v1.0.0-alpha1 \
-              --pattern "*${{ matrix.deb_suffix }}*.deb" \
-              --dir target/debian/alpha1 2>&1; then
-            echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
-          else
-            echo "::warning::Release v1.0.0-alpha1 not found or no *${{ matrix.deb_suffix }}*.deb asset — skipping upgrade test."
-            echo "SKIP_UPGRADE=true" >> "$GITHUB_ENV"
-          fi
+          gh release download v1.0.0-alpha4 \
+            --pattern "*${{ matrix.deb_suffix }}*.deb" \
+            --dir target/debian/alpha1
+          echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
 
       - name: QEMU upgrade test
-        if: env.SKIP_UPGRADE != 'true'
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
