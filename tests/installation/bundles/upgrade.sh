@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/installation/bundles/upgrade.sh
-# Upgrade bundle: alpha1 -> current package upgrade and config preservation checks.
+# Upgrade bundle: alpha4 -> current package upgrade and config preservation checks.
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ source "${LIB_DIR}/scenarios.sh"
 source "${LIB_DIR}/cloud-init-db-disk.sh"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
-ALPHA1_GLOB="${ALPHA1_DEB:-${PROJECT_ROOT}/target/debian/bitprotector_1.0.0~alpha1*.deb}"
+ALPHA1_GLOB="${ALPHA1_DEB:-${PROJECT_ROOT}/target/debian/bitprotector_1.0.0~alpha4*.deb}"
 SSH_PORT="${SSH_PORT:-2225}"
 API_PORT="${API_PORT:-18446}"
 TIMEOUT="${TIMEOUT:-900}"
@@ -35,8 +35,8 @@ if [[ -z "${CURRENT_DEB}" ]]; then
     exit 1
 fi
 if [[ -z "${ALPHA1_DEB_FILE}" ]]; then
-    log ERROR "alpha1 .deb file not found at ${ALPHA1_GLOB}"
-    echo "Provide ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha1*.deb"
+    log ERROR "alpha4 .deb file not found at ${ALPHA1_GLOB}"
+    echo "Provide ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha4*.deb"
     exit 1
 fi
 

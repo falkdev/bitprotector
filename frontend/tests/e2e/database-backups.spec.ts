@@ -41,5 +41,5 @@ test('manages database backups from the web UI', async ({ page, qemu }) => {
   await page.getByRole('button', { name: 'Use Backup File' }).click()
   await page.getByRole('button', { name: 'Stage Restore' }).click()
   await expectToast(page, 'Restore staged; restart BitProtector to apply it')
-  await expect(page.getByText('Restore Staged')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Restore Staged' })).toBeVisible()
 })
