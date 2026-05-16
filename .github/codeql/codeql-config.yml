@@ -1,6 +1,4 @@
 disable-default-queries: false
-paths-ignore: []
-# Rust extractor quality is limited in build-mode: none;
-# suppress the call-target threshold warning until CodeQL
-# adds full Rust manual-build support.
-quality-queries: []
+# Rust extractor quality is limited in build-mode: none.
+# call-target resolution will be below 50% threshold; this produces
+# a warning annotation only — it does not fail the job.
