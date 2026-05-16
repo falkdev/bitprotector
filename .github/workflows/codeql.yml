@@ -23,8 +23,11 @@ jobs:
       matrix:
         include:
           - language: rust
+            build-mode: none
           - language: javascript-typescript
+            build-mode: none
           - language: actions
+            build-mode: none
 
     steps:
       - uses: actions/checkout@v5
@@ -33,7 +36,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: none
+          build-mode: ${{ matrix.build-mode }}
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

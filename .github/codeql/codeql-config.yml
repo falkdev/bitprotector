@@ -1,0 +1,4 @@
+disable-default-queries: false
+# Rust extractor quality is limited in build-mode: none.
+# call-target resolution will be below 50% threshold; this produces
+# a warning annotation only — it does not fail the job.
