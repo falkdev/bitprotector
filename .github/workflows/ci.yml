@@ -492,12 +492,17 @@ jobs:
           # matching "*${{ matrix.deb_suffix }}*.deb" uploaded for each Ubuntu version
           # (one-time manual step: gh release upload v1.0.0-alpha1 <deb-file>).
           mkdir -p target/debian/alpha1
-          gh release download v1.0.0-alpha1 \
-            --pattern "*${{ matrix.deb_suffix }}*.deb" \
-            --dir target/debian/alpha1
-          echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
+          if gh release download v1.0.0-alpha1 \
+              --pattern "*${{ matrix.deb_suffix }}*.deb" \
+              --dir target/debian/alpha1 2>&1; then
+            echo "ALPHA1_DEB=$(ls -1 target/debian/alpha1/*.deb | head -1)" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Release v1.0.0-alpha1 not found or no *${{ matrix.deb_suffix }}*.deb asset — skipping upgrade test."
+            echo "SKIP_UPGRADE=true" >> "$GITHUB_ENV"
+          fi
 
       - name: QEMU upgrade test
+        if: env.SKIP_UPGRADE != 'true'
         env:
           GUEST_IMAGE: ${{ matrix.guest }}
           SSH_PORT: ${{ matrix.ssh_port }}
