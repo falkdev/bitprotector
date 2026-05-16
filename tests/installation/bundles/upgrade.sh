@@ -27,8 +27,8 @@ require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
 SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
-CURRENT_DEB=$(ls -1 ${DEB_PATH} 2>/dev/null | grep -v 'alpha1' | head -1 || true)
 ALPHA1_DEB_FILE=$(ls -1 ${ALPHA1_GLOB} 2>/dev/null | head -1 || true)
+CURRENT_DEB=$(ls -1 ${DEB_PATH} 2>/dev/null | grep -Fvx -- "${ALPHA1_DEB_FILE}" | head -1 || true)
 if [[ -z "${CURRENT_DEB}" ]]; then
     log ERROR "current .deb file not found at ${DEB_PATH}"
     echo "Build with: cargo deb"

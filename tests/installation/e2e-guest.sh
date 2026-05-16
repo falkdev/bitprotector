@@ -60,6 +60,7 @@ if [[ -z "${DEB_FILE}" ]]; then
     echo "Build with: cargo deb"
     exit 1
 fi
+DEB_NAME="$(basename "${DEB_FILE}")"
 
 if [[ ! -f "${UBUNTU_IMAGE}" ]]; then
     log ERROR "cloud image not found at ${UBUNTU_IMAGE}"
@@ -69,6 +70,8 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-$(mktemp -d)}/qemu-e2e-$$"
 mkdir -p "${WORKDIR}"
+mkdir -p "${WORKDIR}/debpkg"
+cp -f "${DEB_FILE}" "${WORKDIR}/debpkg/${DEB_NAME}"
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 
@@ -161,7 +164,7 @@ runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
   - /usr/local/bin/bitprotector-e2e-storage.sh
-  - apt-get install -y -q /mnt/debpkg/bitprotector*.deb
+  - apt-get install -y -q /mnt/debpkg/${DEB_NAME}
   - usermod -a -G bitprotector testuser || true
   - mkdir -p /etc/bitprotector/tls
   - openssl req -x509 -nodes -newkey rsa:2048 -days 365 -subj '/CN=localhost' -keyout /etc/bitprotector/tls/key.pem -out /etc/bitprotector/tls/cert.pem
@@ -219,7 +222,7 @@ qemu-system-x86_64 \
     -device "virtio-blk-pci,drive=drive-spare1,id=dev-spare1,serial=bpspare1" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
-    -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
+    -virtfs "local,path=${WORKDIR}/debpkg,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
     > "${WORKDIR}/qemu.log" 2>&1 &
 
 QEMU_PID=$!

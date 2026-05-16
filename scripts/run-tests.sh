@@ -222,13 +222,10 @@ run_e2e() {
     echo "--- Layer 13: Playwright E2E (ubuntu-24.04 only) ---"
     cd "${PROJECT_ROOT}"
 
-    # Verify Playwright browsers are available; install if not.
-    if ! npx --prefix frontend playwright --version >/dev/null 2>&1; then
-        echo "Playwright not installed — running: npx playwright install --with-deps chromium"
-        (cd frontend && npx playwright install --with-deps chromium)
-    fi
+    echo "Ensuring Playwright Chromium browser is installed"
+    (cd frontend && npx playwright install --with-deps chromium)
 
-    local e2e_pid_file="/tmp/e2e-qemu.pid"
+    local e2e_pid_file="${RUNNER_TEMP:-/tmp}/e2e-qemu.pid"
     local e2e_cleanup_done=0
 
     cleanup_e2e() {

@@ -1,14 +1,14 @@
 ## Plan: CI/Nightly Workflow Optimization
 
-**TL;DR**: The biggest wins come from pre-baking the QEMU guest image (eliminates 1–2 min of in-VM `apt-get` per boot × 16+ jobs), caching runner-side QEMU packages, and eliminating the nightly duplicate `.deb` rebuild. Secondary gains from parallelising lint+unit, faster tool installs, and pre-fetching the alpha1 `.deb` from a GitHub Release.
+**TL;DR**: The implemented wins in this PR come from caching runner-side QEMU packages, eliminating the nightly duplicate `.deb` rebuild, parallelising lint+unit, faster tool installs, and pre-fetching the alpha `.deb` from a GitHub Release. Pre-baking the QEMU guest image was explored separately, but it is not part of the current implementation.
 
 ---
 
-### Phase 1 — Pre-baked QEMU base image *(biggest win: ~16–32 min/full-CI)*
+### Phase 1 — Pre-baked QEMU base image *(future optimization, not implemented here)*
 
-Right now every QEMU job cloud-init runs `apt-get update && apt-get install jq openssl curl` inside the VM on every boot. There are ~8 heavy QEMU job types × 2 guests = 16 VM boots per full CI run.
+Right now every QEMU job cloud-init still runs `apt-get update && apt-get install jq openssl curl` inside the VM on every boot. There are ~8 heavy QEMU job types × 2 guests = 16 VM boots per full CI run.
 
-**Approach — `virt-customize` in `setup-qemu`:**
+**Potential approach — `virt-customize` in `setup-qemu`:**
 
 1. In `.github/actions/setup-qemu/action.yml`, after restoring the vanilla cloud image, run `sudo virt-customize -a image.img --install jq,openssl,curl --run-command 'apt-get clean' --run-command 'cloud-init clean --logs --seed'` to create a pre-baked base image
 2. Cache the pre-baked image under a separate monthly key like `${{ inputs.guest }}-base-YYYYMM` (restore vanilla → customize → save as base)
