@@ -49,7 +49,17 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
     for component in raw_path.components() {
         match component {
             Component::RootDir => {}
-            Component::Normal(segment) => segments.push(segment.to_string_lossy().to_string()),
+            Component::Normal(segment) => {
+                let s = segment.to_string_lossy();
+                let trimmed_seg = s.trim();
+                if trimmed_seg.is_empty() {
+                    anyhow::bail!(
+                        "Virtual path segments may not be empty or whitespace-only: {}",
+                        virtual_path
+                    );
+                }
+                segments.push(trimmed_seg.to_string());
+            }
             Component::CurDir => {}
             Component::ParentDir => {
                 anyhow::bail!("Parent-directory traversal is not allowed in virtual paths")
