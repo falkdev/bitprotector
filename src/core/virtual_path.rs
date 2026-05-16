@@ -58,7 +58,7 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
                         virtual_path
                     );
                 }
-                segments.push(s.to_string());
+                segments.push(trimmed_seg.to_string());
             }
             Component::CurDir => {}
             Component::ParentDir => {
@@ -447,7 +447,7 @@ mod tests {
         );
         assert_eq!(
             normalize_virtual_path("/docs /report.txt").unwrap(),
-            "/docs /report.txt"
+            "/docs/report.txt"
         );
         assert_eq!(
             normalize_virtual_path("/docs/   /report.txt")
