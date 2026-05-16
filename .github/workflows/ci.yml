@@ -103,7 +103,9 @@ jobs:
       - name: Install cargo-llvm-cov
         run: |
           rustup component add llvm-tools-preview
-          cargo binstall cargo-llvm-cov --no-confirm
+          if ! cargo llvm-cov --version &>/dev/null; then
+            cargo install cargo-llvm-cov --locked
+          fi
 
       - name: Rust coverage
         run: cargo llvm-cov --lib --workspace --lcov --output-path rust.lcov --no-clean

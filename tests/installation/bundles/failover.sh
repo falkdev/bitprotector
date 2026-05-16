@@ -155,7 +155,8 @@ runcmd:
   - mkdir -p /mnt/debpkg
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
   - /usr/local/bin/bitprotector-qemu-storage.sh
-  - apt-get install -y -q /mnt/debpkg/bitprotector*.deb
+  - apt-get update -q
+  - apt-get install -y -q xfsprogs /mnt/debpkg/bitprotector*.deb
   - systemctl enable bitprotector || true
   - systemctl start bitprotector || true
   - touch /tmp/install-done
