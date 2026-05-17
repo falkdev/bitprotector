@@ -77,9 +77,38 @@ Documentation must reflect the actual implementation. Before writing or editing 
 3. Fix remaining errors manually.
 4. Confirm clean lint output.
 
+## Hard Stop Rules — Do NOT Cross These Lines
+
+- **NEVER edit source code** — if documentation reveals a code bug, report it and stop. Code fixes belong to the Code Fixer agent.
+- **NEVER run `git push`, `git commit`, or create/merge a pull request.** Your job ends when the docs are linted and accurate.
+- **STOP after reading the relevant source once.** Do not widen the audit scope beyond what was asked.
+- **STOP and ask** if the code behaviour is ambiguous (e.g., a function could work two ways). Do not document a guess.
+
 ## Constraints
 
 - DO NOT invent API endpoints, config keys, or behavior — read the code.
 - DO NOT rewrite docs wholesale when a targeted fix is sufficient.
 - DO NOT skip linting — every doc touched must pass markdownlint before you finish.
 - ONLY document what is in scope for this repo (bitprotector backend + frontend).
+
+## Handoff — Required Before Done
+
+**This agent's job ends when the edited docs lint cleanly and are accurate.** Do not commit, push, or open PRs.
+
+After finishing, output **exactly** the following block (filled in) and then **stop**:
+
+~~~
+---HANDOFF: DOCS COMPLETE---
+
+**What changed:**
+- <docs/path/to/file.md> — <one-line summary of what was updated>
+
+**Code discrepancies found (if any):**
+<List any cases where the code did not match the docs, and what the correct behaviour is.
+ If none, write "None.">
+
+**Lint status:**
+<Paste the last line(s) of the markdownlint output confirming clean lint>
+~~~
+
+Do NOT suggest next steps or ask "should I push?". Output the block and stop.

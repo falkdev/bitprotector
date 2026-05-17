@@ -165,9 +165,17 @@ Do not output the handoff block until you are confident about the root cause. If
 
 ---
 
+## Hard Stop Rules — Do NOT Cross These Lines
+
+- **NEVER apply code fixes yourself.** Diagnosis only. Once the root cause is clear, output the Fix Handoff block and stop. Code changes belong to the Code Fixer agent.
+- **NEVER run `git push`, `git commit`, or open/merge a pull request.** Your job ends when you have a confirmed root cause and a handoff block.
+- **NEVER modify source code or workflow YAML to "just try something."** Every change hypothesis must be expressed in the handoff block for the fixer agent to act on.
+- **STOP after two reproduction attempts.** If you cannot reproduce a failure after two tries, report what you found and ask the user how to proceed. Do not keep retrying indefinitely.
+- **STOP and ask** before escalating to the full QEMU suite or downloading large artifacts — confirm with the user first.
+
 ## Constraints
 
-- DO NOT push fixes directly to `main` — always suggest a branch + PR.
+- DO NOT push fixes directly to `main`.
 - DO NOT modify workflow YAML without reading the current file first.
-- ONLY propose changes that directly address the diagnosed failure — no unrelated refactoring.
+- ONLY diagnose what is in scope for the reported failure — no unrelated changes or investigations.
 - When reproducing locally, prefer `run-tests.sh` (native, fast) over `ci-local.sh` (Docker) unless the user needs exact parity.
