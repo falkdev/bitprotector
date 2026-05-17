@@ -76,6 +76,14 @@ runs:
         sudo apt-get install -y -q \
           qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
 
+    - name: Fix apt cache permissions for caching
+      shell: bash
+      run: |
+        # /var/cache/apt/archives/partial is root:root mode 0700.
+        # actions/cache@v5 saves the cache as the runner user, so tar
+        # cannot enter it and exits with code 2.  Make it world-executable.
+        sudo chmod 755 /var/cache/apt/archives/partial
+
     - name: Enable KVM access
       shell: bash
       run: |
