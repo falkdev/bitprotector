@@ -60,21 +60,32 @@ runs:
       id: apt-cache
       uses: actions/cache@v5
       with:
-        path: /var/cache/apt/archives
-        key: apt-qemu-${{ runner.os }}-v1
+        # Use a user-owned staging directory — /var/cache/apt/archives is
+        # root-owned so the runner user cannot tar-save or tar-restore it
+        # directly.  We copy in/out with sudo instead.
+        path: ~/apt-cache-qemu
+        key: apt-qemu-${{ runner.os }}-v2
+
+    - name: Populate apt cache from staging dir
+      if: steps.apt-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: sudo cp ~/apt-cache-qemu/*.deb /var/cache/apt/archives/ 2>/dev/null || true
 
     - name: Install QEMU and cloud-image utilities
       shell: bash
       run: |
-        # Skip apt-get update on cache hits — the cached .deb files in
-        # /var/cache/apt/archives are reused directly, so no mirror sync
-        # is needed. On a miss apt-get update fetches fresh metadata and
-        # downloads the packages; actions/cache@v5 then saves them above.
         if [[ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]]; then
           sudo apt-get update -q
         fi
         sudo apt-get install -y -q \
           qemu-system-x86 qemu-utils cloud-image-utils socat openssh-client
+
+    - name: Save apt packages to staging dir
+      if: steps.apt-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/apt-cache-qemu
+        cp /var/cache/apt/archives/*.deb ~/apt-cache-qemu/ 2>/dev/null || true
 
     - name: Enable KVM access
       shell: bash
