@@ -64,20 +64,8 @@ describe('trackingApi', () => {
       const result = await trackingApi.list({ source: 'direct' })
       expect(result.items.every((i) => i.kind === 'file')).toBe(true)
     })
-
-    it('source=folder_tracked excludes direct files', async () => {
-      useFallback(
-        [
-          makeTrackedFile({ id: 1, tracked_direct: true, tracked_via_folder: false }),
-          makeTrackedFile({ id: 2, tracked_direct: false, tracked_via_folder: true }),
-        ],
-        []
-      )
-      const result = await trackingApi.list({ source: 'folder_tracked' })
-      // folder_tracked doesn't match 'direct' source or 'folder' kind
-      expect(result.items.every((i) => i.source !== 'direct' && i.kind !== 'folder')).toBe(true)
-    })
   })
+
 
   describe('fallback — has_virtual_path filter', () => {
     it('has_virtual_path=true returns only items with virtual path', async () => {

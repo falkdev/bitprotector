@@ -273,7 +273,7 @@ describe('DatabaseBackupsPage', () => {
       api.post('/database/backups/integrity-check', () =>
         HttpResponse.json([
           makeBackupIntegrityResult({
-            status: 'error',
+            status: 'failed',
             error: 'Checksum mismatch detected',
           }),
         ])

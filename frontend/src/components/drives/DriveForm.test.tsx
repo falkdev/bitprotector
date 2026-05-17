@@ -125,6 +125,9 @@ describe('DriveForm', () => {
       secondary_path: '/mnt/secondary',
       primary_media_type: 'hdd' as const,
       secondary_media_type: 'ssd' as const,
+      primary_state: 'active' as const,
+      secondary_state: 'active' as const,
+      active_role: 'primary' as const,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     }
