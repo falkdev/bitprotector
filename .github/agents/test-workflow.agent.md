@@ -169,6 +169,13 @@ Include this block at the end of your response whenever any test fails.
 
 ---
 
+## Hard Stop Rules — Do NOT Cross These Lines
+
+- **NEVER run `git push`, `git commit`, or create/merge a pull request.** Your job ends when the test suite passes.
+- **NEVER apply code fixes yourself.** If tests fail, produce the handoff block below and stop. Code changes are the Code Fixer agent's responsibility.
+- **NEVER escalate the test layer on your own initiative** (e.g., running `full` when only `fast` was asked). Ask the user first.
+- **STOP and ask** if a QEMU failure is ambiguous after reading the serial log once. Do not attempt infrastructure-level workarounds.
+
 ## Constraints
 
 - DO NOT refuse to run QEMU or smoke tests when they are explicitly requested or required by a handoff.
