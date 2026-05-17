@@ -319,4 +319,93 @@ mod tests {
         assert!(primary_file_path.exists());
         assert_eq!(fs::read(&primary_file_path).unwrap(), content);
     }
+
+    #[test]
+    fn test_restore_mirror_from_master() {
+        let (primary_dir, secondary_dir) = setup_pair();
+        let content = b"restore mirror from master test";
+        let expected_checksum = crate::core::checksum::checksum_bytes(content);
+
+        // Write to primary (master)
+        let primary_file_path = primary_dir.path().join("m.txt");
+        fs::write(&primary_file_path, content).unwrap();
+
+        // Ensure secondary does not have the file
+        let secondary_file_path = secondary_dir.path().join("m.txt");
+        assert!(!secondary_file_path.exists());
+
+        let pair = DrivePair {
+            id: 1,
+            name: "test".to_string(),
+            primary_path: primary_dir.path().to_str().unwrap().to_string(),
+            secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
+            primary_media_type: "hdd".to_string(),
+            secondary_media_type: "hdd".to_string(),
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        restore_mirror_from_master(&pair, "m.txt", &expected_checksum).unwrap();
+        assert!(secondary_file_path.exists());
+        assert_eq!(fs::read(&secondary_file_path).unwrap(), content);
+    }
+
+    #[test]
+    fn test_restore_from_mirror_fails_when_primary_failed() {
+        let (primary_dir, secondary_dir) = setup_pair();
+        let content = b"content";
+        let expected_checksum = crate::core::checksum::checksum_bytes(content);
+        fs::write(secondary_dir.path().join("f.txt"), content).unwrap();
+
+        let pair = DrivePair {
+            id: 1,
+            name: "test".to_string(),
+            primary_path: primary_dir.path().to_str().unwrap().to_string(),
+            secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "failed".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "secondary".to_string(),
+            primary_media_type: "hdd".to_string(),
+            secondary_media_type: "hdd".to_string(),
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        let result = restore_from_mirror(&pair, "f.txt", &expected_checksum);
+        assert!(
+            result.is_err(),
+            "Should fail when primary drive is marked failed"
+        );
+    }
+
+    #[test]
+    fn test_restore_mirror_from_master_fails_when_secondary_failed() {
+        let (primary_dir, secondary_dir) = setup_pair();
+        let content = b"content";
+        let expected_checksum = crate::core::checksum::checksum_bytes(content);
+        fs::write(primary_dir.path().join("f.txt"), content).unwrap();
+
+        let pair = DrivePair {
+            id: 1,
+            name: "test".to_string(),
+            primary_path: primary_dir.path().to_str().unwrap().to_string(),
+            secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "failed".to_string(),
+            active_role: "primary".to_string(),
+            primary_media_type: "hdd".to_string(),
+            secondary_media_type: "hdd".to_string(),
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        let result = restore_mirror_from_master(&pair, "f.txt", &expected_checksum);
+        assert!(
+            result.is_err(),
+            "Should fail when secondary drive is marked failed"
+        );
+    }
 }

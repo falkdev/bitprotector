@@ -1,14 +1,26 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { LoginPage } from './LoginPage'
+import { api } from '@/test/msw/http'
+import { server } from '@/test/msw/server'
 import { renderWithApp } from '@/test/render'
+
+const mockLogin = vi.fn()
+const mockNavigate = vi.fn()
 
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
     isAuthenticated: false,
-    login: vi.fn(),
+    login: mockLogin,
   }),
 }))
+
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => mockNavigate }
+})
 
 describe('LoginPage', () => {
   it('renders the login controls for the web GUI', () => {
@@ -20,5 +32,56 @@ describe('LoginPage', () => {
     expect(screen.getByTestId('password-input')).toBeInTheDocument()
     expect(screen.getByTestId('login-button')).toBeInTheDocument()
     expect(screen.queryByTestId('page-title')).not.toBeInTheDocument()
+  })
+
+  it('submits credentials and navigates on success', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.post('/auth/login', () =>
+        HttpResponse.json({
+          token: 'jwt-token',
+          username: 'alice',
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+        })
+      )
+    )
+
+    renderWithApp(<LoginPage />, { route: '/login' })
+
+    await user.type(screen.getByTestId('username-input'), 'alice')
+    await user.type(screen.getByTestId('password-input'), 'secret')
+    await user.click(screen.getByTestId('login-button'))
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalled()
+      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+    })
+  })
+
+  it('shows error toast on login failure', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.post('/auth/login', () =>
+        HttpResponse.json({ error: 'bad credentials' }, { status: 401 })
+      )
+    )
+
+    renderWithApp(<LoginPage />, { route: '/login' })
+
+    await user.type(screen.getByTestId('username-input'), 'alice')
+    await user.type(screen.getByTestId('password-input'), 'wrong')
+    await user.click(screen.getByTestId('login-button'))
+
+    expect(await screen.findByText('Invalid username or password')).toBeInTheDocument()
+  })
+
+  it('shows validation errors when form is submitted empty', async () => {
+    const user = userEvent.setup()
+    renderWithApp(<LoginPage />, { route: '/login' })
+
+    await user.click(screen.getByTestId('login-button'))
+
+    expect(await screen.findByText('Username is required')).toBeInTheDocument()
+    expect(await screen.findByText('Password is required')).toBeInTheDocument()
   })
 })

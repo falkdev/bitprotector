@@ -5,7 +5,26 @@ import { TrackFileModal } from '@/components/tracking/TrackFileModal'
 import type { DrivePair } from '@/types/drive'
 
 vi.mock('@/components/shared/PathPickerDialog', () => ({
-  PathPickerDialog: () => null,
+  PathPickerDialog: ({
+    open,
+    onPick,
+    onClose,
+    title,
+  }: {
+    open: boolean
+    onPick: (path: string) => void
+    onClose: () => void
+    title: string
+  }) => {
+    if (!open) return null
+    return (
+      <div data-testid="path-picker-dialog">
+        <span>{title}</span>
+        <button onClick={() => onPick('/mnt/primary/picked-file.txt')}>Pick</button>
+        <button onClick={onClose}>ClosePicker</button>
+      </div>
+    )
+  },
 }))
 
 const drive: DrivePair = {
@@ -23,6 +42,11 @@ const drive: DrivePair = {
 }
 
 describe('TrackFileModal', () => {
+  it('renders nothing when open=false', () => {
+    render(<TrackFileModal open={false} onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
+    expect(screen.queryByText('Track new file')).not.toBeInTheDocument()
+  })
+
   it('converts an absolute file path to a relative path before submit', async () => {
     const user = userEvent.setup()
     const onTrack = vi.fn().mockResolvedValue(undefined)
@@ -61,5 +85,135 @@ describe('TrackFileModal', () => {
       relative_path: 'docs/report.pdf',
       virtual_path: '/virtual/docs/report.pdf',
     })
+  })
+
+  it('shows drive pair validation error when submitted without a drive', async () => {
+    const user = userEvent.setup()
+    const onTrack = vi.fn()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
+
+    await user.click(screen.getByRole('button', { name: 'Track file' }))
+
+    expect(await screen.findByText('Drive pair ID is required')).toBeInTheDocument()
+    expect(onTrack).not.toHaveBeenCalled()
+  })
+
+  it('shows path required error when submitted without a path but drive selected', async () => {
+    const user = userEvent.setup()
+    const onTrack = vi.fn()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.click(screen.getByRole('button', { name: 'Track file' }))
+
+    expect(await screen.findByText(/is required/i)).toBeInTheDocument()
+    expect(onTrack).not.toHaveBeenCalled()
+  })
+
+  it('shows path resolution error when path is outside primary root', async () => {
+    const user = userEvent.setup()
+    const onTrack = vi.fn()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
+      '/other/path/file.txt'
+    )
+    await user.click(screen.getByRole('button', { name: 'Track file' }))
+
+    expect(onTrack).not.toHaveBeenCalled()
+  })
+
+  it('shows virtual path error for non-absolute virtual path', async () => {
+    const user = userEvent.setup()
+    const onTrack = vi.fn()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={onTrack} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
+      '/mnt/primary/docs/report.pdf'
+    )
+    await user.type(screen.getByPlaceholderText('/docs/report.pdf'), 'relative/path')
+    await user.click(screen.getByRole('button', { name: 'Track file' }))
+
+    expect(await screen.findByText('Virtual path must be absolute')).toBeInTheDocument()
+    expect(onTrack).not.toHaveBeenCalled()
+  })
+
+  it('shows the primary root hint after selecting a drive', async () => {
+    const user = userEvent.setup()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
+
+    expect(
+      screen.getByText('Select a drive pair before browsing or submitting.')
+    ).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+
+    expect(screen.getByText('Primary root: /mnt/primary')).toBeInTheDocument()
+  })
+
+  it('shows the resolved path hint when a valid path is entered', async () => {
+    const user = userEvent.setup()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
+      '/mnt/primary/docs/report.pdf'
+    )
+
+    expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
+  })
+
+  it('calls onClose when the Cancel button is clicked', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+
+    render(<TrackFileModal open onClose={onClose} onTrack={vi.fn()} drives={[drive]} />)
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('opens the path picker when Browse is clicked and sets path on pick', async () => {
+    const user = userEvent.setup()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+
+    // The file path Browse button (first one)
+    const browseButtons = screen.getAllByRole('button', { name: 'Browse' })
+    await user.click(browseButtons[0])
+
+    expect(screen.getByTestId('path-picker-dialog')).toBeInTheDocument()
+    expect(screen.getByText('Select File Path')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Pick' }))
+
+    expect(screen.queryByTestId('path-picker-dialog')).not.toBeInTheDocument()
+  })
+
+  it('closes the path picker without selecting when ClosePicker is clicked', async () => {
+    const user = userEvent.setup()
+
+    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    const browseButtons = screen.getAllByRole('button', { name: 'Browse' })
+    await user.click(browseButtons[0])
+    await user.click(screen.getByRole('button', { name: 'ClosePicker' }))
+
+    expect(screen.queryByTestId('path-picker-dialog')).not.toBeInTheDocument()
   })
 })

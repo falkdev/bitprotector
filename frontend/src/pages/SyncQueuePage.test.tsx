@@ -257,4 +257,105 @@ describe('SyncQueuePage', () => {
       expect(screen.queryByTestId('queue-paused-banner')).not.toBeInTheDocument()
     })
   })
+
+  it('filters queue items by selecting a filter option', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([
+          makeSyncQueueItem({ id: 50, status: 'pending' }),
+          makeSyncQueueItem({ id: 51, status: 'completed' }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-50')
+    await screen.findByTestId('sync-queue-row-51')
+
+    await user.selectOptions(screen.getByRole('combobox'), 'pending')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sync-queue-row-50')).toBeInTheDocument()
+      expect(screen.queryByTestId('sync-queue-row-51')).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes the resolve dialog when cancel is clicked', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([
+          makeSyncQueueItem({ id: 60, action: 'user_action_required', status: 'pending' }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-60')
+
+    await user.click(screen.getByRole('button', { name: 'Resolve' }))
+    expect(await screen.findByText('Resolve Queue Item')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      expect(screen.queryByText('Resolve Queue Item')).not.toBeInTheDocument()
+    })
+  })
+
+  it('processes the queue when Process Queue is clicked', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 70 })])),
+      api.post('/sync/process', () => HttpResponse.json({ processed: 3 }))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-70')
+
+    await user.click(screen.getByRole('button', { name: 'Process Queue' }))
+    expect(await screen.findByText('Processed 3 queue item(s)')).toBeInTheDocument()
+  })
+
+  it('shows error toast when toggling pause state fails', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 71 })], false)),
+      api.post('/sync/pause', () => HttpResponse.json({}, { status: 500 }))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByRole('button', { name: 'Pause Queue' })
+    await user.click(screen.getByRole('button', { name: 'Pause Queue' }))
+
+    expect(await screen.findByText('Failed to toggle queue pause state')).toBeInTheDocument()
+  })
+
+  it('shows error toast when resolving a queue item fails', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([
+          makeSyncQueueItem({ id: 72, action: 'user_action_required', status: 'pending' }),
+        ])
+      ),
+      api.post('/sync/queue/:id/resolve', () => HttpResponse.json({}, { status: 500 }))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-72')
+
+    await user.click(screen.getByRole('button', { name: 'Resolve' }))
+    await screen.findByText('Resolve Queue Item')
+
+    const resolveButtons = screen.getAllByRole('button', { name: 'Resolve' })
+    await user.click(resolveButtons[resolveButtons.length - 1])
+
+    expect(await screen.findByText('Failed to resolve queue item #72')).toBeInTheDocument()
+  })
 })

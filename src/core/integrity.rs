@@ -550,4 +550,153 @@ mod tests {
         let recovered = attempt_recovery(&pair, &file, &result).unwrap();
         assert!(!recovered);
     }
+
+    #[test]
+    fn test_recovery_from_mirror_missing() {
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let original = b"primary content";
+        let hash = write_file(&primary, "f.txt", original);
+        // No mirror file
+
+        let pair = make_pair(&primary, &secondary);
+        let file = make_tracked_file(1, "f.txt", &hash);
+
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
+        assert_eq!(result.status, IntegrityStatus::MirrorMissing);
+
+        let recovered = attempt_recovery(&pair, &file, &result).unwrap();
+        assert!(recovered);
+
+        // Verify mirror now exists
+        let mirrored = fs::read(secondary.path().join("f.txt")).unwrap();
+        assert_eq!(mirrored, original);
+    }
+
+    #[test]
+    fn test_no_recovery_for_degraded_pair() {
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let original = b"some content";
+        let hash = checksum::checksum_bytes(original);
+        write_file(&secondary, "f.txt", original);
+        fs::write(primary.path().join("f.txt"), b"corrupted").unwrap();
+
+        let mut pair = make_pair(&primary, &secondary);
+        pair.primary_state = "failed".to_string();
+        pair.active_role = "secondary".to_string();
+        let file = make_tracked_file(1, "f.txt", &hash);
+
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
+
+        let recovered = attempt_recovery(&pair, &file, &result).unwrap();
+        assert!(!recovered, "Degraded pair should not attempt recovery");
+    }
+
+    #[test]
+    fn test_attempt_recovery_with_reconciliation_success() {
+        use crate::db::repository::{create_memory_pool, Repository};
+        use crate::db::schema::initialize_schema;
+
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let original = b"reconcile content";
+        let hash = checksum::checksum_bytes(original);
+        write_file(&secondary, "f.txt", original);
+        fs::write(primary.path().join("f.txt"), b"corrupted").unwrap();
+
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        let repo = Repository::new(pool);
+
+        let pair = repo
+            .create_drive_pair(
+                "test",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, original.len() as i64, None)
+            .unwrap();
+        // Simulate a pending mirror queue item for this file
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
+        assert_eq!(result.status, IntegrityStatus::MasterCorrupted);
+
+        let recovered = attempt_recovery_with_reconciliation(&repo, &pair, &file, &result).unwrap();
+        assert!(recovered);
+
+        // is_mirrored should be set to true
+        let updated = repo.get_tracked_file(file.id).unwrap();
+        assert!(
+            updated.is_mirrored,
+            "File should be marked mirrored after reconciliation"
+        );
+
+        // Sync queue item should be completed
+        let (pending, _) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert!(
+            pending.iter().all(|item| item.tracked_file_id != file.id),
+            "No pending queue items should remain for this file"
+        );
+    }
+
+    #[test]
+    fn test_attempt_recovery_with_reconciliation_no_recovery_for_both_corrupted() {
+        use crate::db::repository::{create_memory_pool, Repository};
+        use crate::db::schema::initialize_schema;
+
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let stored_hash = checksum::checksum_bytes(b"original");
+        fs::write(primary.path().join("f.txt"), b"bad1").unwrap();
+        fs::write(secondary.path().join("f.txt"), b"bad2").unwrap();
+
+        let pool = create_memory_pool().unwrap();
+        initialize_schema(&pool.get().unwrap()).unwrap();
+        let repo = Repository::new(pool);
+
+        let pair = repo
+            .create_drive_pair(
+                "test",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &stored_hash, 8, None)
+            .unwrap();
+
+        let result = check_file_integrity(
+            &pair,
+            &file,
+            checksum::ChecksumStrategy::Streaming,
+            checksum::ChecksumStrategy::Streaming,
+        )
+        .unwrap();
+        assert_eq!(result.status, IntegrityStatus::BothCorrupted);
+
+        let recovered = attempt_recovery_with_reconciliation(&repo, &pair, &file, &result).unwrap();
+        assert!(!recovered);
+    }
 }
