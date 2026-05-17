@@ -24,7 +24,7 @@ This document describes every bundle in the QEMU installation test suite, includ
 
 **Entry point:** `tests/installation/bundles/smoke.sh`  
 **Wrapper:** `tests/installation/qemu_test.sh`  
-**Scenarios:** `tests/installation/scenarios/smoke/` (14 of 16 files sourced)  
+**Scenarios:** `tests/installation/scenarios/smoke/` (15 of 17 files sourced)  
 **Default ports:** SSH 2222, HTTPS 18443  
 **Purpose:** Validates a successful package installation and the core service behaviors that must work before any other testing is meaningful. This bundle is the first gate in CI and the quickest signal that a build is fundamentally broken.
 
@@ -71,6 +71,9 @@ Adds two backup destinations and runs a manual `database run`. Verifies backup f
 
 **smoke-16 — Scheduled sync, integrity, and database backup sweep**  
 Configures schedules for sync, integrity check, and database backup with short intervals, then waits for all three to trigger and complete. Confirms the scheduler correctly dispatches each task type and that results are visible in the respective API endpoints afterward.
+
+**smoke-17 — adopt_mirror queue action end-to-end**  
+Verifies all three `adopt_mirror` queue action cases: (a) **matching standby** — a file already exists on the standby with identical bytes; no copy is performed and the file is marked mirrored. (b) **stale standby** — the standby copy has different content; a full copy from primary overwrites it. (c) **missing standby** — no file exists at the standby path; the primary file is copied across. After processing the queue, all three files must have `is_mirrored: true` and standby content must match primary.
 
 ---
 

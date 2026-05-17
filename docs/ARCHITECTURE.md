@@ -220,7 +220,7 @@ CREATE TABLE sync_queue (
     tracked_file_id INTEGER NOT NULL REFERENCES tracked_files(id),
     action          TEXT    NOT NULL CHECK(action IN (
                         'mirror', 'restore_master', 'restore_mirror',
-                        'verify', 'user_action_required'
+                        'verify', 'user_action_required', 'adopt_mirror'
                     )),
     status          TEXT    NOT NULL DEFAULT 'pending' CHECK(status IN (
                         'pending', 'in_progress', 'completed', 'failed'

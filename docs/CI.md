@@ -46,7 +46,7 @@ All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs u
 | `push` to `main` | 0 – 12 |
 | `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 12 |
 | `workflow_dispatch` with `run_heavy_qemu=false` (default) | 0 – 5 (`qemu-smoke` only for QEMU layer) |
-| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 12) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` |
+| Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 12) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` + `qemu-drive-media-type` |
 
 PR runs use `cancel-in-progress: true` so a new push automatically cancels the previous run. Pushes to `main` never cancel (a heavy failover run mid-flight must finish).
 
@@ -72,7 +72,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 12 | `qemu-uninstall` | Matrix: Ubuntu 24.04 + 26.04. Purge/uninstall scenarios. | ubuntu-24.04 | 8-12 min per guest |
 | 13 | `e2e` | Playwright E2E suite against a dedicated ubuntu-24.04 QEMU guest. Boots the guest via `tests/installation/e2e-guest.sh`, runs all 8 spec files (`drives`, `file-browser`, `scheduler`, `integrity`, `folders`, `auth-and-nav`, `database-backups`, `dashboard`). | ubuntu-24.04 | 10-20 min |
 
-Nightly-only jobs in `nightly.yml` also run `qemu-scale`, `qemu-scale-lowmem`, and `qemu-scheduled-load` (all matrixed across Ubuntu 24.04 + 26.04).
+Nightly-only jobs in `nightly.yml` also run `qemu-scale`, `qemu-scale-lowmem`, `qemu-scheduled-load`, and `qemu-drive-media-type` (all matrixed across Ubuntu 24.04 + 26.04).
 
 **Runner vs guest OS**: the runner is always `ubuntu-24.04` (GitHub-hosted). The *guest* running inside QEMU is controlled by the matrix (`ubuntu-24.04` noble, `ubuntu-26.04` resolute). See [.github/actions/setup-qemu/action.yml](.github/actions/setup-qemu/action.yml) for image download logic.
 
