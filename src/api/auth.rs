@@ -327,7 +327,16 @@ mod tests {
     #[actix_rt::test]
     async fn test_authenticate_user_bad_credentials_returns_false() {
         // PAM will not be configured in test environments; bad credentials always fail.
-        let result = authenticate_user("nonexistent_user_xyz", "wrong_password_xyz");
+        let invalid_password = std::env::var("TEST_INVALID_PASSWORD").unwrap_or_else(|_| {
+            format!(
+                "invalid-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )
+        });
+        let result = authenticate_user("nonexistent_user_xyz", &invalid_password);
         assert!(!result, "Bad credentials should return false");
     }
 }
