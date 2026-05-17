@@ -1,8 +1,10 @@
 [server]
 host = "0.0.0.0"
 port = 8443
-tls_cert = "/etc/bitprotector/cert.pem"
-tls_key = "/etc/bitprotector/key.pem"
+rate_limit_rps = 100
+jwt_secret = "change-me-in-production"
+tls_cert = "/etc/bitprotector/tls/cert.pem"
+tls_key = "/etc/bitprotector/tls/key.pem"
 
 [database]
 path = "/var/lib/bitprotector/bitprotector.db"

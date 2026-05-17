@@ -1014,7 +1014,7 @@ Manually enqueue a sync action for a tracked file.
 }
 ```
 
-`action` is one of: `mirror` | `restore_master` | `restore_mirror` | `verify` | `user_action_required`.
+`action` is one of: `mirror` | `restore_master` | `restore_mirror` | `verify` | `user_action_required` | `adopt_mirror`.
 
 **Response `201`:** Created queue item.  
 **Errors:** `400 Bad Request`
