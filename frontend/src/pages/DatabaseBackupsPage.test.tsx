@@ -285,7 +285,9 @@ describe('DatabaseBackupsPage', () => {
     await screen.findByTestId('database-backup-row-1')
     await user.click(screen.getByRole('button', { name: 'Check Integrity Now' }))
 
-    expect(await screen.findByText('Backup integrity check completed')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Integrity check found 1 unresolved backup(s)')
+    ).toBeInTheDocument()
     expect(await screen.findByText('Checksum mismatch detected')).toBeInTheDocument()
   })
 

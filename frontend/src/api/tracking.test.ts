@@ -66,7 +66,6 @@ describe('trackingApi', () => {
     })
   })
 
-
   describe('fallback — has_virtual_path filter', () => {
     it('has_virtual_path=true returns only items with virtual path', async () => {
       useFallback(
