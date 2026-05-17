@@ -64,7 +64,7 @@ runs:
         # root-owned so the runner user cannot tar-save or tar-restore it
         # directly.  We copy in/out with sudo instead.
         path: ~/apt-cache-qemu
-        key: apt-qemu-${{ runner.os }}-v1
+        key: apt-qemu-${{ runner.os }}-v2
 
     - name: Populate apt cache from staging dir
       if: steps.apt-cache.outputs.cache-hit == 'true'
