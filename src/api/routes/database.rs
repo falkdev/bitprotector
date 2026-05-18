@@ -210,9 +210,11 @@ async fn update_settings(
 }
 
 async fn integrity_check(data: web::Data<Repository>) -> HttpResponse {
-    match backup::run_backup_integrity_check(&data) {
-        Ok(results) => HttpResponse::Ok().json(results),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    let repo = data.clone();
+    match web::block(move || backup::run_backup_integrity_check(&repo)).await {
+        Ok(Ok(results)) => HttpResponse::Ok().json(results),
+        Ok(Err(e)) => HttpResponse::InternalServerError().body(e.to_string()),
+        Err(_) => HttpResponse::InternalServerError().body("integrity check task was cancelled"),
     }
 }
 
