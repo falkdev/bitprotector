@@ -292,12 +292,53 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
                 } else {
                     "missing"
                 };
-                repo.update_db_backup_integrity_status(
-                    item.config.id,
-                    pre_status,
-                    item.error.as_deref(),
-                )
-                .ok();
+                let mut pre_write_ok = false;
+                for attempt in 0..3u32 {
+                    match repo.update_db_backup_integrity_status(
+                        item.config.id,
+                        pre_status,
+                        item.error.as_deref(),
+                    ) {
+                        Ok(_) => {
+                            pre_write_ok = true;
+                            break;
+                        }
+                        Err(ref e) if attempt < 2 => {
+                            tracing::warn!(
+                                "Retrying pre-repair marker write (attempt {}): {}",
+                                attempt + 1,
+                                e
+                            );
+                            thread::sleep(std::time::Duration::from_millis(
+                                500 * (attempt as u64 + 1),
+                            ));
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to write pre-repair marker for backup #{} after 3 attempts: {}",
+                                item.config.id,
+                                e
+                            );
+                        }
+                    }
+                }
+                if !pre_write_ok {
+                    // Cannot safely proceed: without the pre-repair marker the recovery path
+                    // in is_healthy() cannot fire if the post-repair write also fails.
+                    // Defer to the next integrity cycle.
+                    results.push(BackupIntegrityResult {
+                        backup_config_id: item.config.id,
+                        backup_path: item.path.to_string_lossy().to_string(),
+                        status: pre_status.to_string(),
+                        checksum: None,
+                        repaired_from_id: None,
+                        error: Some(
+                            "pre-repair marker write failed; repair deferred to next integrity check"
+                                .to_string(),
+                        ),
+                    });
+                    continue;
+                }
                 match copy_backup_atomically(source_path, &item.path)
                     .and_then(|_| checksum_file(&item.path))
                 {
