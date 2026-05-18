@@ -243,6 +243,44 @@ fn inspect_backup(config: &DbBackupConfig) -> BackupHealth<'_> {
     }
 }
 
+/// Retry a status write up to `max_attempts` times with linear back-off.
+/// Returns `(true, None)` on success, or `(false, Some(last_error_message))` after all attempts fail.
+fn retry_status_write(
+    repo: &Repository,
+    config_id: i64,
+    status: &str,
+    error: Option<&str>,
+    max_attempts: u32,
+    label: &str,
+) -> (bool, Option<String>) {
+    let mut last_error: Option<String> = None;
+    for attempt in 0..max_attempts {
+        match repo.update_db_backup_integrity_status(config_id, status, error) {
+            Ok(_) => return (true, None),
+            Err(e) => {
+                last_error = Some(e.to_string());
+                if attempt < max_attempts - 1 {
+                    tracing::warn!(
+                        "Retrying {} write (attempt {}): {}",
+                        label,
+                        attempt + 1,
+                        last_error.as_deref().unwrap_or("")
+                    );
+                    thread::sleep(std::time::Duration::from_millis(500 * (attempt as u64 + 1)));
+                } else {
+                    tracing::error!(
+                        "Failed to write {} after {} attempts: {}",
+                        label,
+                        max_attempts,
+                        last_error.as_deref().unwrap_or("")
+                    );
+                }
+            }
+        }
+    }
+    (false, last_error)
+}
+
 /// Verify configured backups and repair corrupt or missing copies from a healthy peer.
 pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<BackupIntegrityResult>> {
     let configs = repo.list_db_backup_configs()?;
@@ -292,50 +330,30 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
                 } else {
                     "missing"
                 };
-                let mut pre_write_ok = false;
-                for attempt in 0..3u32 {
-                    match repo.update_db_backup_integrity_status(
-                        item.config.id,
-                        pre_status,
-                        item.error.as_deref(),
-                    ) {
-                        Ok(_) => {
-                            pre_write_ok = true;
-                            break;
-                        }
-                        Err(ref e) if attempt < 2 => {
-                            tracing::warn!(
-                                "Retrying pre-repair marker write (attempt {}): {}",
-                                attempt + 1,
-                                e
-                            );
-                            thread::sleep(std::time::Duration::from_millis(
-                                500 * (attempt as u64 + 1),
-                            ));
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to write pre-repair marker for backup #{} after 3 attempts: {}",
-                                item.config.id,
-                                e
-                            );
-                        }
-                    }
-                }
+                let pre_label = format!("pre-repair marker for backup #{}", item.config.id);
+                let (pre_write_ok, pre_write_err) = retry_status_write(
+                    repo,
+                    item.config.id,
+                    pre_status,
+                    item.error.as_deref(),
+                    3,
+                    &pre_label,
+                );
                 if !pre_write_ok {
                     // Cannot safely proceed: without the pre-repair marker the recovery path
                     // in is_healthy() cannot fire if the post-repair write also fails.
                     // Defer to the next integrity cycle.
+                    let err_msg = format!(
+                        "pre-repair marker write failed; repair deferred to next integrity check: {}",
+                        pre_write_err.as_deref().unwrap_or("unknown error")
+                    );
                     results.push(BackupIntegrityResult {
                         backup_config_id: item.config.id,
                         backup_path: item.path.to_string_lossy().to_string(),
                         status: pre_status.to_string(),
                         checksum: None,
                         repaired_from_id: None,
-                        error: Some(
-                            "pre-repair marker write failed; repair deferred to next integrity check"
-                                .to_string(),
-                        ),
+                        error: Some(err_msg),
                     });
                     continue;
                 }
@@ -346,35 +364,16 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
                         // Retry the status write: a transient SQLITE_BUSY_SNAPSHOT on this
                         // call would otherwise silently drop the "repaired" record, causing
                         // the repair to be invisible to the API and tests.
-                        let mut write_ok = false;
-                        for attempt in 0..6u32 {
-                            match repo.update_db_backup_integrity_status(
-                                item.config.id,
-                                "repaired",
-                                None,
-                            ) {
-                                Ok(_) => {
-                                    write_ok = true;
-                                    break;
-                                }
-                                Err(ref e) if attempt < 5 => {
-                                    tracing::warn!(
-                                        "Retrying repaired-status write (attempt {}): {}",
-                                        attempt + 1,
-                                        e
-                                    );
-                                    thread::sleep(std::time::Duration::from_millis(
-                                        500 * (attempt as u64 + 1),
-                                    ));
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to persist repaired status after 6 attempts: {}",
-                                        e
-                                    );
-                                }
-                            }
-                        }
+                        let repair_label =
+                            format!("repaired-status for backup #{}", item.config.id);
+                        let (write_ok, _) = retry_status_write(
+                            repo,
+                            item.config.id,
+                            "repaired",
+                            None,
+                            6,
+                            &repair_label,
+                        );
                         if !write_ok {
                             // Physical repair succeeded but status write failed.
                             // The pre-repair "corrupt"/"missing" marker written above ensures
@@ -696,5 +695,68 @@ mod tests {
             corrupt.path().to_str().unwrap(),
         );
         assert!(result.is_err());
+    }
+
+    /// When the DB is read-only every `update_db_backup_integrity_status` call fails with
+    /// SQLITE_READONLY (returned immediately, no busy-wait).  The pre-repair marker write
+    /// therefore exhausts its retries and the function must:
+    ///  1. Return the deferred status for the corrupt backup (no panic / no error propagation).
+    ///  2. NOT physically overwrite the corrupt file.
+    ///  3. Include the underlying DB error in the result `error` field.
+    #[test]
+    fn test_integrity_defers_repair_when_status_write_fails() {
+        use crate::db::repository::create_pool;
+        use r2d2::Pool;
+        use r2d2_sqlite::SqliteConnectionManager;
+
+        // Use a file-based repo so we can reopen it in explicit read-only mode.
+        let db_dir = TempDir::new().unwrap();
+        let db_path = db_dir.path().join("test.db");
+        let db_path_str = db_path.to_str().unwrap();
+        let pool = create_pool(db_path_str).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            initialize_schema(&conn).unwrap();
+        }
+        let repo = Repository::new(pool);
+
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let source_db = make_sqlite_file();
+        repo.create_db_backup_config(primary.path().to_str().unwrap(), None, true)
+            .unwrap();
+        repo.create_db_backup_config(secondary.path().to_str().unwrap(), None, true)
+            .unwrap();
+        run_all_backups(&repo, source_db.path().to_str().unwrap()).unwrap();
+
+        // Corrupt the primary so a repair will be attempted.
+        fs::write(primary.path().join(BACKUP_FILENAME), b"not sqlite").unwrap();
+
+        // Drop the original pool so all connections are closed before reopening.
+        drop(repo);
+
+        // Reopen in explicit read-only mode: SELECTs succeed, writes return SQLITE_READONLY
+        // immediately (no busy-wait), so the retry loop exhausts quickly.
+        let manager =
+            SqliteConnectionManager::file(db_path_str).with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY);
+        let ro_pool = Pool::builder().max_size(1).build(manager).unwrap();
+        let ro_repo = Repository::new(ro_pool);
+
+        let results = run_backup_integrity_check(&ro_repo).unwrap();
+
+        // Primary: pre-repair status write failed → repair deferred, status stays "corrupt".
+        assert_eq!(results[0].status, "corrupt");
+        let err = results[0].error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("deferred"),
+            "expected 'deferred' in error, got: {err}"
+        );
+
+        // The corrupt file must not have been physically replaced.
+        assert_eq!(
+            fs::read(primary.path().join(BACKUP_FILENAME)).unwrap(),
+            b"not sqlite",
+            "corrupt file must not be overwritten when the pre-repair status write fails"
+        );
     }
 }
