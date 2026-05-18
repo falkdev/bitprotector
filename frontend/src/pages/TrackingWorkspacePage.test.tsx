@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { TrackingWorkspacePage } from './TrackingWorkspacePage'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
@@ -12,6 +12,26 @@ import {
   makeTrackingListResponse,
 } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
+
+vi.mock('@/components/shared/PathPickerDialog', () => ({
+  PathPickerDialog: ({
+    open,
+    onPick,
+    onClose,
+  }: {
+    open: boolean
+    onPick: (path: string) => void
+    onClose: () => void
+  }) => {
+    if (!open) return null
+    return (
+      <div data-testid="mock-path-picker">
+        <button onClick={() => onPick('/virtual/picked-path')}>PickPath</button>
+        <button onClick={onClose}>ClosePicker</button>
+      </div>
+    )
+  },
+}))
 
 function mockBaseTrackingPage(items = [makeTrackingItem()], drivePairs = [makeDrivePair()]) {
   server.use(
@@ -797,6 +817,213 @@ describe('TrackingWorkspacePage', () => {
       expect(
         within(screen.getByTestId('file-details')).getByText(effectiveVirtualPath)
       ).toBeInTheDocument()
+    })
+  })
+
+  it('opens file virtual path modal from the set-path action and saves virtual path', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 71,
+              kind: 'file',
+              path: 'docs/report.pdf',
+              virtual_path: null,
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] })),
+      api.put('/virtual-paths/:id', () => HttpResponse.json('ok')),
+      api.get('/files/:id', () =>
+        HttpResponse.json(
+          makeTrackedFile({ id: 71, relative_path: 'docs/report.pdf', virtual_path: null })
+        )
+      )
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-71')
+    await user.click(screen.getByTestId('action-set-virtual-path'))
+
+    await screen.findByText('Set File Virtual Path')
+
+    await user.clear(screen.getByLabelText('Virtual Path'))
+    await user.type(screen.getByLabelText('Virtual Path'), '/virtual/docs/report.pdf')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Virtual path updated')).toBeInTheDocument()
+    })
+  })
+
+  it('shows virtual path error in file virtual path modal when path is not absolute', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 72,
+              kind: 'file',
+              path: 'docs/readme.txt',
+              virtual_path: null,
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] })),
+      api.get('/files/:id', () =>
+        HttpResponse.json(
+          makeTrackedFile({ id: 72, relative_path: 'docs/readme.txt', virtual_path: null })
+        )
+      )
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-72')
+    await user.click(screen.getByTestId('action-set-virtual-path'))
+
+    await screen.findByText('Set File Virtual Path')
+
+    await user.clear(screen.getByLabelText('Virtual Path'))
+    await user.type(screen.getByLabelText('Virtual Path'), 'relative/path')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Virtual path must be absolute')).toBeInTheDocument()
+    })
+  })
+
+  it('closes the file virtual path modal when Cancel is clicked', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 73,
+              kind: 'file',
+              path: 'docs/note.txt',
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] })),
+      api.get('/files/:id', () =>
+        HttpResponse.json(makeTrackedFile({ id: 73, relative_path: 'docs/note.txt' }))
+      )
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-73')
+    await user.click(screen.getByTestId('action-set-virtual-path'))
+    await screen.findByText('Set File Virtual Path')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      expect(screen.queryByText('Set File Virtual Path')).not.toBeInTheDocument()
+    })
+  })
+
+  it('opens path picker from file virtual path modal and sets path on pick', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 74,
+              kind: 'file',
+              path: 'docs/pick-me.txt',
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] })),
+      api.put('/virtual-paths/:id', () => HttpResponse.json('ok')),
+      api.get('/files/:id', () =>
+        HttpResponse.json(makeTrackedFile({ id: 74, relative_path: 'docs/pick-me.txt' }))
+      )
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('file-row-74')
+    await user.click(screen.getByTestId('action-set-virtual-path'))
+    await screen.findByText('Set File Virtual Path')
+
+    await user.click(screen.getByRole('button', { name: 'Browse' }))
+    expect(screen.getByTestId('mock-path-picker')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'PickPath' }))
+    expect(screen.queryByTestId('mock-path-picker')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Virtual Path')).toHaveValue('/virtual/picked-path')
+  })
+
+  it('opens FileDetails aside panel when a file row is clicked and closes it', async () => {
+    const user = userEvent.setup()
+    const trackedFile = makeTrackedFile({
+      id: 80,
+      relative_path: 'docs/aside-test.txt',
+      virtual_path: '/virtual/aside-test.txt',
+    })
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 80,
+              kind: 'file',
+              path: 'docs/aside-test.txt',
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] })),
+      api.get('/files/:id', () => HttpResponse.json(trackedFile))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+    await screen.findByTestId('file-row-80')
+
+    await user.click(screen.getByTestId('file-row-80'))
+    expect(await screen.findByText('aside-test.txt')).toBeInTheDocument()
+
+    // Close the aside panel
+    await user.click(screen.getByTestId('close-details'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('file-details')).not.toBeInTheDocument()
     })
   })
 })

@@ -450,4 +450,14 @@ mod tests {
     fn test_next_cron_sleep_ms_invalid_expression() {
         assert!(next_cron_sleep_ms("not a cron").is_err());
     }
+
+    #[test]
+    fn task_type_as_str_sync() {
+        assert_eq!(TaskType::Sync.as_str(), "sync");
+    }
+
+    #[test]
+    fn task_type_as_str_integrity_check() {
+        assert_eq!(TaskType::IntegrityCheck.as_str(), "integrity_check");
+    }
 }

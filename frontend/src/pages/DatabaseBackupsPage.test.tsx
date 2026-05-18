@@ -215,4 +215,122 @@ describe('DatabaseBackupsPage', () => {
 
     expect(await screen.findByText('Backup path is required.')).toBeInTheDocument()
   })
+
+  it('edits a backup destination', async () => {
+    const user = userEvent.setup()
+    const backup = makeBackupConfig({ id: 1, backup_path: '/mnt/backups/db', drive_label: 'usb-1' })
+
+    server.use(
+      api.get('/database/backups', () => HttpResponse.json([backup])),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings())),
+      api.put('/database/backups/1', () =>
+        HttpResponse.json({ ...backup, drive_label: 'usb-edited' })
+      )
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+
+    await screen.findByTestId('database-backup-row-1')
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+
+    await screen.findByText('Save Changes')
+    const labelInput = screen.getByLabelText('Drive Label')
+    await user.clear(labelInput)
+    await user.type(labelInput, 'usb-edited')
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    expect(await screen.findByText('Backup destination updated')).toBeInTheDocument()
+  })
+
+  it('deletes a backup destination', async () => {
+    const user = userEvent.setup()
+    const backup = makeBackupConfig({ id: 1 })
+
+    server.use(
+      api.get('/database/backups', () => HttpResponse.json([backup])),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings())),
+      api.delete('/database/backups/1', () => new HttpResponse(null, { status: 204 }))
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+
+    await screen.findByTestId('database-backup-row-1')
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    expect(await screen.findByText('Backup destination deleted')).toBeInTheDocument()
+  })
+
+  it('shows integrity check results with error info', async () => {
+    const user = userEvent.setup()
+    const backup = makeBackupConfig({ id: 1 })
+
+    server.use(
+      api.get('/database/backups', () => HttpResponse.json([backup])),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings())),
+      api.post('/database/backups/integrity-check', () =>
+        HttpResponse.json([
+          makeBackupIntegrityResult({
+            status: 'failed',
+            error: 'Checksum mismatch detected',
+          }),
+        ])
+      )
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+
+    await screen.findByTestId('database-backup-row-1')
+    await user.click(screen.getByRole('button', { name: 'Check Integrity Now' }))
+
+    expect(
+      await screen.findByText('Integrity check found 1 unresolved backup(s)')
+    ).toBeInTheDocument()
+    expect(await screen.findByText('Checksum mismatch detected')).toBeInTheDocument()
+  })
+
+  it('reloads data when the Reload button is clicked', async () => {
+    const user = userEvent.setup()
+    let callCount = 0
+
+    server.use(
+      api.get('/database/backups', () => {
+        callCount++
+        return HttpResponse.json([makeBackupConfig()])
+      }),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings()))
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+    await screen.findByTestId('database-backup-row-1')
+
+    const initialCount = callCount
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+
+    await vi.waitFor(() => {
+      expect(callCount).toBeGreaterThan(initialCount)
+    })
+  })
+
+  it('closes the settings modal when cancel is clicked', async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      api.get('/database/backups', () => HttpResponse.json([makeBackupConfig()])),
+      api.get('/database/backups/settings', () => HttpResponse.json(makeBackupSettings()))
+    )
+
+    renderWithApp(<DatabaseBackupsPage />)
+    await screen.findByTestId('database-backup-row-1')
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByText('Backup Settings')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Backup Settings')).not.toBeInTheDocument()
+    })
+  })
 })

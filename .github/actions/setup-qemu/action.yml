@@ -90,10 +90,11 @@ runs:
     - name: Enable KVM access
       shell: bash
       run: |
-        sudo chmod 666 /dev/kvm || true
-        if command -v kvm-ok &>/dev/null; then
-          kvm-ok || echo "WARNING: kvm-ok reports no hardware KVM — QEMU will fall back to TCG (slower)"
+        if [[ ! -e /dev/kvm ]]; then
+          echo "::error::/dev/kvm not present on this runner. GitHub-hosted ubuntu-24.04 runners always provide KVM; re-run the job to get a fresh runner."
+          exit 1
         fi
+        sudo chmod 666 /dev/kvm
 
     - name: Resolve image metadata
       id: image-meta

@@ -62,4 +62,9 @@ describe('auth-store', () => {
     })
     expect(useAuthStore.getState().isTokenExpired()).toBe(false)
   })
+
+  it('returns true from isTokenExpired when expiresAt is null', () => {
+    useAuthStore.setState({ expiresAt: null })
+    expect(useAuthStore.getState().isTokenExpired()).toBe(true)
+  })
 })

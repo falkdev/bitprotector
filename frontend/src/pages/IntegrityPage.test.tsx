@@ -11,6 +11,7 @@ import {
   makeIntegrityRun,
   makeIntegrityRunResult,
   makeIntegrityRunResultsResponse,
+  makeSingleIntegrityResult,
 } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
@@ -188,5 +189,167 @@ describe('IntegrityPage', () => {
     renderWithApp(<IntegrityPage />)
     expect(await screen.findByText('Files checking in parallel')).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
+  })
+
+  it('rechecks a file and removes it from the list when result is ok', async () => {
+    const user = userEvent.setup()
+    const result = makeIntegrityRunResult({
+      id: 10,
+      run_id: 77,
+      file_id: 55,
+      needs_attention: true,
+    })
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/integrity/runs/active', () => HttpResponse.json({ run: null })),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({ id: 77, status: 'completed' }),
+            results: [result],
+            total: 1,
+          })
+        )
+      ),
+      api.post('/integrity/check/:id', () =>
+        HttpResponse.json(
+          makeSingleIntegrityResult({ file_id: 55, status: 'ok', recovered: false })
+        )
+      )
+    )
+
+    renderWithApp(<IntegrityPage />)
+    expect(await screen.findByTestId('integrity-row-55')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Recheck' }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('integrity-row-55')).not.toBeInTheDocument()
+    })
+    expect(await screen.findByText('File #55 rechecked')).toBeInTheDocument()
+  })
+
+  it('rechecks a file and updates status in place when still failing', async () => {
+    const user = userEvent.setup()
+    const result = makeIntegrityRunResult({
+      id: 10,
+      run_id: 77,
+      file_id: 55,
+      needs_attention: true,
+    })
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/integrity/runs/active', () => HttpResponse.json({ run: null })),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({ id: 77, status: 'completed' }),
+            results: [result],
+            total: 1,
+          })
+        )
+      ),
+      api.post('/integrity/check/:id', () =>
+        HttpResponse.json(
+          makeSingleIntegrityResult({ file_id: 55, status: 'mirror_corrupted', recovered: false })
+        )
+      )
+    )
+
+    renderWithApp(<IntegrityPage />)
+    expect(await screen.findByTestId('integrity-row-55')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Recheck' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('File #55 rechecked')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('integrity-row-55')).toBeInTheDocument()
+  })
+
+  it('shows error toast when recheck fails', async () => {
+    const user = userEvent.setup()
+    const result = makeIntegrityRunResult({
+      id: 10,
+      run_id: 77,
+      file_id: 55,
+      needs_attention: true,
+    })
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/integrity/runs/active', () => HttpResponse.json({ run: null })),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({ id: 77, status: 'completed' }),
+            results: [result],
+            total: 1,
+          })
+        )
+      ),
+      api.post('/integrity/check/:id', () => HttpResponse.json({}, { status: 500 }))
+    )
+
+    renderWithApp(<IntegrityPage />)
+    expect(await screen.findByTestId('integrity-row-55')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Recheck' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to recheck file #55')).toBeInTheDocument()
+    })
+  })
+
+  it('shows Load More button when hasMore is true and loads more on click', async () => {
+    const user = userEvent.setup()
+    const firstResult = makeIntegrityRunResult({
+      id: 20,
+      run_id: 77,
+      file_id: 100,
+      needs_attention: true,
+    })
+    const secondResult = makeIntegrityRunResult({
+      id: 21,
+      run_id: 77,
+      file_id: 101,
+      needs_attention: true,
+    })
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/integrity/runs/active', () => HttpResponse.json({ run: null })),
+      api.get('/integrity/runs/latest', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({ id: 77, status: 'completed' }),
+            results: [firstResult],
+            total: 2,
+            per_page: 1,
+          })
+        )
+      ),
+      api.get('/integrity/runs/:id/results', () =>
+        HttpResponse.json(
+          makeIntegrityRunResultsResponse({
+            run: makeIntegrityRun({ id: 77, status: 'completed' }),
+            results: [secondResult],
+            total: 2,
+            per_page: 1,
+          })
+        )
+      )
+    )
+
+    renderWithApp(<IntegrityPage />)
+    expect(await screen.findByTestId('integrity-row-100')).toBeInTheDocument()
+
+    const loadMoreBtn = screen.getByRole('button', { name: 'Load More' })
+    expect(loadMoreBtn).toBeInTheDocument()
+
+    await user.click(loadMoreBtn)
+    expect(await screen.findByTestId('integrity-row-101')).toBeInTheDocument()
   })
 })

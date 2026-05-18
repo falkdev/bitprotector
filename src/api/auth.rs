@@ -272,4 +272,71 @@ mod tests {
         assert_eq!(claims.sub, "bob");
         assert!(claims.exp > claims.iat, "expiry must be after issue time");
     }
+
+    // ── RevokedTokens tests ───────────────────────────────────────────────────
+
+    #[actix_rt::test]
+    async fn test_revoked_tokens_round_trip() {
+        let revoked = RevokedTokens::default();
+        let token = issue_token("carol", SECRET, 3600).unwrap();
+        let claims = validate_token(&token, SECRET).unwrap();
+
+        assert!(!revoked.is_revoked(&claims));
+        revoked.revoke(&claims);
+        assert!(revoked.is_revoked(&claims));
+    }
+
+    #[actix_rt::test]
+    async fn test_revoked_tokens_different_user_not_affected() {
+        let revoked = RevokedTokens::default();
+        let token_a = issue_token("alice", SECRET, 3600).unwrap();
+        let token_b = issue_token("bob", SECRET, 3600).unwrap();
+        let claims_a = validate_token(&token_a, SECRET).unwrap();
+        let claims_b = validate_token(&token_b, SECRET).unwrap();
+
+        revoked.revoke(&claims_a);
+        assert!(revoked.is_revoked(&claims_a));
+        assert!(!revoked.is_revoked(&claims_b));
+    }
+
+    #[actix_rt::test]
+    async fn test_revoked_token_rejected_by_extractor() {
+        let token = issue_token("dave", SECRET, 3600).unwrap();
+        let claims = validate_token(&token, SECRET).unwrap();
+        let revoked = web::Data::new(RevokedTokens::default());
+        revoked.revoke(&claims);
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(JwtSecret(SECRET.to_vec())))
+                .app_data(revoked)
+                .route("/protected", web::get().to(protected_route)),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/protected")
+            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    // ── authenticate_user tests ───────────────────────────────────────────────
+
+    #[actix_rt::test]
+    async fn test_authenticate_user_bad_credentials_returns_false() {
+        // PAM will not be configured in test environments; bad credentials always fail.
+        let invalid_password = std::env::var("TEST_INVALID_PASSWORD").unwrap_or_else(|_| {
+            format!(
+                "invalid-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )
+        });
+        let result = authenticate_user("nonexistent_user_xyz", &invalid_password);
+        assert!(!result, "Bad credentials should return false");
+    }
 }
