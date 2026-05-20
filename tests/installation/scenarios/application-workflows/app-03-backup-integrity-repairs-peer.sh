@@ -20,24 +20,37 @@ test -f '${backup_b}/bitprotector.db'
         # Backup files already exist from a previous scenario (app-02).
         # app-02's backup scheduler may still have an in-flight write to
         # backup_b (stop_database_backup_threads sends a signal but does
-        # not join the thread). Wait for last_backup to stabilise across
-        # four consecutive readings (≤45 s) before we corrupt the file,
-        # so the in-flight write cannot overwrite our intentional corruption.
-        local prev_ts="" cur_ts="" stable=0 waited=0
-        while [[ ${waited} -lt 45 ]]; do
+        # not join the thread). Capture T0 first so we can detect when an
+        # in-flight write actually completes, then wait using the same
+        # advanced-flag strategy before we corrupt the file.
+        local T0
+        T0=$(api_json GET '/database/backups' "${token}" \
+            | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+        local cur_ts="" prev_ts="${T0}" stable=0 waited=0 advanced=false
+        while [[ ${waited} -lt 90 ]]; do
             cur_ts=$(api_json GET '/database/backups' "${token}" \
                 | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
-            if [[ "${cur_ts}" == "${prev_ts}" ]]; then
-                (( stable++ )) || true
-                [[ ${stable} -ge 4 ]] && break
+            if [[ "${cur_ts}" != "${T0}" ]]; then
+                advanced=true
+            fi
+            if [[ "${advanced}" == "true" ]]; then
+                # In-flight backup completed; wait for timestamp to stop changing.
+                if [[ "${cur_ts}" == "${prev_ts}" ]]; then
+                    (( stable++ )) || true
+                    [[ ${stable} -ge 4 ]] && break
+                else
+                    stable=0
+                fi
             else
-                stable=0
+                # last_backup unchanged from T0; thread was likely sleeping and has
+                # already exited — safe to proceed after backup_interval + buffer.
+                [[ ${waited} -ge 20 ]] && break
             fi
             prev_ts="${cur_ts}"
             sleep 1
             (( waited++ )) || true
         done
-        echo "timing: app-03 backup_quiesce_seconds=${waited}"
+        echo "timing: app-03 backup_quiesce_seconds=${waited} advanced=${advanced}"
     fi
 
     ssh_vm "printf 'not sqlite\n' | sudo tee '${backup_b}/bitprotector.db' >/dev/null"

@@ -74,29 +74,48 @@ test -f '${backup_b}/bitprotector.db'
 
     verify_sqlite "${backup_a}/bitprotector.db"
     verify_sqlite "${backup_b}/bitprotector.db"
+
+    # Record last_backup BEFORE disabling so the quiesce can detect when
+    # the in-flight backup (if any) actually completes.
+    local T0
+    T0=$(api_json GET '/database/backups' "${token}" \
+        | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+
     api_json PUT '/database/backups/settings' "${token}" \
       '{"backup_enabled":false,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
 
     # Wait until the backup thread has finished any in-flight write.
-    # The backup task (create_sqlite_snapshot + file copies) can take several
-    # seconds on ubuntu-24.04 under load.  We poll until last_backup is stable
-    # for four consecutive seconds, or bail out after 45s (enough for any
-    # single backup pass to complete, including 30s SQLite busy-timeout).
-    local prev_ts="" cur_ts="" stable=0 waited=0
-    while [[ ${waited} -lt 45 ]]; do
+    # Strategy:
+    #   • If last_backup advances past T0 → an in-flight backup just completed;
+    #     then wait for 4 consecutive stable readings before proceeding.
+    #   • If last_backup stays at T0 for ≥20 s → the thread was sleeping when
+    #     stop was signalled and exited within 100 ms; no further write is coming.
+    # Bail out unconditionally after 90 s.
+    local cur_ts="" prev_ts="${T0}" stable=0 waited=0 advanced=false
+    while [[ ${waited} -lt 90 ]]; do
         cur_ts=$(api_json GET '/database/backups' "${token}" \
             | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
-        if [[ "${cur_ts}" == "${prev_ts}" ]]; then
-            (( stable++ )) || true
-            [[ ${stable} -ge 4 ]] && break
+        if [[ "${cur_ts}" != "${T0}" ]]; then
+            advanced=true
+        fi
+        if [[ "${advanced}" == "true" ]]; then
+            # In-flight backup completed; wait for timestamp to stop changing.
+            if [[ "${cur_ts}" == "${prev_ts}" ]]; then
+                (( stable++ )) || true
+                [[ ${stable} -ge 4 ]] && break
+            else
+                stable=0
+            fi
         else
-            stable=0
+            # last_backup unchanged from T0; thread was likely sleeping and has
+            # already exited — safe to proceed after backup_interval + buffer.
+            [[ ${waited} -ge 20 ]] && break
         fi
         prev_ts="${cur_ts}"
         sleep 1
         (( waited++ )) || true
     done
-    echo "timing: scheduled-load-02 backup_quiesce_seconds=${waited}"
+    echo "timing: scheduled-load-02 backup_quiesce_seconds=${waited} advanced=${advanced}"
 
     ssh_vm "printf 'not sqlite\\n' | sudo tee '${backup_b}/bitprotector.db' >/dev/null"
 
