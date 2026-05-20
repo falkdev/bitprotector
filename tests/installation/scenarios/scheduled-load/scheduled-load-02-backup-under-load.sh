@@ -74,7 +74,30 @@ test -f '${backup_b}/bitprotector.db'
 
     verify_sqlite "${backup_a}/bitprotector.db"
     verify_sqlite "${backup_b}/bitprotector.db"
-    api_json PUT '/database/backups/settings' "${token}" '{"backup_enabled":false,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
+    api_json PUT '/database/backups/settings' "${token}" \
+      '{"backup_enabled":false,"integrity_enabled":true,"integrity_interval_seconds":5}' >/dev/null
+
+    # Wait until the backup thread has finished any in-flight write.
+    # The backup task (create_sqlite_snapshot + file copies) can take several
+    # seconds on ubuntu-24.04 under load.  We poll until last_backup is stable
+    # for four consecutive seconds, or bail out after 45s (enough for any
+    # single backup pass to complete, including 30s SQLite busy-timeout).
+    local prev_ts="" cur_ts="" stable=0 waited=0
+    while [[ ${waited} -lt 45 ]]; do
+        cur_ts=$(api_json GET '/database/backups' "${token}" \
+            | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+        if [[ "${cur_ts}" == "${prev_ts}" ]]; then
+            (( stable++ )) || true
+            [[ ${stable} -ge 4 ]] && break
+        else
+            stable=0
+        fi
+        prev_ts="${cur_ts}"
+        sleep 1
+        (( waited++ )) || true
+    done
+    echo "timing: scheduled-load-02 backup_quiesce_seconds=${waited}"
+
     ssh_vm "printf 'not sqlite\\n' | sudo tee '${backup_b}/bitprotector.db' >/dev/null"
 
     local repair_watch_start
