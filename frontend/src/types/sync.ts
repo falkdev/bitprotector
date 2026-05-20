@@ -4,6 +4,7 @@ export type SyncAction =
   | 'restore_master'
   | 'restore_mirror'
   | 'verify'
+  | 'adopt_mirror'
   | 'user_action_required'
 
 export type SyncResolution = 'keep_master' | 'keep_mirror' | 'provide_new'

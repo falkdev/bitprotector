@@ -816,7 +816,7 @@ export function TrackingWorkspacePage() {
               />
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => {
                     if (!hasDrivePairs) {
                       return
@@ -1354,6 +1354,7 @@ function FileVirtualPathModal({
         title="Select File Virtual Path"
         description="Choose the absolute virtual path for this tracked file."
         mode="file"
+        virtualFileMode={true}
         value={value}
         startPath={value || '/'}
         confirmLabel="Use Virtual Path"
