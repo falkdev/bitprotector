@@ -16,6 +16,28 @@ app_03_backup_integrity_repairs_peer() {
 test -f '${backup_a}/bitprotector.db' &&
 test -f '${backup_b}/bitprotector.db'
 "
+    else
+        # Backup files already exist from a previous scenario (app-02).
+        # app-02's backup scheduler may still have an in-flight write to
+        # backup_b (stop_database_backup_threads sends a signal but does
+        # not join the thread). Wait for last_backup to stabilise across
+        # four consecutive readings (≤45 s) before we corrupt the file,
+        # so the in-flight write cannot overwrite our intentional corruption.
+        local prev_ts="" cur_ts="" stable=0 waited=0
+        while [[ ${waited} -lt 45 ]]; do
+            cur_ts=$(api_json GET '/database/backups' "${token}" \
+                | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+            if [[ "${cur_ts}" == "${prev_ts}" ]]; then
+                (( stable++ )) || true
+                [[ ${stable} -ge 4 ]] && break
+            else
+                stable=0
+            fi
+            prev_ts="${cur_ts}"
+            sleep 1
+            (( waited++ )) || true
+        done
+        echo "timing: app-03 backup_quiesce_seconds=${waited}"
     fi
 
     ssh_vm "printf 'not sqlite\n' | sudo tee '${backup_b}/bitprotector.db' >/dev/null"
