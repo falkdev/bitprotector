@@ -25,11 +25,11 @@ test -f '${backup_b}/bitprotector.db'
         # advanced-flag strategy before we corrupt the file.
         local T0
         T0=$(api_json GET '/database/backups' "${token}" \
-            | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+            | jq -r '[.[].last_backup // ""] | sort | last // ""')
         local cur_ts="" prev_ts="${T0}" stable=0 waited=0 advanced=false
         while [[ ${waited} -lt 90 ]]; do
             cur_ts=$(api_json GET '/database/backups' "${token}" \
-                | jq -r '[.[].last_backup // ""] | sort | last // ""' 2>/dev/null || true)
+                | jq -r '[.[].last_backup // ""] | sort | last // ""')
             if [[ "${cur_ts}" != "${T0}" ]]; then
                 advanced=true
             fi
@@ -50,6 +50,10 @@ test -f '${backup_b}/bitprotector.db'
             sleep 1
             (( waited++ )) || true
         done
+        if [[ ${waited} -ge 90 ]]; then
+            echo "app-03: timed out (90 s) waiting for backup thread to quiesce" >&2
+            exit 1
+        fi
         echo "timing: app-03 backup_quiesce_seconds=${waited} advanced=${advanced}"
     fi
 
