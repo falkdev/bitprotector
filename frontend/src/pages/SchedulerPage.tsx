@@ -111,7 +111,7 @@ function ScheduleFormModal({
     setSaving(false)
     setMaxDurationValue(
       schedule?.max_duration_seconds != null
-        ? String(Math.round(schedule.max_duration_seconds / 60))
+        ? String(Math.ceil(schedule.max_duration_seconds / 60))
         : ''
     )
 

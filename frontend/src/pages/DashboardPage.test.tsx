@@ -26,6 +26,7 @@ describe('DashboardPage', () => {
 
     renderWithApp(<DashboardPage />)
 
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument()
     expect(await screen.findByTestId('status-metric-files-tracked')).toBeInTheDocument()
   })
 })

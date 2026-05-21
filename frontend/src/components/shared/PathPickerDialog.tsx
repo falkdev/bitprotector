@@ -220,7 +220,7 @@ export function PathPickerDialog({
     return () => {
       observer.disconnect()
     }
-  }, [])
+  }, [loading])
 
   const validateSelectionError = useMemo(() => {
     if (!draftPath.trim()) {
@@ -229,6 +229,10 @@ export function PathPickerDialog({
 
     if (virtualFileMode && !filenameDraft.trim()) {
       return 'Filename is required'
+    }
+
+    if (virtualFileMode && filenameDraft.includes('/')) {
+      return 'Filename must not contain path separators'
     }
 
     if (
@@ -240,6 +244,10 @@ export function PathPickerDialog({
       return 'Select a file, not a folder'
     }
 
+    if (virtualFileMode) {
+      const dir = draftPath.trim().replace(/\/$/, '')
+      return validatePath?.(`${dir}/${filenameDraft.trim()}`) ?? null
+    }
     return validatePath?.(draftPath.trim()) ?? null
   }, [draftPath, filenameDraft, mode, selectedKind, selectedPath, validatePath, virtualFileMode])
 
@@ -293,7 +301,9 @@ export function PathPickerDialog({
             type="button"
             onClick={(event) => {
               event.stopPropagation()
-              node.handleClick(event)
+              if (isSelectable) {
+                node.handleClick(event)
+              }
 
               if (!isDirectory) {
                 return
@@ -401,10 +411,20 @@ export function PathPickerDialog({
     }
 
     setShowHidden(false)
-    setFilenameDraft('')
     setBrowsingFilename(false)
-    void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
-  }, [initializeTree, open, scopedRootPath, startPath, value])
+
+    if (virtualFileMode && value.trim()) {
+      const trimmedValue = value.trim()
+      const lastSlash = trimmedValue.lastIndexOf('/')
+      const dir = lastSlash > 0 ? trimmedValue.slice(0, lastSlash) : trimmedValue
+      const basename = lastSlash >= 0 ? trimmedValue.slice(lastSlash + 1) : ''
+      setFilenameDraft(basename)
+      void initializeTree((startPath && startPath.trim()) || dir || scopedRootPath, false)
+    } else {
+      setFilenameDraft('')
+      void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
+    }
+  }, [initializeTree, open, scopedRootPath, startPath, value, virtualFileMode])
 
   if (!open) {
     return null
@@ -546,7 +566,7 @@ export function PathPickerDialog({
                     }}
                     onSelect={(nodes) => {
                       const selected = nodes[0]?.data
-                      if (!selected) {
+                      if (!selected || !selected.isSelectable) {
                         setSelectedPath(null)
                         setSelectedKind(null)
                         return
