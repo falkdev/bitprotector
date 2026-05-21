@@ -12,6 +12,7 @@ import { useSyncStore } from '@/stores/sync-store'
 import { formatDate } from '@/lib/format'
 import type {
   ResolveQueueItemRequest,
+  SyncAction,
   SyncQueueItem,
   SyncResolution,
   SyncStatus,
@@ -26,6 +27,24 @@ const STATUS_STYLES: Record<SyncStatus, string> = {
   in_progress: 'bg-blue-100 text-blue-800',
   completed: 'bg-green-100 text-green-800',
   failed: 'bg-red-100 text-red-800',
+}
+
+const ACTION_LABELS: Record<SyncAction, string> = {
+  mirror: 'Mirror',
+  restore_master: 'Restore Master',
+  restore_mirror: 'Restore Mirror',
+  verify: 'Verify',
+  adopt_mirror: 'Adopt Mirror',
+  user_action_required: 'Action Required',
+}
+
+const ACTION_DESCRIPTIONS: Record<SyncAction, string> = {
+  mirror: 'Copy master files to the mirror drive',
+  restore_master: 'Recover the master drive using the mirror',
+  restore_mirror: 'Repair the mirror using the master drive',
+  verify: 'Verify file checksums for integrity',
+  adopt_mirror: 'Promote the mirror as the new authoritative source',
+  user_action_required: 'Manual conflict resolution needed',
 }
 
 function ResolveDialog({
@@ -345,7 +364,14 @@ export function SyncQueuePage() {
             {
               key: 'action',
               header: 'Action',
-              cell: (item) => item.action,
+              cell: (item) => (
+                <span
+                  className="rounded bg-muted px-2 py-0.5 text-xs font-medium"
+                  title={ACTION_DESCRIPTIONS[item.action]}
+                >
+                  {ACTION_LABELS[item.action]}
+                </span>
+              ),
             },
             {
               key: 'status',

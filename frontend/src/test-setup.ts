@@ -23,6 +23,14 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 })
 
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
 function resetStores() {
   useAuthStore.setState({
     token: null,

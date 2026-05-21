@@ -378,8 +378,8 @@ describe('SchedulerPage', () => {
     await user.click(screen.getByRole('checkbox', { name: /Enable schedule immediately/i }))
 
     // Set a max duration
-    await user.clear(screen.getByLabelText('Max duration in seconds'))
-    await user.type(screen.getByLabelText('Max duration in seconds'), '120')
+    await user.clear(screen.getByLabelText('Max duration in minutes'))
+    await user.type(screen.getByLabelText('Max duration in minutes'), '2')
 
     await user.click(screen.getByRole('button', { name: 'Create Schedule' }))
     expect(await screen.findByText('Schedule created')).toBeInTheDocument()

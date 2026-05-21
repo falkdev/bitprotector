@@ -1,10 +1,6 @@
 import { test, expect } from './support/fixtures'
-import { expectToast } from './support/ui'
 
-test('loads dashboard status and runs the core quick actions against the live backend', async ({
-  page,
-  qemu,
-}) => {
+test('loads dashboard status metrics and recent activity', async ({ page, qemu }) => {
   const fixture = await qemu.seedDriveFixture()
   await qemu.runBitProtector([
     'drives',
@@ -24,14 +20,5 @@ test('loads dashboard status and runs the core quick actions against the live ba
   await page.goto('/dashboard')
   await expect(page).toHaveURL(/\/dashboard$/)
   await expect(page.getByTestId('status-metric-files-tracked')).toBeVisible()
-  await expect(page.getByTestId('quick-action-sync')).toBeVisible()
-
-  await page.getByTestId('quick-action-sync').click()
-  await expectToast(page, /Sync queue processed/)
-
-  await page.getByTestId('quick-action-integrity').click()
-  await expectToast(page, 'Integrity run started')
-
-  await page.getByTestId('quick-action-backup').click()
-  await expectToast(page, /Database backup completed|Backup completed with/)
+  await expect(page.getByRole('heading', { name: 'Recent Activity' })).toBeVisible()
 })

@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Eye, EyeOff, FileText, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
+import {
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FileText,
+  FileMinus,
+  Folder,
+  FolderOpen,
+  RefreshCw,
+  X,
+} from 'lucide-react'
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
 import { filesystemApi } from '@/api/filesystem'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
@@ -31,6 +41,7 @@ interface PathPickerDialogProps {
   startPath?: string
   rootPath?: string
   confirmLabel?: string
+  virtualFileMode?: boolean
   onClose: () => void
   onPick: (path: string) => void
   validatePath?: (path: string) => string | null
@@ -164,43 +175,81 @@ export function PathPickerDialog({
   startPath,
   rootPath,
   confirmLabel = 'Use Path',
+  virtualFileMode = false,
   onClose,
   onPick,
   validatePath,
 }: PathPickerDialogProps) {
+  const effectiveMode: PickerMode = virtualFileMode ? 'directory' : mode
   const scopedRootPath = useMemo(
     () => normalizeAbsoluteFilesystemPath(rootPath?.trim() || '/'),
     [rootPath]
   )
   const treeRef = useRef<TreeApi<PickerNode> | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const nodesRef = useRef<PickerNode[]>([createRootNode(scopedRootPath)])
   const loadingPathsRef = useRef<Set<string>>(new Set())
   const loadingPromisesRef = useRef<Map<string, Promise<void>>>(new Map())
   const [treeData, setTreeData] = useState<PickerNode[]>([createRootNode(scopedRootPath)])
   const [treeKey, setTreeKey] = useState(0)
   const [draftPath, setDraftPath] = useState(value)
+  const [filenameDraft, setFilenameDraft] = useState('')
+  const [browsingFilename, setBrowsingFilename] = useState(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedKind, setSelectedKind] = useState<FilesystemEntryKind | null>(null)
   const [showHidden, setShowHidden] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadingPaths, setLoadingPaths] = useState<string[]>([])
   const [treeError, setTreeError] = useState<string | null>(null)
+  const [treeHeight, setTreeHeight] = useState(420)
 
   useEffect(() => {
     nodesRef.current = treeData
   }, [treeData])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) {
+        setTreeHeight(entry.contentRect.height)
+      }
+    })
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+    }
+  }, [loading])
 
   const validateSelectionError = useMemo(() => {
     if (!draftPath.trim()) {
       return 'Path is required'
     }
 
-    if (mode === 'file' && selectedPath === draftPath.trim() && selectedKind === 'directory') {
+    if (virtualFileMode && !filenameDraft.trim()) {
+      return 'Filename is required'
+    }
+
+    if (virtualFileMode && filenameDraft.includes('/')) {
+      return 'Filename must not contain path separators'
+    }
+
+    if (
+      !virtualFileMode &&
+      mode === 'file' &&
+      selectedPath === draftPath.trim() &&
+      selectedKind === 'directory'
+    ) {
       return 'Select a file, not a folder'
     }
 
+    if (virtualFileMode) {
+      const dir = draftPath.trim().replace(/\/$/, '')
+      return validatePath?.(`${dir}/${filenameDraft.trim()}`) ?? null
+    }
     return validatePath?.(draftPath.trim()) ?? null
-  }, [draftPath, mode, selectedKind, selectedPath, validatePath])
+  }, [draftPath, filenameDraft, mode, selectedKind, selectedPath, validatePath, virtualFileMode])
 
   const loadChildren = useCallback(
     async (path: string, includeHidden: boolean, force = false) => {
@@ -222,7 +271,7 @@ export function PathPickerDialog({
           const response = await filesystemApi.children({
             path,
             include_hidden: includeHidden,
-            directories_only: mode === 'directory',
+            directories_only: effectiveMode === 'directory',
           })
           const children = response.entries.map(toNode)
           setTreeData((current) =>
@@ -238,12 +287,13 @@ export function PathPickerDialog({
       loadingPromisesRef.current.set(path, request)
       return request
     },
-    [mode, scopedRootPath]
+    [effectiveMode, scopedRootPath]
   )
 
   const renderNode = useCallback(
     ({ node, style }: NodeRendererProps<PickerNode>) => {
       const isDirectory = node.data.kind === 'directory'
+      const isSelectable = node.data.isSelectable !== false
 
       return (
         <div style={style}>
@@ -251,7 +301,9 @@ export function PathPickerDialog({
             type="button"
             onClick={(event) => {
               event.stopPropagation()
-              node.handleClick(event)
+              if (isSelectable) {
+                node.handleClick(event)
+              }
 
               if (!isDirectory) {
                 return
@@ -273,7 +325,8 @@ export function PathPickerDialog({
             }}
             className={cn(
               'flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
-              node.isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+              node.isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-accent',
+              !isSelectable && 'opacity-50 cursor-not-allowed'
             )}
             data-testid={`path-picker-node-${node.data.path}`}
           >
@@ -290,8 +343,10 @@ export function PathPickerDialog({
               ) : (
                 <Folder className="h-4 w-4 shrink-0 text-yellow-500" />
               )
-            ) : (
+            ) : isSelectable ? (
               <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <FileMinus className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
             <span className="truncate">{node.data.name}</span>
           </button>
@@ -317,6 +372,7 @@ export function PathPickerDialog({
       setTreeKey((current) => current + 1)
       setSelectedPath(null)
       setSelectedKind(null)
+      treeRef.current?.deselectAll?.()
       setDraftPath(scopedInitialPath)
 
       try {
@@ -326,7 +382,7 @@ export function PathPickerDialog({
         treeRef.current?.open(scopedRootPath)
 
         const directoryTarget =
-          mode === 'file'
+          effectiveMode === 'file'
             ? scopedInitialPath.split('/').slice(0, -1).join('/') || scopedRootPath
             : scopedInitialPath
         const ancestors = buildAncestorChainWithinRoot(directoryTarget, scopedRootPath)
@@ -346,7 +402,7 @@ export function PathPickerDialog({
         setLoading(false)
       }
     },
-    [loadChildren, mode, scopedRootPath]
+    [loadChildren, effectiveMode, scopedRootPath]
   )
 
   useEffect(() => {
@@ -355,151 +411,227 @@ export function PathPickerDialog({
     }
 
     setShowHidden(false)
-    void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
-  }, [initializeTree, open, scopedRootPath, startPath, value])
+    setBrowsingFilename(false)
+
+    if (virtualFileMode && value.trim()) {
+      const trimmedValue = value.trim()
+      const lastSlash = trimmedValue.lastIndexOf('/')
+      const dir = lastSlash > 0 ? trimmedValue.slice(0, lastSlash) : trimmedValue
+      const basename = lastSlash >= 0 ? trimmedValue.slice(lastSlash + 1) : ''
+      setFilenameDraft(basename)
+      void initializeTree((startPath && startPath.trim()) || dir || scopedRootPath, false)
+    } else {
+      setFilenameDraft('')
+      void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
+    }
+  }, [initializeTree, open, scopedRootPath, startPath, value, virtualFileMode])
 
   if (!open) {
     return null
   }
 
   return (
-    <ModalLayer className="px-4">
-      <div className="flex h-[42rem] w-full max-w-4xl flex-col rounded-xl border border-border bg-card shadow-lg">
-        <div className="flex items-start justify-between border-b border-border px-6 py-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold">{title}</h2>
-            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            aria-label="Close path picker"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-4 border-b border-border px-6 py-4">
-          <div>
-            <label htmlFor="path-picker-path" className="mb-1 block text-sm font-medium">
-              Selected Path
-            </label>
-            <input
-              id="path-picker-path"
-              value={draftPath}
-              onChange={(event) => setDraftPath(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-              placeholder={mode === 'file' ? '/path/to/file' : '/path/to/folder'}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-h-[1.25rem] text-xs text-destructive">{validateSelectionError}</div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void initializeTree(draftPath.trim() || scopedRootPath, showHidden)}
-                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextShowHidden = !showHidden
-                  setShowHidden(nextShowHidden)
-                  void initializeTree(draftPath.trim() || scopedRootPath, nextShowHidden)
-                }}
-                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
-              >
-                {showHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {showHidden ? 'Hide Hidden' : 'Show Hidden'}
-              </button>
+    <>
+      <ModalLayer className="px-4">
+        <div className="flex h-[42rem] w-full max-w-4xl flex-col rounded-xl border border-border bg-card shadow-lg">
+          <div className="flex items-start justify-between border-b border-border px-6 py-4">
+            <div className="space-y-1">
+              <h2 className="text-lg font-semibold">{title}</h2>
+              {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Close path picker"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        </div>
 
-        <div className="relative flex-1 overflow-hidden px-4 py-4">
-          {loading ? (
-            <div className="flex h-full items-center justify-center">
-              <LoadingSpinner />
+          <div className="space-y-4 border-b border-border px-6 py-4">
+            <div>
+              <label htmlFor="path-picker-path" className="mb-1 block text-sm font-medium">
+                {virtualFileMode ? 'Directory' : 'Selected Path'}
+              </label>
+              <input
+                id="path-picker-path"
+                value={draftPath}
+                onChange={(event) => setDraftPath(event.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                placeholder={
+                  virtualFileMode
+                    ? '/path/to/folder'
+                    : mode === 'file'
+                      ? '/path/to/file'
+                      : '/path/to/folder'
+                }
+              />
             </div>
-          ) : (
-            <div className="h-full overflow-hidden rounded-lg border border-border bg-background">
-              {treeError ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                  <p className="text-sm text-destructive">{treeError}</p>
-                  <p className="text-xs text-muted-foreground">
-                    You can still type a path above and confirm it manually.
-                  </p>
+            {virtualFileMode && (
+              <div>
+                <label htmlFor="path-picker-filename" className="mb-1 block text-sm font-medium">
+                  Filename
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="path-picker-filename"
+                    value={filenameDraft}
+                    onChange={(event) => setFilenameDraft(event.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                    placeholder="filename.ext"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBrowsingFilename(true)}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
+                  >
+                    Copy from existing
+                  </button>
                 </div>
-              ) : (
-                <Tree<PickerNode>
-                  key={treeKey}
-                  ref={treeRef}
-                  data={treeData}
-                  width="100%"
-                  height={420}
-                  rowHeight={36}
-                  indent={20}
-                  padding={8}
-                  openByDefault={false}
-                  disableDrag
-                  disableEdit
-                  disableMultiSelection
-                  selection={selectedPath ?? undefined}
-                  onToggle={(path) => {
-                    const node = findNode(nodesRef.current, path)
-                    if (node?.kind === 'directory' && treeRef.current?.isOpen(path)) {
-                      void loadChildren(path, showHidden)
-                    }
-                  }}
-                  onSelect={(nodes) => {
-                    const selected = nodes[0]?.data
-                    if (!selected) {
-                      setSelectedPath(null)
-                      setSelectedKind(null)
-                      return
-                    }
-
-                    setSelectedPath(selected.path)
-                    setSelectedKind(selected.kind)
-                    setDraftPath(selected.path)
-                  }}
-                  className="h-full"
-                  rowClassName="focus:outline-none"
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-h-[1.25rem] text-xs text-destructive">
+                {validateSelectionError}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void initializeTree(draftPath.trim() || scopedRootPath, showHidden)
+                  }
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
                 >
-                  {renderNode}
-                </Tree>
-              )}
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextShowHidden = !showHidden
+                    setShowHidden(nextShowHidden)
+                    void initializeTree(draftPath.trim() || scopedRootPath, nextShowHidden)
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent"
+                >
+                  {showHidden ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                  {showHidden ? 'Hide Hidden' : 'Show Hidden'}
+                </button>
+              </div>
             </div>
-          )}
-          {loadingPaths.length > 0 ? (
-            <div className="pointer-events-none absolute bottom-6 right-6 rounded-full border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow">
-              Loading…
-            </div>
-          ) : null}
-        </div>
+          </div>
 
-        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onPick(draftPath.trim())}
-            disabled={!!validateSelectionError || !draftPath.trim()}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {confirmLabel}
-          </button>
+          <div className="relative flex-1 overflow-hidden px-4 py-4">
+            {loading ? (
+              <div className="flex h-full items-center justify-center">
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <div
+                ref={containerRef}
+                className="h-full overflow-hidden rounded-lg border border-border bg-background"
+              >
+                {treeError ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                    <p className="text-sm text-destructive">{treeError}</p>
+                    <p className="text-xs text-muted-foreground">
+                      You can still type a path above and confirm it manually.
+                    </p>
+                  </div>
+                ) : (
+                  <Tree<PickerNode>
+                    key={treeKey}
+                    ref={treeRef}
+                    data={treeData}
+                    width="100%"
+                    height={treeHeight}
+                    rowHeight={36}
+                    indent={20}
+                    padding={8}
+                    openByDefault={false}
+                    disableDrag
+                    disableEdit
+                    disableMultiSelection
+                    selection={selectedPath ?? undefined}
+                    onToggle={(path) => {
+                      const node = findNode(nodesRef.current, path)
+                      if (node?.kind === 'directory' && treeRef.current?.isOpen(path)) {
+                        void loadChildren(path, showHidden)
+                      }
+                    }}
+                    onSelect={(nodes) => {
+                      const selected = nodes[0]?.data
+                      if (!selected || !selected.isSelectable) {
+                        setSelectedPath(null)
+                        setSelectedKind(null)
+                        return
+                      }
+
+                      setSelectedPath(selected.path)
+                      setSelectedKind(selected.kind)
+                      setDraftPath(selected.path)
+                      treeRef.current?.select?.(selected.id)
+                    }}
+                    className="h-full"
+                    rowClassName="focus:outline-none"
+                  >
+                    {renderNode}
+                  </Tree>
+                )}
+              </div>
+            )}
+            {loadingPaths.length > 0 ? (
+              <div className="pointer-events-none absolute bottom-6 right-6 rounded-full border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow">
+                Loading…
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const dir = draftPath.trim().replace(/\/$/, '')
+                const finalPath = virtualFileMode
+                  ? `${dir}/${filenameDraft.trim()}`
+                  : draftPath.trim()
+                onPick(finalPath)
+              }}
+              disabled={!!validateSelectionError || !draftPath.trim()}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {confirmLabel}
+            </button>
+          </div>
         </div>
-      </div>
-    </ModalLayer>
+      </ModalLayer>
+      {virtualFileMode && browsingFilename && (
+        <PathPickerDialog
+          open={browsingFilename}
+          title="Copy filename from existing file"
+          mode="file"
+          value={filenameDraft ? `${draftPath.trim()}/${filenameDraft.trim()}` : draftPath.trim()}
+          startPath={draftPath.trim() || '/'}
+          confirmLabel="Use Filename"
+          onClose={() => setBrowsingFilename(false)}
+          onPick={(pickedPath) => {
+            setFilenameDraft(pickedPath.split('/').pop() ?? '')
+            setBrowsingFilename(false)
+          }}
+        />
+      )}
+    </>
   )
 }

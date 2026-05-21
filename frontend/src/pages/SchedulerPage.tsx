@@ -110,7 +110,9 @@ function ScheduleFormModal({
     setError(null)
     setSaving(false)
     setMaxDurationValue(
-      schedule?.max_duration_seconds != null ? String(schedule.max_duration_seconds) : ''
+      schedule?.max_duration_seconds != null
+        ? String(Math.ceil(schedule.max_duration_seconds / 60))
+        : ''
     )
 
     if (schedule?.cron_expr) {
@@ -185,10 +187,10 @@ function ScheduleFormModal({
     if (maxDurationTrimmed !== '') {
       const parsed = Number(maxDurationTrimmed)
       if (!Number.isInteger(parsed) || parsed < 0) {
-        setError('Max duration must be a non-negative whole number of seconds.')
+        setError('Max duration must be a non-negative whole number of minutes.')
         return
       }
-      maxDurationSeconds = parsed > 0 ? parsed : null
+      maxDurationSeconds = parsed > 0 ? parsed * 60 : null
     }
 
     try {
@@ -375,7 +377,7 @@ function ScheduleFormModal({
             </legend>
             <div className="flex items-center gap-2">
               <input
-                aria-label="Max duration in seconds"
+                aria-label="Max duration in minutes"
                 type="number"
                 min={0}
                 step={1}
@@ -384,7 +386,7 @@ function ScheduleFormModal({
                 placeholder="Unlimited"
                 className="w-36 rounded-md border border-input bg-background px-3 py-2 text-sm"
               />
-              <span className="text-sm text-muted-foreground">seconds</span>
+              <span className="text-sm text-muted-foreground">minutes</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               The job stops gracefully after this duration; remaining items resume at the next
