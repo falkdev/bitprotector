@@ -72,7 +72,7 @@ echo "Expected Debian ver: ${EXPECTED_DEB_VERSION}"
 
 # --- Step 3: auto-detect artifacts if not supplied ---
 if [[ -z "${DEB_PATH}" ]]; then
-    CANDIDATE="${PROJECT_ROOT}/target/debian/${EXPECTED_DEB_FILENAME}"
+    CANDIDATE="${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}/${EXPECTED_DEB_FILENAME}"
     if [[ -f "${CANDIDATE}" ]]; then
         DEB_PATH="${CANDIDATE}"
         echo "Auto-detected .deb : ${DEB_PATH}"

@@ -101,15 +101,15 @@ run_build_artifacts() {
     scripts/build-deb.sh --ubuntu-version 26.04
     echo "build-artifacts: OK"
     echo "  .debs:"
-    ls -1 target/debian/bitprotector_*.deb
+    ls -1 target/debian/ubuntu-*/bitprotector_*.deb
 }
 
 run_qemu_smoke() {
     echo "--- Layer 5: QEMU smoke (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_test.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 smoke (run ./scripts/setup-qemu.sh 26.04 first)"
     fi
@@ -119,9 +119,9 @@ run_qemu_smoke() {
 run_qemu_application_workflows() {
     echo "--- Layer 6: QEMU application workflows (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/application_workflows.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found - skipping 26.04 application workflows"
     fi
@@ -131,9 +131,9 @@ run_qemu_application_workflows() {
 run_qemu_failover() {
     echo "--- Layer 7: QEMU failover (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_failover_test.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_failover_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_failover_test.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_failover_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 failover"
     fi
@@ -143,9 +143,9 @@ run_qemu_failover() {
 run_qemu_uninstall() {
     echo "--- Layer 8: QEMU uninstall (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_uninstall_test.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/qemu_uninstall_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_uninstall_test.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/qemu_uninstall_test.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 uninstall"
     fi
@@ -155,9 +155,9 @@ run_qemu_uninstall() {
 run_qemu_resilience() {
     echo "--- Layer 9: QEMU resilience (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/resilience.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/resilience.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/resilience.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/resilience.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 resilience"
     fi
@@ -171,9 +171,9 @@ run_qemu_upgrade() {
         echo "WARN: ALPHA1_DEB is not set; skipping local upgrade bundle"
         return 0
     fi
-    GUEST_IMAGE=ubuntu-24.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh
+    GUEST_IMAGE=ubuntu-24.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh
+        GUEST_IMAGE=ubuntu-26.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 upgrade"
     fi
@@ -183,9 +183,9 @@ run_qemu_upgrade() {
 run_qemu_degraded_boot() {
     echo "--- Layer 11: QEMU degraded-boot (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/degraded_boot.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/degraded_boot.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/degraded_boot.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/degraded_boot.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 degraded-boot"
     fi
@@ -195,9 +195,9 @@ run_qemu_degraded_boot() {
 run_qemu_drive_media_type() {
     echo "--- Layer 12: QEMU drive media type (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/drive_media_type.sh
+    GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/drive_media_type.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/drive_media_type.sh
+        GUEST_IMAGE=ubuntu-26.04 ./tests/installation/bundles/drive_media_type.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
     else
         echo "WARN: 26.04 image not found — skipping 26.04 drive-media-type"
     fi
@@ -224,7 +224,7 @@ run_e2e() {
     }
     trap cleanup_e2e EXIT
 
-    SSH_PORT=2280 API_PORT=18480 ./tests/installation/e2e-guest.sh
+    SSH_PORT=2280 API_PORT=18480 ./tests/installation/e2e-guest.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
 
     QEMU_SSH_PORT=2280 QEMU_API_PORT=18480 CI=true \
         npm --prefix frontend run test:e2e:qemu

@@ -168,6 +168,7 @@ impl pam_client2::ConversationHandler for PasswordConversation {
 }
 
 /// Authenticate a user via PAM. Returns true on success.
+#[cfg(not(test))]
 pub fn authenticate_user(username: &str, password: &str) -> bool {
     let mut context = match pam_client2::Context::new(
         "bitprotector",
@@ -178,6 +179,15 @@ pub fn authenticate_user(username: &str, password: &str) -> bool {
         Err(_) => return false,
     };
     context.authenticate(pam_client2::Flag::NONE).is_ok()
+}
+
+/// In unit-test builds the real PAM stack is never invoked — PAM is a system
+/// service that is not available (or triggers graphical prompts via pam_fprintd)
+/// in a developer environment where /etc/pam.d/bitprotector is not installed.
+/// Bad credentials therefore always return false, which is the correct outcome.
+#[cfg(test)]
+pub fn authenticate_user(_username: &str, _password: &str) -> bool {
+    false
 }
 
 #[cfg(test)]

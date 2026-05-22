@@ -10,7 +10,7 @@
 #   --deb-version <ver>      Debian package version string (computed from git if omitted)
 #   --rebuild                Force rebuild of the Docker image even if it already exists
 #
-# Output: target/debian/bitprotector_*.deb
+# Output: target/debian/ubuntu-<version>/bitprotector_*.deb
 
 set -euo pipefail
 
@@ -74,6 +74,13 @@ echo "Building .deb (ubuntu-${UBUNTU_VERSION}) version: ${DEB_VERSION}"
 # Ensure host Cargo cache dirs exist so Docker does not create them owned by root
 mkdir -p "${HOME}/.cargo/registry" "${HOME}/.cargo/git"
 
+# Ensure output dir exists as a directory (remove stale file from a previous failed build if present)
+OUTPUT_DIR="${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}"
+if [[ -e "${OUTPUT_DIR}" && ! -d "${OUTPUT_DIR}" ]]; then
+    rm -f "${OUTPUT_DIR}"
+fi
+mkdir -p "${OUTPUT_DIR}"
+
 docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \
@@ -82,7 +89,7 @@ docker run --rm \
     -v "${HOME}/.cargo/registry:/tmp/.cargo/registry" \
     -v "${HOME}/.cargo/git:/tmp/.cargo/git" \
     "${IMAGE}" \
-    bash -c "cd /workspace/frontend && npm ci && npm run build && cd /workspace && cargo deb --deb-version '${DEB_VERSION}'"
+    bash -c "cd /workspace/frontend && npm ci && npm run build && cd /workspace && cargo deb --deb-version '${DEB_VERSION}' --output target/debian/ubuntu-${UBUNTU_VERSION}/"
 
 echo "build-deb: OK"
-echo "  .deb: $(ls -1 "${PROJECT_ROOT}/target/debian/bitprotector_"*.deb | head -1)"
+echo "  .deb: $(ls -1 "${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}/bitprotector_"*.deb | head -1)"
