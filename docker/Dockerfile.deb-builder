@@ -1,0 +1,31 @@
+ARG UBUNTU_VERSION=24.04
+FROM ubuntu:${UBUNTU_VERSION}
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# System dependencies required to build bitprotector and produce a .deb
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libpam0g-dev \
+    libclang-dev \
+    llvm \
+    ca-certificates \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 24 via the NodeSource setup script
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust stable via rustup (non-interactive, no profile prompts)
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --no-modify-path --profile minimal
+
+# Install cargo-deb
+RUN cargo install cargo-deb
+
+WORKDIR /workspace

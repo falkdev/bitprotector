@@ -96,26 +96,12 @@ run_rust_integration_heavy() {
 
 run_build_artifacts() {
     echo "--- Layer 4: build artifacts ---"
-    cd "${PROJECT_ROOT}/frontend"
-    npm ci
-    npm run build
     cd "${PROJECT_ROOT}"
-    if ! cargo deb --version &>/dev/null; then
-        cargo install cargo-deb
-    fi
-    # Compute dev version matching CI logic.
-    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-    if [[ -n "${LAST_TAG}" ]]; then
-        CARGO_BASE="${LAST_TAG#v}"
-    else
-        CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-    fi
-    DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
-    SHORT_SHA=$(git rev-parse --short HEAD)
-    DEV_VERSION="${DEB_UPSTREAM}-0ubuntu1~24.04.1+git.${SHORT_SHA}"
-    cargo deb --deb-version "${DEV_VERSION}"
+    scripts/build-deb.sh --ubuntu-version 24.04
+    scripts/build-deb.sh --ubuntu-version 26.04
     echo "build-artifacts: OK"
-    echo "  .deb: $(ls -1 target/debian/bitprotector_*.deb | head -1)"
+    echo "  .debs:"
+    ls -1 target/debian/bitprotector_*.deb
 }
 
 run_qemu_smoke() {
