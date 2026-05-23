@@ -280,7 +280,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bitprotector-deb-ubuntu-${{ matrix.ubuntu }}
-          path: target/debian/bitprotector_*.deb
+          path: target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb
           retention-days: 7
 
   # ---------------------------------------------------------------------------
