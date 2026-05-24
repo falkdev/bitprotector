@@ -77,29 +77,32 @@ jobs:
             runner: ubuntu-24.04
           - ubuntu: "26.04"
             deb_suffix: "26.04.1"
-            # TODO: switch to ubuntu-26.04 once GA
-            # Track: https://github.com/actions/runner-images/issues/13964
             runner: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
-      - uses: ./.github/actions/setup-rust
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: ./.github/actions/setup-frontend
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-
 
-      - name: npm install
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      - name: Install cargo-deb
-        run: |
-          if ! cargo deb --version &>/dev/null; then
-            cargo install cargo-deb
-          fi
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.deb-builder
+          tags: bitprotector-deb-builder:ubuntu-${{ matrix.ubuntu }}
+          build-args: UBUNTU_VERSION=${{ matrix.ubuntu }}
+          load: true
+          cache-from: type=gha,scope=deb-builder-${{ matrix.ubuntu }}
+          cache-to: type=gha,scope=deb-builder-${{ matrix.ubuntu }},mode=max
 
       - name: Compute Debian release version
         run: |
@@ -109,16 +112,13 @@ jobs:
           echo "RELEASE_DEB_VERSION=${RELEASE_DEB_VERSION}" >> "$GITHUB_ENV"
           echo "Debian version: ${RELEASE_DEB_VERSION}"
 
-      - name: cargo build --release
-        run: cargo build --release
-
-      - name: cargo deb
-        run: cargo deb --deb-version "${RELEASE_DEB_VERSION}"
+      - name: Build .deb
+        run: scripts/build-deb.sh --ubuntu-version ${{ matrix.ubuntu }} --deb-version "${RELEASE_DEB_VERSION}"
 
       - name: Run version consistency check
         run: |
           chmod +x scripts/check-version.sh
-          DEB_PATH=$(ls target/debian/bitprotector_*.deb | head -1)
+          DEB_PATH=$(ls target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb | head -1)
           ./scripts/check-version.sh \
             --deb "${DEB_PATH}" \
             --binary target/release/bitprotector \
@@ -128,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bitprotector-deb-release-ubuntu-${{ matrix.ubuntu }}
-          path: target/debian/bitprotector_*.deb
+          path: target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb
           retention-days: 30
 
   # ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | — | `coverage` | `cargo llvm-cov` + `npm run test:coverage` artifact upload (non-gating) | ubuntu-24.04 | 4-8 min |
 | 2 | `rust-integration-fast` | CLI + split API integration binaries + core integration tests (except `scaling_100k`) | ubuntu-24.04 | 4-7 min |
 | 3 | `rust-integration-heavy` | `cargo test --test scaling_100k` (100k rows, 3 s/query budgets) | ubuntu-24.04 | 2-4 min |
-| 4 | `build-artifacts` | `npm ci && npm run build && cargo deb` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
+| 4 | `build-artifacts` | Docker-based build: `scripts/build-deb.sh` runs inside `bitprotector-deb-builder:ubuntu-<VER>` → uploads `.deb` as artifact | ubuntu-24.04 | 4-6 min |
 | 5 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
 | 6 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
 | 7 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
@@ -143,6 +143,21 @@ The wrapper uses `catthehacker/ubuntu:full-latest` which includes `qemu-system-x
 
 ---
 
+## Host Prerequisites
+
+For local builds and the `smoke`/`full` layers, you need:
+
+| Tool | Used by |
+| --- | --- |
+| Docker | `run-tests.sh smoke` / `full` (Layer 4 — `build-artifacts`) and direct `build-deb.sh` invocations |
+| QEMU + KVM | Layer 5+ QEMU tests (run `./scripts/setup-qemu.sh` first) |
+| Rust toolchain | Layers 0–3 (lint, unit, integration) |
+| Node.js 24+ | Layers 0–1 (lint, frontend unit) |
+
+Layer 4 (`build-artifacts`) requires **only Docker** — no Rust or Node.js on the host. See [docs/BUILDING.md](BUILDING.md) for details.
+
+---
+
 ## Native Local Runs (no Docker)
 
 If you don't want the `act` overhead, run layers natively using the same layer subcommands:
@@ -150,7 +165,7 @@ If you don't want the `act` overhead, run layers natively using the same layer s
 ```bash
 ./scripts/run-tests.sh lint
 ./scripts/run-tests.sh fast
-./scripts/run-tests.sh smoke   # requires QEMU installed (run setup-qemu.sh first)
+./scripts/run-tests.sh smoke   # requires Docker (for build-deb.sh) + QEMU (run setup-qemu.sh first)
 ./scripts/run-tests.sh full    # includes qemu-application-workflows + Playwright E2E
 GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/application_workflows.sh
 GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/scheduled_load.sh   # nightly-style load
@@ -158,7 +173,14 @@ GUEST_IMAGE=ubuntu-24.04 ./tests/installation/bundles/scheduled_load.sh   # nigh
 ./scripts/run-tests.sh e2e
 ```
 
-This script calls cargo/npm/bash directly — no containers. The layer definitions are shared with `ci-local.sh`.
+Layers 0–3 call cargo/npm directly. Layer 4 calls `scripts/build-deb.sh` which uses Docker. The layer definitions are shared with `ci-local.sh`.
+
+To build a `.deb` directly without running the full test suite:
+
+```bash
+./scripts/build-deb.sh --ubuntu-version 24.04
+./scripts/build-deb.sh --ubuntu-version 26.04
+```
 
 ---
 

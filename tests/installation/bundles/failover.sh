@@ -192,7 +192,7 @@ qemu-system-x86_64 \
     -device "virtio-blk-pci,drive=drive-bpdb,id=dev-bpdb,serial=bpdb" \
     -net nic \
     -net "user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${API_PORT}-:8443" \
-    -virtfs "local,path=${PROJECT_ROOT}/target/debian,mount_tag=debpkg,security_model=passthrough,id=debpkg" \
+    -virtfs "local,path=$(dirname "${DEB_FILE}"),mount_tag=debpkg,security_model=passthrough,id=debpkg" \
     > "${WORKDIR}/qemu.log" 2>&1 &
 QEMU_PID=$!
 
