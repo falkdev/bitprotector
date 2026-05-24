@@ -33,7 +33,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH="/usr/local/cargo/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --no-modify-path --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" && \
-    chmod -R a+rx /usr/local/rustup /usr/local/cargo
+    chmod -R a+rx /usr/local/cargo && \
+    chmod -R a+rwx /usr/local/rustup
 
 # Install cargo-deb (pinned version for reproducible builds)
 RUN cargo install cargo-deb --version "3.7.0" && chmod -R a+rx /usr/local/cargo/bin
