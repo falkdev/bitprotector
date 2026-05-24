@@ -92,9 +92,7 @@ On the first run, the script builds the `bitprotector-deb-builder:ubuntu-<VERSIO
 | Rust stable (via `rustup`) | Compiles the Rust binary |
 | `cargo-deb` | Packages the binary into a `.deb` |
 
-The host's `~/.cargo/registry` and `~/.cargo/git` are bind-mounted into the container at `/root/.cargo/registry` and `/root/.cargo/git`. This means Cargo crate downloads are reused across Docker runs without re-downloading from crates.io.
-
-> **Note (Linux hosts):** Files written to `~/.cargo/registry` by the container are owned by `root` because the container runs as root. This only affects cleanup (`sudo rm -rf ~/.cargo/registry` if needed). Cargo itself works correctly with root-owned registry files.
+The host's `~/.cargo/registry` and `~/.cargo/git` are bind-mounted into the container at `/tmp/.cargo/registry` and `/tmp/.cargo/git`. The container runs as the current host user (via `--user $(id -u):$(id -g)`) with `CARGO_HOME=/tmp/.cargo`, so all files written during the build remain owned by you — no `sudo` is needed for cleanup.
 
 ---
 

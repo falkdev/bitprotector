@@ -118,7 +118,7 @@ jobs:
       - name: Run version consistency check
         run: |
           chmod +x scripts/check-version.sh
-          DEB_PATH=$(ls target/debian/bitprotector_*.deb | head -1)
+          DEB_PATH=$(ls target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb | head -1)
           ./scripts/check-version.sh \
             --deb "${DEB_PATH}" \
             --binary target/release/bitprotector \
@@ -128,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bitprotector-deb-release-ubuntu-${{ matrix.ubuntu }}
-          path: target/debian/bitprotector_*.deb
+          path: target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb
           retention-days: 30
 
   # ---------------------------------------------------------------------------

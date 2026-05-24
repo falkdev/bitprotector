@@ -28,8 +28,16 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --ubuntu-version) UBUNTU_VERSION="$2"; shift 2 ;;
-        --deb-version)    DEB_VERSION="$2"; shift 2 ;;
+        --ubuntu-version)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --ubuntu-version requires an argument" >&2; usage
+            fi
+            UBUNTU_VERSION="$2"; shift 2 ;;
+        --deb-version)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --deb-version requires an argument" >&2; usage
+            fi
+            DEB_VERSION="$2"; shift 2 ;;
         --rebuild)        REBUILD=1; shift ;;
         -h|--help)        usage ;;
         *) echo "ERROR: Unknown argument: $1" >&2; usage ;;
@@ -38,6 +46,11 @@ done
 
 if [[ -z "${UBUNTU_VERSION}" ]]; then
     echo "ERROR: --ubuntu-version is required" >&2
+    usage
+fi
+
+if [[ "${UBUNTU_VERSION}" != "24.04" && "${UBUNTU_VERSION}" != "26.04" ]]; then
+    echo "ERROR: --ubuntu-version must be 24.04 or 26.04 (got: '${UBUNTU_VERSION}')" >&2
     usage
 fi
 
@@ -85,11 +98,12 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \
     -e CARGO_HOME=/tmp/.cargo \
+    -e DEB_VERSION="${DEB_VERSION}" \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${HOME}/.cargo/registry:/tmp/.cargo/registry" \
     -v "${HOME}/.cargo/git:/tmp/.cargo/git" \
     "${IMAGE}" \
-    bash -c "cd /workspace/frontend && npm ci && npm run build && cd /workspace && cargo deb --deb-version '${DEB_VERSION}' --output target/debian/ubuntu-${UBUNTU_VERSION}/"
+    bash -c "cd /workspace/frontend && npm ci && npm run build && cd /workspace && cargo deb --deb-version \"\${DEB_VERSION}\" --output target/debian/ubuntu-${UBUNTU_VERSION}/"
 
 echo "build-deb: OK"
 echo "  .deb: $(ls -1 "${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}/bitprotector_"*.deb | head -1)"
