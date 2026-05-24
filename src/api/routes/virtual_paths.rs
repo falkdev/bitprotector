@@ -27,7 +27,7 @@ async fn set_virtual_path(
 ) -> HttpResponse {
     let file_id = path.into_inner();
     match virtual_path::set_virtual_path(&repo, file_id, &body.virtual_path) {
-        Ok(_) => HttpResponse::Ok().body(format!("Virtual path set for file #{}", file_id)),
+        Ok(_) => HttpResponse::Ok().body(format!("Virtual path set for file #{file_id}")),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
 }
@@ -36,7 +36,7 @@ async fn set_virtual_path(
 async fn remove_virtual_path(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
     let file_id = path.into_inner();
     match virtual_path::remove_virtual_path(&repo, file_id) {
-        Ok(_) => HttpResponse::Ok().body(format!("Virtual path removed for file #{}", file_id)),
+        Ok(_) => HttpResponse::Ok().body(format!("Virtual path removed for file #{file_id}")),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
 }

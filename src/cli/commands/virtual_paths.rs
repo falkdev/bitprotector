@@ -91,7 +91,7 @@ pub fn handle(cmd: VirtualPathsCommand, repo: &Repository) -> anyhow::Result<()>
                 result.errors.len()
             );
             for err in &result.errors {
-                eprintln!("  ERROR: {}", err);
+                eprintln!("  ERROR: {err}");
             }
         }
     }

@@ -1,7 +1,7 @@
 mod common;
 
 use actix_web::test;
-use bitprotector_lib::core::{checksum, drive, integrity, virtual_path};
+use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
 use tempfile::TempDir;

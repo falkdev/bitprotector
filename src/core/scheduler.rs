@@ -53,13 +53,13 @@ fn next_cron_sleep_ms(expr: &str) -> anyhow::Result<u64> {
 
     // Standard 5-field: "min hour dom month dow"
     // cron crate 7-field: "sec min hour dom month dow year"
-    let seven_field = format!("0 {} *", expr);
+    let seven_field = format!("0 {expr} *");
     let schedule = Schedule::from_str(&seven_field)
-        .map_err(|e| anyhow::anyhow!("Invalid cron expression '{}': {}", expr, e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid cron expression '{expr}': {e}"))?;
     let next = schedule
         .upcoming(Utc)
         .next()
-        .ok_or_else(|| anyhow::anyhow!("No upcoming occurrence for cron '{}'", expr))?;
+        .ok_or_else(|| anyhow::anyhow!("No upcoming occurrence for cron '{expr}'"))?;
     let ms = (next - Utc::now()).num_milliseconds().max(0) as u64;
     Ok(ms)
 }

@@ -266,7 +266,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/protected")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
@@ -326,7 +326,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/protected")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);

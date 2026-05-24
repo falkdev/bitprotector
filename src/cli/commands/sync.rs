@@ -65,7 +65,7 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
                     item.id, item.tracked_file_id, item.action, item.status, item.created_at
                 );
             }
-            println!("Total: {}", total);
+            println!("Total: {total}");
         }
         SyncCommand::Show { id } => {
             let item = repo.get_sync_queue_item(id)?;
@@ -75,10 +75,10 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Status:    {}", item.status);
             println!("  Created:   {}", item.created_at);
             if let Some(err) = &item.error_message {
-                println!("  Error:     {}", err);
+                println!("  Error:     {err}");
             }
             if let Some(done) = &item.completed_at {
-                println!("  Completed: {}", done);
+                println!("  Completed: {done}");
             }
         }
         SyncCommand::Add(args) => {
@@ -90,7 +90,7 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
         }
         SyncCommand::Process => {
             let count = sync_queue::process_all_pending(repo, None)?;
-            println!("Processed {} pending sync queue item(s)", count);
+            println!("Processed {count} pending sync queue item(s)");
         }
         SyncCommand::Pause => {
             repo.set_sync_queue_paused(true)?;
@@ -104,10 +104,9 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             let task = match args.task.as_str() {
                 "sync" => scheduler::TaskType::Sync,
                 "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
-                other => anyhow::bail!(
-                    "Unknown task type '{}'. Use 'sync' or 'integrity-check'",
-                    other
-                ),
+                other => {
+                    anyhow::bail!("Unknown task type '{other}'. Use 'sync' or 'integrity-check'")
+                }
             };
             let count = scheduler::run_task(
                 &task,

@@ -235,7 +235,7 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
             if let Some(name) = &pair_name {
                 let _ = event_logger::log_drive_deleted(repo, id, name);
             }
-            println!("Removed drive pair #{}", id);
+            println!("Removed drive pair #{id}");
         }
         DrivesCommand::Replace { action } => match action {
             ReplaceCommand::Mark(args) => {

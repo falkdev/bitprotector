@@ -438,10 +438,7 @@ impl Repository {
             |r| r.get(0),
         )?;
         if count > 0 {
-            anyhow::bail!(
-                "Cannot delete drive pair: {} files are still tracked",
-                count
-            );
+            anyhow::bail!("Cannot delete drive pair: {count} files are still tracked");
         }
         conn.execute("DELETE FROM drive_pairs WHERE id=?1", rusqlite::params![id])?;
         Ok(())
@@ -1242,7 +1239,7 @@ impl Repository {
                     params.len() + 1,
                     effective_virtual_expr
                 ));
-                params.push(Value::Text(format!("%{}%", raw_q)));
+                params.push(Value::Text(format!("%{raw_q}%")));
             }
             if let Some(prefix) = virtual_prefix.map(str::trim).filter(|p| !p.is_empty()) {
                 conditions.push(format!(
@@ -1305,7 +1302,7 @@ impl Repository {
                     "(tfolder.folder_path LIKE ?{0} OR COALESCE(tfolder.virtual_path, '') LIKE ?{0})",
                     params.len() + 1
                 ));
-                params.push(Value::Text(format!("%{}%", raw_q)));
+                params.push(Value::Text(format!("%{raw_q}%")));
             }
             if let Some(prefix) = virtual_prefix.map(str::trim).filter(|p| !p.is_empty()) {
                 conditions.push(format!(
@@ -1454,9 +1451,9 @@ impl Repository {
         let search_prefix = if parent == "/" {
             "/".to_string()
         } else {
-            format!("{}/", parent)
+            format!("{parent}/")
         };
-        let pattern = format!("{}%", search_prefix);
+        let pattern = format!("{search_prefix}%");
         let segment_start = search_prefix.len() as i64 + 1;
 
         let mut stmt = conn.prepare(
@@ -1705,8 +1702,7 @@ impl Repository {
         };
         conn.execute(
             &format!(
-                "UPDATE sync_queue SET status=?1, error_message=?2, completed_at={} WHERE id=?3",
-                completed_at
+                "UPDATE sync_queue SET status=?1, error_message=?2, completed_at={completed_at} WHERE id=?3"
             ),
             rusqlite::params![status, error_message, id],
         )?;
@@ -1840,7 +1836,7 @@ impl Repository {
             conditions.push(format!("e.event_type='{}'", et.replace('\'', "''")));
         }
         if let Some(fid) = tracked_file_id {
-            conditions.push(format!("e.tracked_file_id={}", fid));
+            conditions.push(format!("e.tracked_file_id={fid}"));
         }
         if let Some(f) = from {
             conditions.push(format!("e.created_at>='{}'", f.replace('\'', "''")));
@@ -2479,7 +2475,7 @@ mod tests {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
         for i in 0..5 {
-            repo.create_tracked_file(pair.id, &format!("file{}.txt", i), "hash", 100, None)
+            repo.create_tracked_file(pair.id, &format!("file{i}.txt"), "hash", 100, None)
                 .unwrap();
         }
         let (files, total) = repo.list_tracked_files(None, None, None, 1, 3).unwrap();

@@ -1,10 +1,7 @@
 mod common;
 
 use actix_web::test;
-use bitprotector_lib::core::{checksum, drive, integrity, virtual_path};
 use common::{bearer, make_repo};
-use std::fs;
-use tempfile::TempDir;
 
 // ── Scheduler ─────────────────────────────────────────────────────────────
 
@@ -41,7 +38,7 @@ async fn test_scheduler_create_and_get() {
     assert_eq!(body["interval_seconds"], 300);
 
     let req = test::TestRequest::get()
-        .uri(&format!("/api/v1/scheduler/schedules/{}", id))
+        .uri(&format!("/api/v1/scheduler/schedules/{id}"))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;

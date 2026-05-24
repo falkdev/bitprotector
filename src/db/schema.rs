@@ -329,7 +329,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .expect("Query failed");
-            assert_eq!(count, 1, "Table '{}' was not created", table);
+            assert_eq!(count, 1, "Table '{table}' was not created");
         }
     }
 

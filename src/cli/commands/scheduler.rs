@@ -82,7 +82,7 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
                         .map(|i| i.to_string())
                         .unwrap_or_else(|| "-".to_string()),
                     cfg.max_duration_seconds
-                        .map(|s| format!("{}s", s))
+                        .map(|s| format!("{s}s"))
                         .unwrap_or_else(|| "-".to_string()),
                     if cfg.enabled { "yes" } else { "no" },
                 );
@@ -107,7 +107,7 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
             )?;
             println!("Created schedule #{}: {} ({})", cfg.id, cfg.task_type, {
                 if let Some(ref expr) = cfg.cron_expr {
-                    format!("cron: {}", expr)
+                    format!("cron: {expr}")
                 } else {
                     format!("interval: {}s", cfg.interval_seconds.unwrap_or(0))
                 }
@@ -116,17 +116,17 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
 
         SchedulerCommand::Remove { id } => {
             repo.delete_schedule_config(id)?;
-            println!("Removed schedule #{}", id);
+            println!("Removed schedule #{id}");
         }
 
         SchedulerCommand::Enable { id } => {
             repo.update_schedule_config(id, None, None, Some(true), None)?;
-            println!("Enabled schedule #{}", id);
+            println!("Enabled schedule #{id}");
         }
 
         SchedulerCommand::Disable { id } => {
             repo.update_schedule_config(id, None, None, Some(false), None)?;
-            println!("Disabled schedule #{}", id);
+            println!("Disabled schedule #{id}");
         }
 
         SchedulerCommand::SetMaxDuration { id, seconds } => {
@@ -134,8 +134,8 @@ pub fn handle(cmd: SchedulerCommand, repo: &Repository) -> anyhow::Result<()> {
             let value: Option<Option<i64>> = Some(seconds.filter(|&s| s > 0));
             repo.update_schedule_config(id, None, None, None, value)?;
             match seconds.filter(|&s| s > 0) {
-                Some(s) => println!("Set max duration for schedule #{} to {}s", id, s),
-                None => println!("Cleared max duration for schedule #{}", id),
+                Some(s) => println!("Set max duration for schedule #{id} to {s}s"),
+                None => println!("Cleared max duration for schedule #{id}"),
             }
         }
 

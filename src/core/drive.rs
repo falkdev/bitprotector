@@ -164,7 +164,7 @@ pub fn drive_root_marker_path(path: &str) -> std::path::PathBuf {
 
 pub fn ensure_drive_root_marker(path: &str) -> anyhow::Result<()> {
     if !path_is_available(path) {
-        anyhow::bail!("Drive root unavailable: {}", path);
+        anyhow::bail!("Drive root unavailable: {path}");
     }
 
     let marker = drive_root_marker_path(path);

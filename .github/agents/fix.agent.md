@@ -102,6 +102,7 @@ After each fix, report:
 After all fixes are verified, output **exactly** the block below (with placeholders filled in) — wrapped in triple-backtick fences — into the chat, then **stop**. The user decides what happens next.
 
 ~~~
+<!-- SOLUTION HANDOFF — copy everything between the triple-backtick fences into the Test Workflow agent -->
 ```
 **What was fixed:**
 <one sentence describing the root cause and the fix>

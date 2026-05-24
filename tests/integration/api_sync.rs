@@ -1,7 +1,7 @@
 mod common;
 
 use actix_web::test;
-use bitprotector_lib::core::{checksum, drive, integrity, virtual_path};
+use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
 use tempfile::TempDir;
@@ -44,7 +44,7 @@ async fn test_sync_queue_add_and_get() {
     assert_eq!(body["action"], "verify");
 
     let req = test::TestRequest::get()
-        .uri(&format!("/api/v1/sync/queue/{}", item_id))
+        .uri(&format!("/api/v1/sync/queue/{item_id}"))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;

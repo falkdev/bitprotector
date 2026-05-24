@@ -39,10 +39,7 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
 
     let raw_path = Path::new(trimmed);
     if !raw_path.is_absolute() {
-        anyhow::bail!(
-            "Virtual path must be absolute (start with /): {}",
-            virtual_path
-        );
+        anyhow::bail!("Virtual path must be absolute (start with /): {virtual_path}");
     }
 
     let mut segments = Vec::new();
@@ -54,8 +51,7 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
                 let trimmed_seg = s.trim();
                 if trimmed_seg.is_empty() {
                     anyhow::bail!(
-                        "Virtual path segments may not be empty or whitespace-only: {}",
-                        virtual_path
+                        "Virtual path segments may not be empty or whitespace-only: {virtual_path}"
                     );
                 }
                 segments.push(trimmed_seg.to_string());
@@ -64,7 +60,7 @@ pub fn normalize_virtual_path(virtual_path: &str) -> anyhow::Result<String> {
             Component::ParentDir => {
                 anyhow::bail!("Parent-directory traversal is not allowed in virtual paths")
             }
-            Component::Prefix(_) => anyhow::bail!("Unsupported virtual path: {}", virtual_path),
+            Component::Prefix(_) => anyhow::bail!("Unsupported virtual path: {virtual_path}"),
         }
     }
 
@@ -111,7 +107,7 @@ pub fn set_virtual_path(repo: &Repository, file_id: i64, virtual_path: &str) -> 
 pub fn remove_virtual_path(repo: &Repository, file_id: i64) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(file_id)?;
     let Some(virtual_path) = file.virtual_path.as_deref() else {
-        anyhow::bail!("File #{} has no virtual path assigned", file_id);
+        anyhow::bail!("File #{file_id} has no virtual path assigned");
     };
 
     let normalized = normalize_virtual_path(virtual_path)?;
@@ -183,12 +179,11 @@ pub fn create_symlink(
         Ok(metadata) => {
             if !metadata.file_type().is_symlink() {
                 anyhow::bail!(
-                    "Virtual path already exists and is not a BitProtector-managed symlink: {}",
-                    virtual_path
+                    "Virtual path already exists and is not a BitProtector-managed symlink: {virtual_path}"
                 );
             }
             if !allow_replace_existing_symlink {
-                anyhow::bail!("Virtual path is already in use: {}", virtual_path);
+                anyhow::bail!("Virtual path is already in use: {virtual_path}");
             }
             fs::remove_file(&link_path).context("Failed to remove old symlink")?;
         }
@@ -206,10 +201,7 @@ pub fn remove_symlink(virtual_path: &str) -> anyhow::Result<()> {
     match fs::symlink_metadata(&link_path) {
         Ok(metadata) => {
             if !metadata.file_type().is_symlink() {
-                anyhow::bail!(
-                    "Virtual path is not a BitProtector-managed symlink: {}",
-                    virtual_path
-                );
+                anyhow::bail!("Virtual path is not a BitProtector-managed symlink: {virtual_path}");
             }
             fs::remove_file(&link_path)?;
         }
@@ -262,7 +254,7 @@ fn validate_virtual_path(
         }
 
         if reservation.virtual_path == normalized {
-            anyhow::bail!("Virtual path is already assigned: {}", normalized);
+            anyhow::bail!("Virtual path is already assigned: {normalized}");
         }
 
         if paths_overlap(&reservation.virtual_path, &normalized) {
@@ -277,8 +269,7 @@ fn validate_virtual_path(
         Ok(metadata) => {
             if !metadata.file_type().is_symlink() {
                 anyhow::bail!(
-                    "Virtual path already exists and is not a BitProtector-managed symlink: {}",
-                    normalized
+                    "Virtual path already exists and is not a BitProtector-managed symlink: {normalized}"
                 );
             }
 
@@ -290,7 +281,7 @@ fn validate_virtual_path(
                     });
 
             if !owned_by_current {
-                anyhow::bail!("Virtual path is already in use: {}", normalized);
+                anyhow::bail!("Virtual path is already in use: {normalized}");
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -389,8 +380,8 @@ fn paths_overlap(left: &str, right: &str) -> bool {
 
 fn owner_error(owner: VirtualOwner, message: &str) -> String {
     match owner {
-        VirtualOwner::File(id) => format!("File {}: {}", id, message),
-        VirtualOwner::Folder(id) => format!("Folder {}: {}", id, message),
+        VirtualOwner::File(id) => format!("File {id}: {message}"),
+        VirtualOwner::Folder(id) => format!("Folder {id}: {message}"),
     }
 }
 

@@ -29,7 +29,7 @@ pub fn resolve_path_within_drive_root(
 
     let root = Path::new(drive_root)
         .canonicalize()
-        .with_context(|| format!("Failed to access drive root: {}", drive_root))?;
+        .with_context(|| format!("Failed to access drive root: {drive_root}"))?;
     let candidate = if raw_path.is_absolute() {
         PathBuf::from(raw_path)
     } else {

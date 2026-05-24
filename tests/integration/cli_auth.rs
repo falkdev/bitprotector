@@ -50,7 +50,7 @@ async fn test_auth_middleware_accepts_valid_token() {
 
     let req = test::TestRequest::get()
         .uri("/secret")
-        .insert_header(("Authorization", format!("Bearer {}", token)))
+        .insert_header(("Authorization", format!("Bearer {token}")))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
@@ -70,7 +70,7 @@ async fn test_expired_token_rejected() {
 
     let req = test::TestRequest::get()
         .uri("/secret")
-        .insert_header(("Authorization", format!("Bearer {}", expired_token)))
+        .insert_header(("Authorization", format!("Bearer {expired_token}")))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);

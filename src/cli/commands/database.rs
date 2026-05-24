@@ -122,23 +122,23 @@ pub fn handle_with_db_path(
                 cfg.last_integrity_status.as_deref().unwrap_or("(never)")
             );
             if let Some(label) = &cfg.drive_label {
-                println!("  Drive Label: {}", label);
+                println!("  Drive Label: {label}");
             }
             if let Some(error) = &cfg.last_error {
-                println!("  Last Error:  {}", error);
+                println!("  Last Error:  {error}");
             }
         }
         DatabaseCommand::Remove { id } => {
             repo.delete_db_backup_config(id)?;
-            println!("Backup destination #{} removed.", id);
+            println!("Backup destination #{id} removed.");
         }
         DatabaseCommand::Enable { id } => {
             repo.update_db_backup_config(id, None, None, Some(true))?;
-            println!("Backup destination #{} enabled.", id);
+            println!("Backup destination #{id} enabled.");
         }
         DatabaseCommand::Disable { id } => {
             repo.update_db_backup_config(id, None, None, Some(false))?;
-            println!("Backup destination #{} disabled.", id);
+            println!("Backup destination #{id} disabled.");
         }
         DatabaseCommand::Run => {
             let results = backup::run_all_backups(repo, db_path)?;
@@ -176,7 +176,7 @@ pub fn handle_with_db_path(
                     r.backup_path
                 );
                 if let Some(error) = &r.error {
-                    println!("       {}", error);
+                    println!("       {error}");
                 }
             }
         }

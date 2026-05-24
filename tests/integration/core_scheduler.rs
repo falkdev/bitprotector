@@ -206,7 +206,7 @@ fn test_scheduler_thread_respects_max_duration() {
     let content = b"max duration test";
     let hash = checksum::checksum_bytes(content);
     for i in 0..20 {
-        let fname = format!("md{}.txt", i);
+        let fname = format!("md{i}.txt");
         fs::write(primary.path().join(&fname), content).unwrap();
         let f = repo
             .create_tracked_file(pair.id, &fname, &hash, content.len() as i64, None)
