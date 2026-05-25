@@ -575,7 +575,6 @@ export function PathPickerDialog({
                       setSelectedPath(selected.path)
                       setSelectedKind(selected.kind)
                       setDraftPath(selected.path)
-                      treeRef.current?.select?.(selected.id)
                     }}
                     className="h-full"
                     rowClassName="focus:outline-none"

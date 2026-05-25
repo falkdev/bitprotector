@@ -47,4 +47,5 @@ export interface SyncQueueListResponse {
   page: number
   per_page: number
   queue_paused: boolean
+  active_items: number
 }

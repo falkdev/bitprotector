@@ -5,6 +5,7 @@ import type { SyncQueueItem, SyncStatus } from '@/types/sync'
 interface SyncStore {
   items: SyncQueueItem[]
   queuePaused: boolean
+  activeItems: number
   loading: boolean
   error: string | null
   filter: SyncStatus | 'all'
@@ -18,6 +19,7 @@ interface SyncStore {
 export const useSyncStore = create<SyncStore>((set, get) => ({
   items: [],
   queuePaused: false,
+  activeItems: 0,
   loading: false,
   error: null,
   filter: 'all',
@@ -26,7 +28,12 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const response = await syncApi.listQueue()
-      set({ items: response.queue, queuePaused: response.queue_paused, loading: false })
+      set({
+        items: response.queue,
+        queuePaused: response.queue_paused,
+        activeItems: response.active_items,
+        loading: false,
+      })
     } catch (err) {
       set({ loading: false, error: String(err) })
     }

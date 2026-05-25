@@ -22,6 +22,7 @@ function resetStore() {
   useSyncStore.setState({
     items: [],
     queuePaused: false,
+    activeItems: 0,
     loading: false,
     error: null,
     filter: 'all',
@@ -36,13 +37,16 @@ describe('sync-store', () => {
   it('fetch sets items and queuePaused on success', async () => {
     const item = makeSyncItem()
     server.use(
-      api.get('/sync/queue', () => HttpResponse.json({ queue: [item], queue_paused: true }))
+      api.get('/sync/queue', () =>
+        HttpResponse.json({ queue: [item], queue_paused: true, active_items: 1 })
+      )
     )
 
     await useSyncStore.getState().fetch()
 
     expect(useSyncStore.getState().items).toEqual([item])
     expect(useSyncStore.getState().queuePaused).toBe(true)
+    expect(useSyncStore.getState().activeItems).toBe(1)
     expect(useSyncStore.getState().loading).toBe(false)
     expect(useSyncStore.getState().error).toBeNull()
   })
