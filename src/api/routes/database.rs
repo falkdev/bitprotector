@@ -86,7 +86,7 @@ fn validate_interval(value: Option<i64>, name: &str) -> Result<(), HttpResponse>
         if seconds <= 0 {
             return Err(HttpResponse::BadRequest().json(ApiError::new(
                 "validation_error",
-                &format!("{} must be greater than zero", name),
+                &format!("{name} must be greater than zero"),
             )));
         }
     }

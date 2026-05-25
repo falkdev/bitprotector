@@ -56,7 +56,7 @@ pub fn handle(cmd: LogsCommand, repo: &Repository) -> anyhow::Result<()> {
                     e.message,
                 );
             }
-            println!("Total: {}", total);
+            println!("Total: {total}");
         }
         LogsCommand::Show { id } => {
             let e = repo.get_event_log(id)?;
@@ -65,13 +65,13 @@ pub fn handle(cmd: LogsCommand, repo: &Repository) -> anyhow::Result<()> {
             println!(
                 "  File:    {}",
                 e.tracked_file_id
-                    .map(|id| format!("#{}", id))
+                    .map(|id| format!("#{id}"))
                     .unwrap_or_else(|| "(none)".to_string())
             );
             println!("  Message: {}", e.message);
             println!("  Created: {}", e.created_at);
             if let Some(details) = &e.details {
-                println!("  Details: {}", details);
+                println!("  Details: {details}");
             }
         }
     }

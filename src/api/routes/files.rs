@@ -100,7 +100,7 @@ pub async fn get_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl
         Ok(file) => HttpResponse::Ok().json(file),
         Err(_) => HttpResponse::NotFound().json(ApiError::new(
             "RESOURCE_NOT_FOUND",
-            &format!("Tracked file {} not found", id),
+            &format!("Tracked file {id} not found"),
         )),
     }
 }
@@ -113,7 +113,7 @@ pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Tracked file {} not found", id),
+                &format!("Tracked file {id} not found"),
             ))
         }
     };
@@ -146,7 +146,7 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Tracked file {} not found", id),
+                &format!("Tracked file {id} not found"),
             ))
         }
     };

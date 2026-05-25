@@ -11,7 +11,7 @@ use tempfile::TempDir;
 fn make_repo() -> Repository {
     let pool = create_memory_pool().unwrap();
     let conn = pool.get().unwrap();
-    initialize_schema(&*conn).unwrap();
+    initialize_schema(&conn).unwrap();
     drop(conn);
     Repository::new(pool)
 }

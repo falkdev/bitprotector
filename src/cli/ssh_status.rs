@@ -95,7 +95,7 @@ pub fn format_status(report: &StatusReport) -> String {
     }
 
     match &report.last_backup {
-        Some(ts) => lines.push(format!("│  Last backup: {}", ts)),
+        Some(ts) => lines.push(format!("│  Last backup: {ts}")),
         None => lines.push("│  No backups configured".to_string()),
     }
 

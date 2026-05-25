@@ -101,8 +101,12 @@ After each fix, report:
 
 After all fixes are verified, output **exactly** the block below (with placeholders filled in) — wrapped in triple-backtick fences — into the chat, then **stop**. The user decides what happens next.
 
+Format it exactly like this:
+
 ~~~
+<!-- FIX HANDOFF — copy everything between the triple-backtick fences into the Test Workflow agent -->
 ```
+
 **What was fixed:**
 <one sentence describing the root cause and the fix>
 
@@ -119,6 +123,8 @@ Scope: <which module(s) or layer(s) are affected, e.g. "scoped to src/core/drive
 Behaviour before: <what the code did before the fix>
 Behaviour after: <what the code does now>
 Why safe: <why the change is minimal and unlikely to break unrelated behaviour, e.g. "only affects the drive-listing response shape, no shared state modified">
+
+---END HANDOFF---
 ```
 ~~~
 

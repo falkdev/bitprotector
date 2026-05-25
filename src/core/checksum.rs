@@ -184,10 +184,7 @@ pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
         let _ = std::fs::remove_file(dst_path);
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "checksum mismatch: expected={} actual={}",
-                expected_checksum, actual
-            ),
+            format!("checksum mismatch: expected={expected_checksum} actual={actual}"),
         ));
     }
     Ok(())

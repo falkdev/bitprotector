@@ -100,7 +100,7 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
                 .unwrap_or_else(|_| folder.folder_path.clone());
             let _ = event_logger::log_folder_untracked(repo, id, &full_path);
-            println!("Removed tracked folder #{}", id);
+            println!("Removed tracked folder #{id}");
         }
         FoldersCommand::Scan(args) => {
             let folder = repo.get_tracked_folder(args.id)?;

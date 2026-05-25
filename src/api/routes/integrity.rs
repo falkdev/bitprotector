@@ -33,7 +33,7 @@ pub async fn check_file(
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Tracked file {} not found", id),
+                &format!("Tracked file {id} not found"),
             ))
         }
     };
@@ -124,7 +124,7 @@ pub async fn stop_run(repo: web::Data<Repository>, path: web::Path<i64>) -> impl
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Integrity run {} not found", run_id),
+                &format!("Integrity run {run_id} not found"),
             ))
         }
     }
@@ -195,7 +195,7 @@ pub async fn run_results(
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Integrity run {} not found", run_id),
+                &format!("Integrity run {run_id} not found"),
             ))
         }
     };

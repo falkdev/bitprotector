@@ -18,8 +18,8 @@ pub fn log_file_tracked(repo: &Repository, file_id: i64, path: &str) -> anyhow::
         repo,
         "file_created",
         Some(file_id),
-        &format!("Tracked: {}", path),
-        Some(&format!("{{\"path\":\"{}\"}}", path)),
+        &format!("Tracked: {path}"),
+        Some(&format!("{{\"path\":\"{path}\"}}")),
     )
 }
 
@@ -29,8 +29,8 @@ pub fn log_file_untracked(repo: &Repository, file_id: i64, path: &str) -> anyhow
         repo,
         "file_untracked",
         Some(file_id),
-        &format!("Untracked: {}", path),
-        Some(&format!("{{\"path\":\"{}\"}}", path)),
+        &format!("Untracked: {path}"),
+        Some(&format!("{{\"path\":\"{path}\"}}")),
     )
 }
 
@@ -45,10 +45,9 @@ pub fn log_file_mirrored(
         repo,
         "file_mirrored",
         Some(file_id),
-        &format!("Mirrored: {}", path),
+        &format!("Mirrored: {path}"),
         Some(&format!(
-            "{{\"path\":\"{}\",\"checksum\":\"{}\"}}",
-            path, checksum
+            "{{\"path\":\"{path}\",\"checksum\":\"{checksum}\"}}"
         )),
     )
 }
@@ -59,8 +58,8 @@ pub fn log_integrity_pass(repo: &Repository, file_id: i64, path: &str) -> anyhow
         repo,
         "integrity_pass",
         Some(file_id),
-        &format!("Integrity OK: {}", path),
-        Some(&format!("{{\"path\":\"{}\"}}", path)),
+        &format!("Integrity OK: {path}"),
+        Some(&format!("{{\"path\":\"{path}\"}}")),
     )
 }
 
@@ -75,11 +74,8 @@ pub fn log_integrity_fail(
         repo,
         "integrity_fail",
         Some(file_id),
-        &format!("Integrity FAIL ({}): {}", status, path),
-        Some(&format!(
-            "{{\"path\":\"{}\",\"status\":\"{}\"}}",
-            path, status
-        )),
+        &format!("Integrity FAIL ({status}): {path}"),
+        Some(&format!("{{\"path\":\"{path}\",\"status\":\"{status}\"}}")),
     )
 }
 
@@ -96,13 +92,13 @@ pub fn log_both_corrupted(
         repo,
         "both_corrupted",
         Some(file_id),
-        &format!("Both copies corrupted: {}", path),
+        &format!("Both copies corrupted: {path}"),
         Some(&format!(
             "{{\"path\":\"{}\",\"stored_checksum\":\"{}\",\"master_checksum\":{},\"mirror_checksum\":{}}}",
             path,
             stored_checksum,
-            master_checksum.map_or("null".to_string(), |c| format!("\"{}\"", c)),
-            mirror_checksum.map_or("null".to_string(), |c| format!("\"{}\"", c)),
+            master_checksum.map_or("null".to_string(), |c| format!("\"{c}\"")),
+            mirror_checksum.map_or("null".to_string(), |c| format!("\"{c}\"")),
         )),
     )
 }
@@ -129,8 +125,7 @@ pub fn log_recovery(
             action
         ),
         Some(&format!(
-            "{{\"action\":\"{}\",\"success\":{}}}",
-            action, success
+            "{{\"action\":\"{action}\",\"success\":{success}}}"
         )),
     )
 }
@@ -146,11 +141,8 @@ pub fn log_sync_completed(
         repo,
         "sync_completed",
         Some(file_id),
-        &format!("Sync completed ({}): {}", action, path),
-        Some(&format!(
-            "{{\"action\":\"{}\",\"path\":\"{}\"}}",
-            action, path
-        )),
+        &format!("Sync completed ({action}): {path}"),
+        Some(&format!("{{\"action\":\"{action}\",\"path\":\"{path}\"}}")),
     )
 }
 
@@ -166,7 +158,7 @@ pub fn log_sync_failed(
         repo,
         "sync_failed",
         Some(file_id),
-        &format!("Sync failed ({}): {}", action, path),
+        &format!("Sync failed ({action}): {path}"),
         Some(&format!(
             "{{\"action\":\"{}\",\"path\":\"{}\",\"error\":\"{}\"}}",
             action,
@@ -187,10 +179,9 @@ pub fn log_folder_tracked(
         repo,
         "folder_tracked",
         None,
-        &format!("Folder tracked: {} (folder #{})", folder_path, folder_id),
+        &format!("Folder tracked: {folder_path} (folder #{folder_id})"),
         Some(&format!(
-            "{{\"folder_id\":{},\"path\":\"{}\",\"drive_pair_id\":{}}}",
-            folder_id, folder_path, drive_pair_id
+            "{{\"folder_id\":{folder_id},\"path\":\"{folder_path}\",\"drive_pair_id\":{drive_pair_id}}}"
         )),
     )
 }
@@ -205,10 +196,9 @@ pub fn log_folder_untracked(
         repo,
         "folder_untracked",
         None,
-        &format!("Folder untracked: {} (folder #{})", folder_path, folder_id),
+        &format!("Folder untracked: {folder_path} (folder #{folder_id})"),
         Some(&format!(
-            "{{\"folder_id\":{},\"path\":\"{}\"}}",
-            folder_id, folder_path
+            "{{\"folder_id\":{folder_id},\"path\":\"{folder_path}\"}}"
         )),
     )
 }
@@ -224,13 +214,9 @@ pub fn log_integrity_run_started(
         repo,
         "integrity_run_started",
         None,
-        &format!(
-            "Integrity run #{} started ({} files, trigger: {})",
-            run_id, total_files, trigger
-        ),
+        &format!("Integrity run #{run_id} started ({total_files} files, trigger: {trigger})"),
         Some(&format!(
-            "{{\"run_id\":{},\"total_files\":{},\"trigger\":\"{}\"}}",
-            run_id, total_files, trigger
+            "{{\"run_id\":{run_id},\"total_files\":{total_files},\"trigger\":\"{trigger}\"}}"
         )),
     )
 }
@@ -248,12 +234,10 @@ pub fn log_integrity_run_completed(
         "integrity_run_completed",
         None,
         &format!(
-            "Integrity run #{} {}: {} issues, {} recovered",
-            run_id, status, issues, recovered
+            "Integrity run #{run_id} {status}: {issues} issues, {recovered} recovered"
         ),
         Some(&format!(
-            "{{\"run_id\":{},\"status\":\"{}\",\"issues\":{},\"recovered\":{}}}",
-            run_id, status, issues, recovered
+            "{{\"run_id\":{run_id},\"status\":\"{status}\",\"issues\":{issues},\"recovered\":{recovered}}}"
         )),
     )
 }
@@ -270,10 +254,9 @@ pub fn log_drive_created(
         repo,
         "drive_created",
         None,
-        &format!("Drive pair created: {} (#{})", name, pair_id),
+        &format!("Drive pair created: {name} (#{pair_id})"),
         Some(&format!(
-            "{{\"pair_id\":{},\"name\":\"{}\",\"primary_path\":\"{}\",\"secondary_path\":\"{}\"}}",
-            pair_id, name, primary_path, secondary_path
+            "{{\"pair_id\":{pair_id},\"name\":\"{name}\",\"primary_path\":\"{primary_path}\",\"secondary_path\":\"{secondary_path}\"}}"
         )),
     )
 }
@@ -284,11 +267,8 @@ pub fn log_drive_updated(repo: &Repository, pair_id: i64, name: &str) -> anyhow:
         repo,
         "drive_updated",
         None,
-        &format!("Drive pair updated: {} (#{})", name, pair_id),
-        Some(&format!(
-            "{{\"pair_id\":{},\"name\":\"{}\"}}",
-            pair_id, name
-        )),
+        &format!("Drive pair updated: {name} (#{pair_id})"),
+        Some(&format!("{{\"pair_id\":{pair_id},\"name\":\"{name}\"}}")),
     )
 }
 
@@ -298,11 +278,8 @@ pub fn log_drive_deleted(repo: &Repository, pair_id: i64, name: &str) -> anyhow:
         repo,
         "drive_deleted",
         None,
-        &format!("Drive pair deleted: {} (#{})", name, pair_id),
-        Some(&format!(
-            "{{\"pair_id\":{},\"name\":\"{}\"}}",
-            pair_id, name
-        )),
+        &format!("Drive pair deleted: {name} (#{pair_id})"),
+        Some(&format!("{{\"pair_id\":{pair_id},\"name\":\"{name}\"}}")),
     )
 }
 
@@ -319,12 +296,10 @@ pub fn log_drive_failover(
         "drive_failover",
         None,
         &format!(
-            "Emergency failover for drive pair #{}: {} unavailable, active role now {}",
-            pair_id, failed_role, new_active_role
+            "Emergency failover for drive pair #{pair_id}: {failed_role} unavailable, active role now {new_active_role}"
         ),
         Some(&format!(
-            "{{\"pair_id\":{},\"failed_role\":\"{}\",\"new_active_role\":\"{}\",\"failed_path\":\"{}\"}}",
-            pair_id, failed_role, new_active_role, failed_path
+            "{{\"pair_id\":{pair_id},\"failed_role\":\"{failed_role}\",\"new_active_role\":\"{new_active_role}\",\"failed_path\":\"{failed_path}\"}}"
         )),
     )
 }
@@ -335,14 +310,8 @@ pub fn log_drive_quiescing(repo: &Repository, pair_id: i64, role: &str) -> anyho
         repo,
         "drive_quiescing",
         None,
-        &format!(
-            "Drive pair #{} entered quiescing state for {} replacement",
-            pair_id, role
-        ),
-        Some(&format!(
-            "{{\"pair_id\":{},\"role\":\"{}\"}}",
-            pair_id, role
-        )),
+        &format!("Drive pair #{pair_id} entered quiescing state for {role} replacement"),
+        Some(&format!("{{\"pair_id\":{pair_id},\"role\":\"{role}\"}}")),
     )
 }
 
@@ -356,14 +325,8 @@ pub fn log_drive_quiesce_cancelled(
         repo,
         "drive_quiesce_cancelled",
         None,
-        &format!(
-            "Drive pair #{} cancelled {} replacement quiesce",
-            pair_id, role
-        ),
-        Some(&format!(
-            "{{\"pair_id\":{},\"role\":\"{}\"}}",
-            pair_id, role
-        )),
+        &format!("Drive pair #{pair_id} cancelled {role} replacement quiesce"),
+        Some(&format!("{{\"pair_id\":{pair_id},\"role\":\"{role}\"}}")),
     )
 }
 
@@ -380,12 +343,10 @@ pub fn log_drive_failure_confirmed(
         "drive_failure_confirmed",
         None,
         &format!(
-            "Drive pair #{} confirmed {} failure; active role now {}",
-            pair_id, role, new_active_role
+            "Drive pair #{pair_id} confirmed {role} failure; active role now {new_active_role}"
         ),
         Some(&format!(
-            "{{\"pair_id\":{},\"role\":\"{}\",\"new_active_role\":\"{}\",\"failed_path\":\"{}\"}}",
-            pair_id, role, new_active_role, failed_path
+            "{{\"pair_id\":{pair_id},\"role\":\"{role}\",\"new_active_role\":\"{new_active_role}\",\"failed_path\":\"{failed_path}\"}}"
         )),
     )
 }
@@ -403,12 +364,10 @@ pub fn log_drive_replacement_assigned(
         "drive_replacement_assigned",
         None,
         &format!(
-            "Drive pair #{} assigned replacement {} path, queued {} rebuild item(s)",
-            pair_id, role, queued_items
+            "Drive pair #{pair_id} assigned replacement {role} path, queued {queued_items} rebuild item(s)"
         ),
         Some(&format!(
-            "{{\"pair_id\":{},\"role\":\"{}\",\"new_path\":\"{}\",\"queued_items\":{}}}",
-            pair_id, role, new_path, queued_items
+            "{{\"pair_id\":{pair_id},\"role\":\"{role}\",\"new_path\":\"{new_path}\",\"queued_items\":{queued_items}}}"
         )),
     )
 }
@@ -424,13 +383,9 @@ pub fn log_drive_rebuild_completed(
         repo,
         "drive_rebuild_completed",
         None,
-        &format!(
-            "Drive pair #{} finished rebuilding {}; active role is {}",
-            pair_id, role, active_role
-        ),
+        &format!("Drive pair #{pair_id} finished rebuilding {role}; active role is {active_role}"),
         Some(&format!(
-            "{{\"pair_id\":{},\"role\":\"{}\",\"active_role\":\"{}\"}}",
-            pair_id, role, active_role
+            "{{\"pair_id\":{pair_id},\"role\":\"{role}\",\"active_role\":\"{active_role}\"}}"
         )),
     )
 }
@@ -522,7 +477,7 @@ mod tests {
             "file_created",
         ];
         for (i, et) in expected.iter().enumerate() {
-            assert_eq!(types[i], *et, "Event type mismatch at index {}", i);
+            assert_eq!(types[i], *et, "Event type mismatch at index {i}");
         }
     }
 

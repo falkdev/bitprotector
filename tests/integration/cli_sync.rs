@@ -8,7 +8,7 @@ use tempfile::TempDir;
 fn make_repo() -> Repository {
     let pool = create_memory_pool().unwrap();
     let conn = pool.get().unwrap();
-    initialize_schema(&*conn).unwrap();
+    initialize_schema(&conn).unwrap();
     drop(conn);
     Repository::new(pool)
 }
@@ -264,8 +264,7 @@ fn test_resolve_provide_new_missing_path_returns_error() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("does not exist"),
-        "Error should mention missing path, got: {}",
-        msg
+        "Error should mention missing path, got: {msg}"
     );
 }
 
@@ -285,8 +284,7 @@ fn test_resolve_invalid_resolution_returns_error() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("Unknown resolution"),
-        "Error should name the bad resolution, got: {}",
-        msg
+        "Error should name the bad resolution, got: {msg}"
     );
 }
 
@@ -308,8 +306,7 @@ fn test_resolve_non_user_action_required_item_returns_error() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("user_action_required"),
-        "Error should mention the required action type, got: {}",
-        msg
+        "Error should mention the required action type, got: {msg}"
     );
 }
 

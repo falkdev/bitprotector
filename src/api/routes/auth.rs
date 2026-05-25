@@ -127,7 +127,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/auth/validate")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
@@ -167,7 +167,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri("/auth/logout")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
@@ -189,7 +189,7 @@ mod tests {
         // Logout first
         let logout_req = test::TestRequest::post()
             .uri("/auth/logout")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let logout_resp = test::call_service(&app, logout_req).await;
         assert_eq!(logout_resp.status(), 200);
@@ -197,7 +197,7 @@ mod tests {
         // Validate with same token should now fail
         let validate_req = test::TestRequest::get()
             .uri("/auth/validate")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let validate_resp = test::call_service(&app, validate_req).await;
         assert_eq!(validate_resp.status(), 401);

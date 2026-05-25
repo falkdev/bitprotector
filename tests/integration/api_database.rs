@@ -56,7 +56,7 @@ async fn test_database_create_and_get_backup() {
     assert!(body.get("max_copies").is_none());
 
     let req = test::TestRequest::get()
-        .uri(&format!("/api/v1/database/backups/{}", id))
+        .uri(&format!("/api/v1/database/backups/{id}"))
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;

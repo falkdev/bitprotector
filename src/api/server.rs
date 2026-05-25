@@ -311,7 +311,7 @@ fn load_tls_config(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::Se
 
     let tls_certs: Vec<_> = certs(cert_file).collect::<Result<_, _>>()?;
     let tls_key = private_key(key_file)?
-        .ok_or_else(|| anyhow::anyhow!("No private key found in {}", key_path))?;
+        .ok_or_else(|| anyhow::anyhow!("No private key found in {key_path}"))?;
 
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -395,7 +395,7 @@ pub async fn run_server(
             .configure(|cfg| configure_application(cfg, Some(frontend_dir.clone())))
     });
 
-    let bind_addr = format!("{}:{}", host, port);
+    let bind_addr = format!("{host}:{port}");
 
     #[cfg(not(test))]
     if let (Some(cert), Some(key)) = (tls_cert, tls_key) {
@@ -552,7 +552,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri("/api/v1/auth/validate")
-            .insert_header(("Authorization", format!("Bearer {}", token)))
+            .insert_header(("Authorization", format!("Bearer {token}")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);

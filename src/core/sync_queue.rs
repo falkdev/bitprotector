@@ -54,7 +54,7 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
                 anyhow::bail!("Integrity check failed")
             }
         }
-        action => anyhow::bail!("Unknown action: {}", action),
+        action => anyhow::bail!("Unknown action: {action}"),
     };
 
     match result {
@@ -192,13 +192,13 @@ pub fn resolve_queue_item(
 
             // Pre-validate: exists, readable, regular file
             if !src_path.exists() {
-                anyhow::bail!("provided path does not exist: {}", src);
+                anyhow::bail!("provided path does not exist: {src}");
             }
             if !src_path.is_file() {
-                anyhow::bail!("provided path is not a regular file: {}", src);
+                anyhow::bail!("provided path is not a regular file: {src}");
             }
             std::fs::metadata(src_path)
-                .map_err(|e| anyhow::anyhow!("provided path is not readable ({}): {}", src, e))?;
+                .map_err(|e| anyhow::anyhow!("provided path is not readable ({src}): {e}"))?;
 
             // Ensure parent directories exist on both sides
             if let Some(parent) = master_path.parent() {
@@ -211,8 +211,7 @@ pub fn resolve_queue_item(
             std::fs::copy(src_path, &mirror_path)?;
         }
         other => anyhow::bail!(
-            "Unknown resolution '{}'; expected keep_master, keep_mirror, or provide_new",
-            other
+            "Unknown resolution '{other}'; expected keep_master, keep_mirror, or provide_new"
         ),
     }
 
@@ -248,7 +247,7 @@ pub fn create_from_integrity_failure(
 /// Create a sync queue item to re-mirror a changed file.
 pub fn create_from_change(repo: &Repository, file_id: i64) -> anyhow::Result<SyncQueueItem> {
     repo.create_sync_queue_item_dedup(file_id, "mirror")?
-        .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{}", file_id))
+        .ok_or_else(|| anyhow::anyhow!("mirror action already pending for file #{file_id}"))
 }
 
 /// Create a sync queue item for a newly tracked file.
@@ -260,8 +259,7 @@ pub fn create_for_new_tracking(repo: &Repository, file_id: i64) -> anyhow::Resul
         Ok(item)
     } else {
         Err(anyhow::anyhow!(
-            "adopt_mirror action already pending for file #{}",
-            file_id
+            "adopt_mirror action already pending for file #{file_id}"
         ))
     }
 }
@@ -391,8 +389,7 @@ mod tests {
             let updated = repo.get_sync_queue_item(item.id).unwrap();
             assert_eq!(
                 updated.status, "completed",
-                "Action {} should complete",
-                action
+                "Action {action} should complete"
             );
         }
     }
@@ -617,7 +614,7 @@ mod tests {
 
         // Enqueue many items
         for i in 0..20 {
-            let fname = format!("dl{}.txt", i);
+            let fname = format!("dl{i}.txt");
             fs::write(primary.path().join(&fname), content).unwrap();
             let f = repo
                 .create_tracked_file(pair.id, &fname, &hash, content.len() as i64, None)

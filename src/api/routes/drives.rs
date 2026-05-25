@@ -45,7 +45,7 @@ fn parse_role(role: &str) -> anyhow::Result<DriveRole> {
     match role {
         "primary" => Ok(DriveRole::Primary),
         "secondary" => Ok(DriveRole::Secondary),
-        other => anyhow::bail!("Unknown drive role '{}'", other),
+        other => anyhow::bail!("Unknown drive role '{other}'"),
     }
 }
 
@@ -112,7 +112,7 @@ pub async fn get_drive_pair(repo: web::Data<Repository>, path: web::Path<i64>) -
         Ok(pair) => HttpResponse::Ok().json(pair),
         Err(_) => HttpResponse::NotFound().json(ApiError::new(
             "RESOURCE_NOT_FOUND",
-            &format!("Drive pair {} not found", id),
+            &format!("Drive pair {id} not found"),
         )),
     }
 }
@@ -260,7 +260,7 @@ pub async fn assign_replacement(
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Drive pair {} not found", id),
+                &format!("Drive pair {id} not found"),
             ))
         }
     };
@@ -304,7 +304,7 @@ pub async fn emergency_failover(
         Err(_) => {
             return HttpResponse::NotFound().json(ApiError::new(
                 "RESOURCE_NOT_FOUND",
-                &format!("Drive pair {} not found", id),
+                &format!("Drive pair {id} not found"),
             ))
         }
     };

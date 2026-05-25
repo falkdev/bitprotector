@@ -170,7 +170,7 @@ fn test_integrity_check_all_clean() {
         .success();
 
     for name in &["x.txt", "y.txt"] {
-        let content = format!("content of {}", name);
+        let content = format!("content of {name}");
         fs::write(primary.path().join(name), content.as_bytes()).unwrap();
         fs::write(secondary.path().join(name), content.as_bytes()).unwrap();
         cmd(db.path().to_str().unwrap())

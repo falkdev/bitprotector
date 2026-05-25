@@ -453,7 +453,7 @@ mod tests {
                 pair_id,
                 &primary,
                 &secondary,
-                &format!("dl{}.txt", i),
+                &format!("dl{i}.txt"),
                 true,
             );
         }

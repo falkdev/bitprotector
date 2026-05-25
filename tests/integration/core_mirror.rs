@@ -64,8 +64,7 @@ fn test_restore_mirror_from_master_primary_file_missing() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("does not exist") || msg.contains("not exist"),
-        "Error should mention missing file, got: {}",
-        msg
+        "Error should mention missing file, got: {msg}"
     );
 }
 
@@ -87,8 +86,7 @@ fn test_restore_mirror_from_master_checksum_mismatch() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("checksum mismatch"),
-        "Error should mention checksum mismatch, got: {}",
-        msg
+        "Error should mention checksum mismatch, got: {msg}"
     );
 }
 
@@ -194,8 +192,7 @@ fn test_restore_from_mirror_checksum_mismatch() {
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("checksum mismatch"),
-        "Error should mention checksum mismatch, got: {}",
-        msg
+        "Error should mention checksum mismatch, got: {msg}"
     );
 }
 

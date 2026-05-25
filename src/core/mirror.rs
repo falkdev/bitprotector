@@ -11,16 +11,16 @@ pub fn validate_drive_pair(primary: &str, secondary: &str) -> anyhow::Result<()>
     let secondary_path = Path::new(secondary);
 
     if !primary_path.exists() {
-        anyhow::bail!("Primary path does not exist: {}", primary);
+        anyhow::bail!("Primary path does not exist: {primary}");
     }
     if !primary_path.is_dir() {
-        anyhow::bail!("Primary path is not a directory: {}", primary);
+        anyhow::bail!("Primary path is not a directory: {primary}");
     }
     if !secondary_path.exists() {
-        anyhow::bail!("Secondary path does not exist: {}", secondary);
+        anyhow::bail!("Secondary path does not exist: {secondary}");
     }
     if !secondary_path.is_dir() {
-        anyhow::bail!("Secondary path is not a directory: {}", secondary);
+        anyhow::bail!("Secondary path is not a directory: {secondary}");
     }
 
     let primary_canon = primary_path
@@ -77,11 +77,7 @@ pub fn mirror_file(drive_pair: &DrivePair, relative_path: &str) -> anyhow::Resul
         checksum::copy_with_checksum(&src, &dst).context("Failed to copy file to mirror")?;
 
     if src_checksum != dst_checksum {
-        anyhow::bail!(
-            "Mirror verification failed: src={} dst={}",
-            src_checksum,
-            dst_checksum
-        );
+        anyhow::bail!("Mirror verification failed: src={src_checksum} dst={dst_checksum}");
     }
 
     Ok(src_checksum)
@@ -114,11 +110,7 @@ pub fn restore_from_mirror(
 
     // Copy and verify checksum in a single streaming pass to halve source reads.
     checksum::copy_and_verify_checksum(&src, &dst, expected_checksum).map_err(|e| {
-        anyhow::anyhow!(
-            "Mirror file checksum mismatch: stored={} ({})",
-            expected_checksum,
-            e
-        )
+        anyhow::anyhow!("Mirror file checksum mismatch: stored={expected_checksum} ({e})")
     })?;
     Ok(())
 }
@@ -150,11 +142,7 @@ pub fn restore_mirror_from_master(
 
     // Copy and verify checksum in a single streaming pass to halve source reads.
     checksum::copy_and_verify_checksum(&src, &dst, expected_checksum).map_err(|e| {
-        anyhow::anyhow!(
-            "Master file checksum mismatch: stored={} ({})",
-            expected_checksum,
-            e
-        )
+        anyhow::anyhow!("Master file checksum mismatch: stored={expected_checksum} ({e})")
     })?;
     Ok(())
 }

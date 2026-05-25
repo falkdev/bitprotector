@@ -87,7 +87,7 @@ pub fn verify_sqlite_database(path: &Path) -> anyhow::Result<()> {
     for row in rows {
         let value = row?;
         if value != "ok" {
-            bail!("SQLite integrity check failed: {}", value);
+            bail!("SQLite integrity check failed: {value}");
         }
     }
     Ok(())
@@ -443,7 +443,7 @@ pub fn run_backup_integrity_check(repo: &Repository) -> anyhow::Result<Vec<Backu
 }
 
 pub fn pending_restore_path(db_path: &str) -> PathBuf {
-    PathBuf::from(format!("{}.restore-pending", db_path))
+    PathBuf::from(format!("{db_path}.restore-pending"))
 }
 
 fn safety_backup_path(db_path: &str) -> PathBuf {

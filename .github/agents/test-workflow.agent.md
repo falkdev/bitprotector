@@ -188,7 +188,9 @@ State which commands you chose and why before running them.
 
 When one or more tests fail, produce a structured fix proposal in this exact format so the user can copy it directly to the Code Fixer agent:
 
-````
+~~~
+<!-- FIX HANDOFF — copy everything between the triple-backtick fences into the Code Fixer agent -->
+```
 ---HANDOFF TO CODE FIXER AGENT---
 
 **Change type:** <formatting-only | logic-fix | api-shape | schema | cli | frontend | mixed-backend-frontend>
@@ -209,7 +211,8 @@ When one or more tests fail, produce a structured fix proposal in this exact for
 After applying the fix, re-run:
 <exact commands to confirm the fix>
 ---END HANDOFF---
-````
+```
+~~~
 
 Include this block at the end of your response whenever any test fails.
 

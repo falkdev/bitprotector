@@ -149,7 +149,7 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
                 .map(|dp| format!("{}/{}", dp.primary_path, file.relative_path))
                 .unwrap_or_else(|_| file.relative_path.clone());
             let _ = event_logger::log_file_untracked(repo, id, &full_path);
-            println!("Untracked file #{}", id);
+            println!("Untracked file #{id}");
         }
     }
     Ok(())
@@ -291,7 +291,7 @@ mod tests {
 
         // Verify mirror is byte-identical
         let mirror_checksum = checksum::checksum_file(
-            &std::path::PathBuf::from(&pair.secondary_path).join("rt.txt"),
+            std::path::PathBuf::from(&pair.secondary_path).join("rt.txt"),
             checksum::ChecksumStrategy::Streaming,
         )
         .unwrap();

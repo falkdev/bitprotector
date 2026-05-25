@@ -144,7 +144,7 @@ async fn run_task(
     let task = match task_name.as_str() {
         "sync" => scheduler::TaskType::Sync,
         "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
-        other => return HttpResponse::BadRequest().body(format!("Unknown task: {}", other)),
+        other => return HttpResponse::BadRequest().body(format!("Unknown task: {other}")),
     };
     match scheduler::run_task(&task, &repo, None, &checksum_cfg) {
         Ok(count) => HttpResponse::Ok().json(TaskResult {

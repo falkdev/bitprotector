@@ -7,6 +7,7 @@ runs:
     - name: Install system build dependencies
       shell: bash
       run: |
+        sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google.list
         sudo apt-get update -q
         sudo apt-get install -y -q libpam0g-dev libclang-dev llvm
 
