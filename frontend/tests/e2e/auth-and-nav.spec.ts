@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures'
-import { loginThroughUi, openSidebarRoute } from './support/ui'
+import { loginThroughUi, openSidebarRoute, createDrivePair } from './support/ui'
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
@@ -13,6 +13,12 @@ test('logs in through the live backend, visits protected pages, and logs out', a
   await openSidebarRoute(page, 'drives')
   await expect(page.getByTestId('page-title')).toHaveText('Drives')
   await expect(page.getByTestId('add-drive-button')).toBeVisible()
+
+  await createDrivePair(page, {
+    name: 'e2e-nav-drive',
+    primaryPath: '/tmp/e2e-primary',
+    secondaryPath: '/tmp/e2e-secondary',
+  })
 
   await openSidebarRoute(page, 'sync')
   await expect(page.getByTestId('page-title')).toHaveText('Sync Queue')
