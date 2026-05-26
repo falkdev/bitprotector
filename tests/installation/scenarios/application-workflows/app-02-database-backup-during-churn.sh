@@ -79,8 +79,7 @@ CHECK
       and ([ $rows[] | .last_error == null ] | all)
     ' >/dev/null
 
-    ssh_vm "
-set -euo pipefail
+    poll_until "app-02 no stale tmp files in backup dirs" 15 "
 TMP_COUNT=\$(find '${backup_a}' '${backup_b}' -maxdepth 1 -name '*.tmp' | wc -l)
 [[ \"\${TMP_COUNT}\" -eq 0 ]]
 "
