@@ -235,7 +235,7 @@ jobs:
           fetch-depth: 0  # needed for git describe to find the last tag
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Cache Cargo registry
         uses: actions/cache@v5
@@ -247,7 +247,7 @@ jobs:
           restore-keys: cargo-registry-
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile.deb-builder
