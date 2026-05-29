@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -122,9 +122,9 @@ describe('AppLayout', () => {
 
       // Wait for fetch to complete, then assert banner is absent
       await screen.findByText('Dashboard content')
-      // Give the async fetch time to resolve
-      await new Promise((r) => setTimeout(r, 0))
-      expect(screen.queryByText(/Add a drive pair/i)).not.toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.queryByText(/Add a drive pair/i)).not.toBeInTheDocument()
+      })
     })
 
     it('hides the banner when the dismiss button is clicked', async () => {
@@ -188,13 +188,13 @@ describe('AppLayout', () => {
 
       // Wait for the fetch to resolve — banner should not appear
       await screen.findByText('Dashboard content')
-      await new Promise((r) => setTimeout(r, 0))
-
-      for (const route of disabledRoutes) {
-        const item = screen.getByTestId(`nav-${route}`)
-        expect(item.tagName).toBe('A')
-        expect(item).not.toHaveAttribute('aria-disabled')
-      }
+      await waitFor(() => {
+        for (const route of disabledRoutes) {
+          const item = screen.getByTestId(`nav-${route}`)
+          expect(item.tagName).toBe('A')
+          expect(item).not.toHaveAttribute('aria-disabled')
+        }
+      })
     })
   })
 })

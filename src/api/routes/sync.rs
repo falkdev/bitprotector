@@ -49,7 +49,10 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
     let page = query.page.unwrap_or(1);
     let per_page = query.per_page.unwrap_or(50);
     let queue_paused = repo.get_sync_queue_paused().unwrap_or(false);
-    let active_items = repo.count_active_sync_queue().unwrap_or(0);
+    let active_items = match repo.count_active_sync_queue() {
+        Ok(count) => count,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
     match repo.list_sync_queue(query.status.as_deref(), page, per_page) {
         Ok((items, total)) => HttpResponse::Ok().json(serde_json::json!({
             "queue": items,

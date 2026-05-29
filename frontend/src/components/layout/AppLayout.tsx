@@ -11,13 +11,14 @@ export function AppLayout() {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
-  const { drives, initialized, fetch: fetchDrives } = useDrivesStore()
+  const { drives, initialized, error: drivesError, fetch: fetchDrives } = useDrivesStore()
   const [bannerDismissed, setBannerDismissed] = useState(false)
   useEffect(() => {
     void fetchDrives()
   }, [fetchDrives])
 
-  const showNoDrivesBanner = initialized && drives.length === 0 && !bannerDismissed
+  const showNoDrivesBanner =
+    initialized && drives.length === 0 && !bannerDismissed && drivesError === null
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

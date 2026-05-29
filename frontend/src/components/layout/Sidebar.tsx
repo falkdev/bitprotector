@@ -47,9 +47,9 @@ export function Sidebar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
   const { theme, toggle } = useTheme()
-  const { drives, initialized: drivesInitialized } = useDrivesStore()
+  const { drives, initialized: drivesInitialized, error: drivesError } = useDrivesStore()
 
-  const schedulerDisabled = drivesInitialized && drives.length === 0
+  const schedulerDisabled = drivesInitialized && drives.length === 0 && drivesError === null
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0')
