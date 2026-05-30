@@ -93,6 +93,33 @@ pub fn verify_sqlite_database(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
+    let candidate = Path::new(db_path);
+    if db_path.trim().is_empty() {
+        bail!("Live database path is empty");
+    }
+
+    let canonical = candidate
+        .canonicalize()
+        .with_context(|| format!("Failed to resolve live database path {}", candidate.display()))?;
+    let cwd = std::env::current_dir().context("Failed to resolve current working directory")?;
+    let cwd = cwd
+        .canonicalize()
+        .context("Failed to canonicalize current working directory")?;
+
+    if !canonical.starts_with(&cwd) {
+        bail!(
+            "Live database path is outside the allowed directory: {}",
+            canonical.display()
+        );
+    }
+    if !canonical.is_file() {
+        bail!("Live database does not exist: {}", canonical.display());
+    }
+
+    Ok(canonical)
+}
+
 fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = snapshot_path.parent() {
         fs::create_dir_all(parent).context("Failed to create snapshot directory")?;
@@ -101,16 +128,13 @@ fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result
         fs::remove_file(snapshot_path).context("Failed to remove old snapshot file")?;
     }
 
-    let db_path = Path::new(db_path);
-    if !db_path.is_file() {
-        bail!("Live database does not exist: {}", db_path.display());
-    }
+    let db_path = validate_live_db_path(db_path)?;
 
     // Open read-write so we can issue a WAL checkpoint before snapshotting.
     // The checkpoint flushes WAL pages into the main file, making the WAL
     // smaller when the backup reader opens and reducing SQLITE_BUSY_SNAPSHOT
     // risk for concurrent writers during the backup.
-    let source = Connection::open(db_path)
+    let source = Connection::open(&db_path)
         .with_context(|| format!("Failed to open live database {}", db_path.display()))?;
     source
         .busy_timeout(std::time::Duration::from_secs(30))
