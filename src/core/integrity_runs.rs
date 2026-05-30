@@ -81,12 +81,14 @@ fn check_should_stop(
 ) -> anyhow::Result<bool> {
     let current = repo.get_integrity_run(run_id)?;
     if current.stop_requested {
+        repo.set_integrity_run_active_workers(run_id, 0)?;
         repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
         return Ok(true);
     }
 
     if let Some(dl) = deadline {
         if std::time::Instant::now() >= dl {
+            repo.set_integrity_run_active_workers(run_id, 0)?;
             repo.finish_integrity_run(run_id, RUN_STATUS_STOPPED, None)?;
             return Ok(true);
         }
