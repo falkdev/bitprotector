@@ -157,6 +157,7 @@ function ResolveDialog({
 export function SyncQueuePage() {
   const items = useSyncStore((state) => state.items)
   const queuePaused = useSyncStore((state) => state.queuePaused)
+  const activeItems = useSyncStore((state) => state.activeItems)
   const loading = useSyncStore((state) => state.loading)
   const filter = useSyncStore((state) => state.filter)
   const fetch = useSyncStore((state) => state.fetch)
@@ -272,7 +273,7 @@ export function SyncQueuePage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => void togglePause()}
-              disabled={togglingPause}
+              disabled={togglingPause || (!queuePaused && activeItems === 0)}
               data-testid="toggle-pause-button"
               className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
             >

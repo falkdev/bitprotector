@@ -6,7 +6,7 @@ import { api } from '@/test/msw/http'
 import { useDrivesStore } from './drives-store'
 
 function resetStore() {
-  useDrivesStore.setState({ drives: [], loading: false, error: null })
+  useDrivesStore.setState({ drives: [], loading: false, initialized: false, error: null })
 }
 
 describe('drives-store', () => {
@@ -23,6 +23,26 @@ describe('drives-store', () => {
     expect(useDrivesStore.getState().drives).toEqual([drive])
     expect(useDrivesStore.getState().loading).toBe(false)
     expect(useDrivesStore.getState().error).toBeNull()
+  })
+
+  it('fetch sets initialized to true on success', async () => {
+    server.use(api.get('/drives', () => HttpResponse.json([])))
+
+    expect(useDrivesStore.getState().initialized).toBe(false)
+    await useDrivesStore.getState().fetch()
+
+    expect(useDrivesStore.getState().initialized).toBe(true)
+  })
+
+  it('fetch sets initialized to true on failure', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json({ error: 'server error' }, { status: 500 }))
+    )
+
+    expect(useDrivesStore.getState().initialized).toBe(false)
+    await useDrivesStore.getState().fetch()
+
+    expect(useDrivesStore.getState().initialized).toBe(true)
   })
 
   it('fetch sets error on failure', async () => {

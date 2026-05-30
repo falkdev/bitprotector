@@ -98,8 +98,27 @@ vi.mock('react-arborist', async () => {
       () => ({
         open,
         isOpen: (id: string) => openPaths.has(id),
+        // Simulates real react-arborist: select() re-fires onSelect.
+        // This allows tests to detect infinite recursion if onSelect calls select().
+        select: (id: string) => {
+          function find(
+            nodes: Array<{ path: string; children?: unknown[] }>
+          ): { name: string; path: string; kind: 'directory' | 'file' } | null {
+            for (const n of nodes) {
+              if (n.path === id)
+                return n as { name: string; path: string; kind: 'directory' | 'file' }
+              if (n.children) {
+                const found = find(n.children as Array<{ path: string; children?: unknown[] }>)
+                if (found) return found
+              }
+            }
+            return null
+          }
+          const node = find(data)
+          if (node) onSelect?.([{ data: node }])
+        },
       }),
-      [open, openPaths]
+      [open, openPaths, data, onSelect]
     )
 
     const renderNodes = (
@@ -284,6 +303,39 @@ describe('PathPickerDialog', () => {
 
     expect(await screen.findByText('Select a file, not a folder')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Use Path' })).toBeDisabled()
+  })
+
+  it('clicking a node does not cause infinite recursion and updates the selected path', async () => {
+    childrenMock.mockResolvedValue({
+      path: '/',
+      canonical_path: '/',
+      parent_path: null,
+      entries: [makeEntry('/home', 'directory')],
+    })
+
+    const user = userEvent.setup()
+    render(
+      <PathPickerDialog
+        open
+        title="Pick a path"
+        mode="directory"
+        value=""
+        onClose={() => {}}
+        onPick={() => {}}
+      />
+    )
+
+    await screen.findByText('home')
+
+    // In real react-arborist, select() re-fires onSelect. If onSelect calls
+    // select() in turn, this produces infinite recursion → stack overflow.
+    // The mock exposes select() to simulate that behaviour.
+    await user.click(screen.getByTestId('path-picker-node-/home'))
+
+    // Path input must reflect the clicked node — confirms onSelect ran exactly once.
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: /selected path/i })).toHaveValue('/home')
+    )
   })
 
   it('shows a helpful message when the filesystem endpoint is unavailable', async () => {

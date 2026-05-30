@@ -2015,6 +2015,17 @@ impl Repository {
 
     // ─── Sync Settings ────────────────────────────────────────────────────────────
 
+    /// Returns the number of sync queue items that are actively pending or in progress.
+    pub fn count_active_sync_queue(&self) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE status IN ('pending', 'in_progress')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// Returns `true` when the sync queue processing is globally paused.
     pub fn get_sync_queue_paused(&self) -> anyhow::Result<bool> {
         let conn = self.conn()?;

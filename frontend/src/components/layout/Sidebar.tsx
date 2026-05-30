@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { useTheme } from '@/lib/use-theme'
+import { useDrivesStore } from '@/stores/drives-store'
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'bitprotector.sidebar.collapsed'
 
@@ -46,6 +47,9 @@ export function Sidebar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
   const { theme, toggle } = useTheme()
+  const { drives, initialized: drivesInitialized, error: drivesError } = useDrivesStore()
+
+  const schedulerDisabled = drivesInitialized && drives.length === 0 && drivesError === null
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0')
@@ -98,29 +102,50 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3">
         <ul className={cn('space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
-          {navItems.map(({ to, label, icon: Icon }) => (
-            <li key={to}>
-              <NavLink
-                to={to}
-                data-testid={`nav-${to.slice(1)}`}
-                aria-label={label}
-                title={collapsed ? label : undefined}
-                onClick={() => setUserMenuOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    'flex overflow-hidden whitespace-nowrap rounded-md py-2 text-sm transition-colors',
-                    collapsed ? 'justify-center px-2' : 'items-center gap-2.5 px-3',
-                    isActive
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                  )
-                }
-              >
-                <Icon className="h-5 w-5 flex-shrink-0" />
-                {!collapsed ? <span className="truncate">{label}</span> : null}
-              </NavLink>
-            </li>
-          ))}
+          {navItems.map(({ to, label, icon: Icon }) => {
+            const isDisabled =
+              ['/scheduler', '/sync', '/integrity', '/files'].includes(to) && schedulerDisabled
+            return (
+              <li key={to}>
+                {isDisabled ? (
+                  <span
+                    data-testid={`nav-${to.slice(1)}`}
+                    aria-label={label}
+                    aria-disabled="true"
+                    title={collapsed ? label : undefined}
+                    className={cn(
+                      'flex overflow-hidden whitespace-nowrap rounded-md py-2 text-sm cursor-not-allowed opacity-60',
+                      collapsed ? 'justify-center px-2' : 'items-center gap-2.5 px-3',
+                      'text-muted-foreground'
+                    )}
+                  >
+                    <Icon className="h-5 w-5 flex-shrink-0" />
+                    {!collapsed ? <span className="truncate">{label}</span> : null}
+                  </span>
+                ) : (
+                  <NavLink
+                    to={to}
+                    data-testid={`nav-${to.slice(1)}`}
+                    aria-label={label}
+                    title={collapsed ? label : undefined}
+                    onClick={() => setUserMenuOpen(false)}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex overflow-hidden whitespace-nowrap rounded-md py-2 text-sm transition-colors',
+                        collapsed ? 'justify-center px-2' : 'items-center gap-2.5 px-3',
+                        isActive
+                          ? 'bg-primary/10 text-primary font-medium'
+                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      )
+                    }
+                  >
+                    <Icon className="h-5 w-5 flex-shrink-0" />
+                    {!collapsed ? <span className="truncate">{label}</span> : null}
+                  </NavLink>
+                )}
+              </li>
+            )
+          })}
         </ul>
       </nav>
 

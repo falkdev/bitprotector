@@ -41,6 +41,7 @@ function resetStores() {
   useDrivesStore.setState({
     drives: [],
     loading: false,
+    initialized: false,
     error: null,
   })
   useLogsStore.setState({

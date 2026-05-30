@@ -1,9 +1,9 @@
 import { test, expect } from './support/fixtures'
-import { loginThroughUi, openSidebarRoute } from './support/ui'
+import { loginThroughUi, openSidebarRoute, createDrivePair } from './support/ui'
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
-test('logs in through the live backend, visits protected pages, and logs out', async ({ page }) => {
+test('logs in through the live backend, visits protected pages, and logs out', async ({ page, qemu }) => {
   await loginThroughUi(page)
   await expect(page).toHaveURL(/\/dashboard$/)
   await expect(page.getByTestId('page-title')).toHaveText('Dashboard')
@@ -13,6 +13,13 @@ test('logs in through the live backend, visits protected pages, and logs out', a
   await openSidebarRoute(page, 'drives')
   await expect(page.getByTestId('page-title')).toHaveText('Drives')
   await expect(page.getByTestId('add-drive-button')).toBeVisible()
+
+  const navFixture = await qemu.seedDriveFixture()
+  await createDrivePair(page, {
+    name: navFixture.driveName,
+    primaryPath: navFixture.primaryPath,
+    secondaryPath: navFixture.secondaryPath,
+  })
 
   await openSidebarRoute(page, 'sync')
   await expect(page.getByTestId('page-title')).toHaveText('Sync Queue')

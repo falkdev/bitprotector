@@ -15,6 +15,7 @@ const queueResponse = (items: ReturnType<typeof makeSyncQueueItem>[], paused = f
     page: 1,
     per_page: 50,
     queue_paused: paused,
+    active_items: items.filter((i) => i.status === 'pending' || i.status === 'in_progress').length,
   })
 
 describe('SyncQueuePage', () => {
@@ -318,6 +319,45 @@ describe('SyncQueuePage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Process Queue' }))
     expect(await screen.findByText('Processed 3 queue item(s)')).toBeInTheDocument()
+  })
+
+  it('disables pause button when queue is not paused and no active items exist', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 80, status: 'completed' })], false)
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const pauseButton = await screen.findByRole('button', { name: 'Pause Queue' })
+    expect(pauseButton).toBeDisabled()
+  })
+
+  it('enables pause button when queue is not paused and there are pending items', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 81, status: 'pending' })], false)
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const pauseButton = await screen.findByRole('button', { name: 'Pause Queue' })
+    expect(pauseButton).toBeEnabled()
+  })
+
+  it('enables resume button even when no active items exist', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 82, status: 'completed' })], true)
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const resumeButton = await screen.findByRole('button', { name: 'Resume Queue' })
+    expect(resumeButton).toBeEnabled()
   })
 
   it('shows error toast when toggling pause state fails', async () => {

@@ -5,6 +5,7 @@ import type { DrivePair, CreateDrivePairRequest, UpdateDrivePairRequest } from '
 interface DrivesState {
   drives: DrivePair[]
   loading: boolean
+  initialized: boolean
   error: string | null
 
   fetch(): Promise<void>
@@ -17,15 +18,16 @@ interface DrivesState {
 export const useDrivesStore = create<DrivesState>((set, get) => ({
   drives: [],
   loading: false,
+  initialized: false,
   error: null,
 
   async fetch() {
     set({ loading: true, error: null })
     try {
       const drives = await drivesApi.list()
-      set({ drives, loading: false })
+      set({ drives, loading: false, initialized: true })
     } catch (err) {
-      set({ loading: false, error: String(err) })
+      set({ loading: false, error: String(err), initialized: true })
     }
   },
 
