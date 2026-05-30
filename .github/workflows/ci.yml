@@ -775,9 +775,9 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install Playwright browsers
+      - name: Install Playwright system deps
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install-deps chrome
 
       - name: Download .deb artifact
         uses: actions/download-artifact@v8

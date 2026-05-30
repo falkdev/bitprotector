@@ -24,6 +24,9 @@ export default defineConfig({
   use: {
     baseURL: PLAYWRIGHT_BASE_URL,
     trace: 'on-first-retry',
+    // In CI use the pre-installed system Chrome to avoid a browser download.
+    // Locally, Playwright's managed Chromium is used (no channel override).
+    ...(process.env.CI ? { channel: 'chrome' } : {}),
   },
   projects: [
     {
