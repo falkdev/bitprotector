@@ -5,7 +5,7 @@ use rusqlite::{Connection, DatabaseName, OpenFlags};
 use serde::Serialize;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::thread;
 
 const BACKUP_FILENAME: &str = "bitprotector.db";
@@ -454,16 +454,34 @@ fn safety_backup_path(db_path: &str) -> PathBuf {
     ))
 }
 
+fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
+    let trimmed = db_path.trim();
+    if trimmed.is_empty() {
+        bail!("Database path is required");
+    }
+
+    let path = Path::new(trimmed);
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        bail!("Database path must not contain parent directory components");
+    }
+
+    Ok(path)
+}
+
 /// Stage a verified backup for restore. The pending file is applied on service startup.
 pub fn stage_restore(db_path: &str, source_path: &str) -> anyhow::Result<RestoreResult> {
+    let db_path = validate_db_restore_target_path(db_path)?;
     let source = Path::new(source_path);
     verify_sqlite_database(source)?;
 
-    let safety_path = safety_backup_path(db_path);
+    let safety_path = safety_backup_path(&db_path.to_string_lossy());
     fs::copy(db_path, &safety_path).context("Failed to create current database safety backup")?;
     verify_sqlite_database(&safety_path)?;
 
-    let staged_path = pending_restore_path(db_path);
+    let staged_path = pending_restore_path(&db_path.to_string_lossy());
     fs::copy(source, &staged_path).context("Failed to stage database restore")?;
     verify_sqlite_database(&staged_path)?;
 
