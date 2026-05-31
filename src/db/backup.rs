@@ -455,10 +455,11 @@ fn safety_backup_path(db_path: &str) -> PathBuf {
 }
 
 fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
-    if db_path.trim().is_empty() {
+    let trimmed = db_path.trim();
+    if trimmed.is_empty() {
         bail!("Database path is required");
     }
-    if db_path != db_path.trim() {
+    if db_path != trimmed {
         bail!("Database path must not contain leading or trailing whitespace");
     }
 
@@ -475,15 +476,16 @@ fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
 
 /// Stage a verified backup for restore. The pending file is applied on service startup.
 pub fn stage_restore(db_path: &str, source_path: &str) -> anyhow::Result<RestoreResult> {
-    let db_path = validate_db_restore_target_path(db_path)?;
+    let validated_path = validate_db_restore_target_path(db_path)?;
     let source = Path::new(source_path);
     verify_sqlite_database(source)?;
 
-    let safety_path = safety_backup_path(&db_path.to_string_lossy());
-    fs::copy(db_path, &safety_path).context("Failed to create current database safety backup")?;
+    let safety_path = safety_backup_path(db_path);
+    fs::copy(validated_path, &safety_path)
+        .context("Failed to create current database safety backup")?;
     verify_sqlite_database(&safety_path)?;
 
-    let staged_path = pending_restore_path(&db_path.to_string_lossy());
+    let staged_path = pending_restore_path(db_path);
     fs::copy(source, &staged_path).context("Failed to stage database restore")?;
     verify_sqlite_database(&staged_path)?;
 
