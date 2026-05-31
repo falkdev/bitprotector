@@ -93,19 +93,30 @@ pub fn verify_sqlite_database(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validates and canonicalises the configured live-database path.
+///
+/// `db_path` is the application's **configured** database file path (set at
+/// startup from environment or defaults — it is not user-supplied input).
+/// The parent directory of that configured path is canonicalised first and
+/// used as the trusted root.  After canonicalising the full path we verify via
+/// `strip_prefix` that symlink resolution has not escaped the trusted root,
+/// defending against symlink-substitution attacks.
 fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
     let candidate = Path::new(db_path);
     if db_path.trim().is_empty() {
         bail!("Live database path is empty");
     }
 
-    let expected_parent = candidate
+    // The trusted root is the canonical form of the *configured* parent
+    // directory.  This is intentionally derived from the application config
+    // (db_path) rather than from any user input.
+    let configured_parent = candidate
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Live database path has no parent directory"))?;
-    let trusted_root = expected_parent.canonicalize().with_context(|| {
+    let trusted_root = configured_parent.canonicalize().with_context(|| {
         format!(
             "Failed to resolve live database directory: {}",
-            expected_parent.display()
+            configured_parent.display()
         )
     })?;
 
@@ -116,7 +127,9 @@ fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
         )
     })?;
 
-    canonical.strip_prefix(&trusted_root).with_context(|| {
+    // Containment check: confirm the resolved path is still inside the
+    // trusted root (the discarded relative path is not needed further).
+    let _ = canonical.strip_prefix(&trusted_root).with_context(|| {
         format!(
             "Live database path is outside the configured database directory: {}",
             canonical.display()
