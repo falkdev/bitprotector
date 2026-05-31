@@ -93,6 +93,56 @@ pub fn verify_sqlite_database(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validates and canonicalises the configured live-database path.
+///
+/// `db_path` is the application's **configured** database file path (set at
+/// startup from environment or defaults — it is not user-supplied input).
+/// The parent directory of that configured path is canonicalised first and
+/// used as the trusted root.  After canonicalising the full path we verify via
+/// `strip_prefix` that symlink resolution has not escaped the trusted root,
+/// defending against symlink-substitution attacks.
+fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
+    let candidate = Path::new(db_path);
+    if db_path.trim().is_empty() {
+        bail!("Live database path is empty");
+    }
+
+    // The trusted root is the canonical form of the *configured* parent
+    // directory.  This is intentionally derived from the application config
+    // (db_path) rather than from any user input.
+    let configured_parent = candidate
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Live database path has no parent directory"))?;
+    let trusted_root = configured_parent.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve live database directory: {}",
+            configured_parent.display()
+        )
+    })?;
+
+    let canonical = candidate.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve live database path {}",
+            candidate.display()
+        )
+    })?;
+
+    // Containment check: confirm the resolved path is still inside the
+    // trusted root (the discarded relative path is not needed further).
+    let _ = canonical.strip_prefix(&trusted_root).with_context(|| {
+        format!(
+            "Live database path is outside the configured database directory: {}",
+            canonical.display()
+        )
+    })?;
+
+    if !canonical.is_file() {
+        bail!("Live database does not exist: {}", canonical.display());
+    }
+
+    Ok(canonical)
+}
+
 fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = snapshot_path.parent() {
         fs::create_dir_all(parent).context("Failed to create snapshot directory")?;
@@ -101,16 +151,13 @@ fn create_sqlite_snapshot(db_path: &str, snapshot_path: &Path) -> anyhow::Result
         fs::remove_file(snapshot_path).context("Failed to remove old snapshot file")?;
     }
 
-    let db_path = Path::new(db_path);
-    if !db_path.is_file() {
-        bail!("Live database does not exist: {}", db_path.display());
-    }
+    let db_path = validate_live_db_path(db_path)?;
 
     // Open read-write so we can issue a WAL checkpoint before snapshotting.
     // The checkpoint flushes WAL pages into the main file, making the WAL
     // smaller when the backup reader opens and reducing SQLITE_BUSY_SNAPSHOT
     // risk for concurrent writers during the backup.
-    let source = Connection::open(db_path)
+    let source = Connection::open(&db_path)
         .with_context(|| format!("Failed to open live database {}", db_path.display()))?;
     source
         .busy_timeout(std::time::Duration::from_secs(30))
