@@ -99,20 +99,13 @@ fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
         bail!("Live database path is empty");
     }
 
-    let canonical = candidate
-        .canonicalize()
-        .with_context(|| format!("Failed to resolve live database path {}", candidate.display()))?;
-    let cwd = std::env::current_dir().context("Failed to resolve current working directory")?;
-    let cwd = cwd
-        .canonicalize()
-        .context("Failed to canonicalize current working directory")?;
+    let canonical = candidate.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve live database path {}",
+            candidate.display()
+        )
+    })?;
 
-    if !canonical.starts_with(&cwd) {
-        bail!(
-            "Live database path is outside the allowed directory: {}",
-            canonical.display()
-        );
-    }
     if !canonical.is_file() {
         bail!("Live database does not exist: {}", canonical.display());
     }
