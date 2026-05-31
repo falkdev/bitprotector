@@ -455,12 +455,14 @@ fn safety_backup_path(db_path: &str) -> PathBuf {
 }
 
 fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
-    let trimmed = db_path.trim();
-    if trimmed.is_empty() {
+    if db_path.trim().is_empty() {
         bail!("Database path is required");
     }
+    if db_path != db_path.trim() {
+        bail!("Database path must not contain leading or trailing whitespace");
+    }
 
-    let path = Path::new(trimmed);
+    let path = Path::new(db_path);
     if path
         .components()
         .any(|component| matches!(component, Component::ParentDir))
@@ -713,6 +715,36 @@ mod tests {
             corrupt.path().to_str().unwrap(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stage_restore_rejects_empty_db_path() {
+        let restore_db = make_sqlite_file();
+        let result = stage_restore("", restore_db.path().to_str().unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("required"), "expected 'required' in: {err}");
+    }
+
+    #[test]
+    fn test_stage_restore_rejects_whitespace_only_db_path() {
+        let restore_db = make_sqlite_file();
+        let result = stage_restore("   ", restore_db.path().to_str().unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("required"), "expected 'required' in: {err}");
+    }
+
+    #[test]
+    fn test_stage_restore_rejects_db_path_with_parent_dir_component() {
+        let restore_db = make_sqlite_file();
+        let result = stage_restore("../db.sqlite", restore_db.path().to_str().unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("parent directory"),
+            "expected 'parent directory' in: {err}"
+        );
     }
 
     /// When the DB is read-only every `update_db_backup_integrity_status` call fails with
