@@ -99,10 +99,27 @@ fn validate_live_db_path(db_path: &str) -> anyhow::Result<PathBuf> {
         bail!("Live database path is empty");
     }
 
+    let expected_parent = candidate
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Live database path has no parent directory"))?;
+    let trusted_root = expected_parent.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve live database directory: {}",
+            expected_parent.display()
+        )
+    })?;
+
     let canonical = candidate.canonicalize().with_context(|| {
         format!(
             "Failed to resolve live database path {}",
             candidate.display()
+        )
+    })?;
+
+    canonical.strip_prefix(&trusted_root).with_context(|| {
+        format!(
+            "Live database path is outside the configured database directory: {}",
+            canonical.display()
         )
     })?;
 
