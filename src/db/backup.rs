@@ -454,7 +454,19 @@ fn safety_backup_path(db_path: &str) -> PathBuf {
     ))
 }
 
-fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
+fn pending_restore_path_from_trusted(db_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.restore-pending", db_path.to_string_lossy()))
+}
+
+fn safety_backup_path_from_trusted(db_path: &Path) -> PathBuf {
+    PathBuf::from(format!(
+        "{}.safety-{}",
+        db_path.to_string_lossy(),
+        Utc::now().format("%Y%m%d%H%M%S")
+    ))
+}
+
+fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<PathBuf> {
     let trimmed = db_path.trim();
     if trimmed.is_empty() {
         bail!("Database path is required");
@@ -471,21 +483,39 @@ fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<&Path> {
         bail!("Database path must not contain parent directory components");
     }
 
-    Ok(path)
+    if !path.is_absolute() {
+        bail!("Database path must be absolute");
+    }
+
+    if !path.is_file() {
+        bail!(
+            "Database path must point to an existing file: {}",
+            path.display()
+        );
+    }
+
+    let canonical_path = fs::canonicalize(path).context("Failed to canonicalize database path")?;
+    if canonical_path != path {
+        bail!(
+            "Database path must be canonical and must not include symlinks or normalization components"
+        );
+    }
+
+    Ok(canonical_path)
 }
 
 /// Stage a verified backup for restore. The pending file is applied on service startup.
 pub fn stage_restore(db_path: &str, source_path: &str) -> anyhow::Result<RestoreResult> {
-    let validated_path = validate_db_restore_target_path(db_path)?;
+    let trusted_db_path = validate_db_restore_target_path(db_path)?;
     let source = Path::new(source_path);
     verify_sqlite_database(source)?;
 
-    let safety_path = safety_backup_path(db_path);
-    fs::copy(validated_path, &safety_path)
+    let safety_path = safety_backup_path_from_trusted(&trusted_db_path);
+    fs::copy(&trusted_db_path, &safety_path)
         .context("Failed to create current database safety backup")?;
     verify_sqlite_database(&safety_path)?;
 
-    let staged_path = pending_restore_path(db_path);
+    let staged_path = pending_restore_path_from_trusted(&trusted_db_path);
     fs::copy(source, &staged_path).context("Failed to stage database restore")?;
     verify_sqlite_database(&staged_path)?;
 
@@ -747,6 +777,46 @@ mod tests {
             err.contains("parent directory"),
             "expected 'parent directory' in: {err}"
         );
+    }
+
+    #[test]
+    fn test_stage_restore_rejects_relative_db_path() {
+        let current_db = make_sqlite_file();
+        let restore_db = make_sqlite_file();
+
+        let relative_path = current_db.path().file_name().unwrap();
+
+        let result = stage_restore(
+            relative_path.to_str().unwrap(),
+            restore_db.path().to_str().unwrap(),
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("absolute"), "expected 'absolute' in: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_stage_restore_rejects_symlink_db_path() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = TempDir::new().unwrap();
+        let restore_db = make_sqlite_file();
+        let real_db = temp_dir.path().join("real.db");
+        let symlink_db = temp_dir.path().join("symlink.db");
+
+        fs::copy(restore_db.path(), &real_db).unwrap();
+        symlink(&real_db, &symlink_db).unwrap();
+
+        let result = stage_restore(
+            symlink_db.to_str().unwrap(),
+            restore_db.path().to_str().unwrap(),
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("canonical"), "expected 'canonical' in: {err}");
     }
 
     /// When the DB is read-only every `update_db_backup_integrity_status` call fails with
