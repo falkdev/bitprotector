@@ -259,13 +259,7 @@ jobs:
 
       - name: Compute dev version
         run: |
-          # Use last tag as base; fall back to Cargo.toml version if no tags exist.
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [[ -n "${LAST_TAG}" ]]; then
-            CARGO_BASE="${LAST_TAG#v}"
-          else
-            CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          fi
+          CARGO_BASE=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
           # Convert '-' to '~' for Debian pre-release ordering, append Ubuntu revision + git SHA.
           DEB_UPSTREAM=$(echo "${CARGO_BASE}" | sed 's/-/~/')
           SHORT_SHA=$(git rev-parse --short HEAD)
