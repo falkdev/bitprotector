@@ -19,8 +19,16 @@ RestartSec=5s
 
 # Security hardening
 NoNewPrivileges=true
-ProtectSystem=strict
+# "full" keeps /usr, /boot, /efi, and /etc read-only while leaving data
+# directories (/mnt, /media, /home, /run/media, etc.) writable — necessary
+# because drive paths and virtual-path symlinks can be at any absolute path.
+ProtectSystem=full
 ReadWritePaths=/var/lib/bitprotector /var/log/bitprotector
+# Allows the service to write to drive directories regardless of their
+# ownership (e.g. root-owned ext4 mount roots), so users do not need to
+# manually chown mount points after install.
+AmbientCapabilities=CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
 PrivateTmp=true
 
 [Install]

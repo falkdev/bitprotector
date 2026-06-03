@@ -210,8 +210,9 @@ Each virtual path is the exact absolute filesystem path where BitProtector
 will create a symlink. There is no global virtual root — every file and folder
 gets its own explicit path.
 
-Make sure the service user has write permission to the parent directories of
-any virtual paths you configure through the CLI, API, or web UI.
+The service is granted `CAP_DAC_OVERRIDE` so it can create symlinks at any
+absolute path without requiring you to manually set permissions on the parent
+directories.
 
 ---
 
