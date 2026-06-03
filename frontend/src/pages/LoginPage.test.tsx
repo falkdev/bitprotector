@@ -58,7 +58,7 @@ describe('LoginPage', () => {
     })
   })
 
-  it('shows error toast on login failure', async () => {
+  it('shows inline error on login failure', async () => {
     const user = userEvent.setup()
     server.use(
       api.post('/auth/login', () =>
@@ -72,7 +72,29 @@ describe('LoginPage', () => {
     await user.type(screen.getByTestId('password-input'), 'wrong')
     await user.click(screen.getByTestId('login-button'))
 
-    expect(await screen.findByText('Invalid username or password')).toBeInTheDocument()
+    const errorEl = await screen.findByTestId('login-error')
+    expect(errorEl).toBeInTheDocument()
+    expect(errorEl).toHaveTextContent('Invalid username or password')
+  })
+
+  it('clears inline error when user edits a field', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.post('/auth/login', () =>
+        HttpResponse.json({ error: 'bad credentials' }, { status: 401 })
+      )
+    )
+
+    renderWithApp(<LoginPage />, { route: '/login' })
+
+    await user.type(screen.getByTestId('username-input'), 'alice')
+    await user.type(screen.getByTestId('password-input'), 'wrong')
+    await user.click(screen.getByTestId('login-button'))
+
+    expect(await screen.findByTestId('login-error')).toBeInTheDocument()
+
+    await user.type(screen.getByTestId('password-input'), 'x')
+    expect(screen.queryByTestId('login-error')).not.toBeInTheDocument()
   })
 
   it('shows validation errors when form is submitted empty', async () => {

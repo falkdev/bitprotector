@@ -1,9 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { toast } from 'sonner'
 import { ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { authApi } from '@/api/auth'
@@ -18,6 +17,7 @@ type FormData = z.infer<typeof schema>
 export function LoginPage() {
   const navigate = useNavigate()
   const { isAuthenticated, login } = useAuth()
+  const [loginError, setLoginError] = useState('')
 
   useEffect(() => {
     if (isAuthenticated) navigate('/dashboard', { replace: true })
@@ -29,13 +29,16 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) })
 
+  const clearLoginError = () => setLoginError('')
+
   const onSubmit = async (data: FormData) => {
+    setLoginError('')
     try {
       const response = await authApi.login(data)
       login(response)
       navigate('/dashboard', { replace: true })
     } catch {
-      toast.error('Invalid username or password')
+      setLoginError('Invalid username or password')
     }
   }
 
@@ -60,7 +63,7 @@ export function LoginPage() {
               type="text"
               autoComplete="username"
               autoFocus
-              {...register('username')}
+              {...register('username', { onChange: clearLoginError })}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-shadow"
               data-testid="username-input"
             />
@@ -78,7 +81,7 @@ export function LoginPage() {
               id="password"
               type="password"
               autoComplete="current-password"
-              {...register('password')}
+              {...register('password', { onChange: clearLoginError })}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-shadow"
               data-testid="password-input"
             />
@@ -86,6 +89,16 @@ export function LoginPage() {
               <p className="mt-1 text-xs text-destructive">{errors.password.message}</p>
             )}
           </div>
+
+          {loginError && (
+            <div
+              role="alert"
+              data-testid="login-error"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {loginError}
+            </div>
+          )}
 
           <button
             type="submit"
