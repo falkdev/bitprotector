@@ -25,6 +25,8 @@ case "$1" in
         rm -rf /etc/bitprotector
         rm -rf /var/lib/bitprotector
         rm -rf /var/log/bitprotector
+        # Remove any systemd drop-in overrides created by the administrator.
+        rm -rf /etc/systemd/system/bitprotector.service.d
     ;;
 esac
 
