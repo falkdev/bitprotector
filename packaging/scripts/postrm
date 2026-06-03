@@ -3,7 +3,24 @@
 set -e
 
 case "$1" in
+    remove|purge)
+        # Revoke shadow group access; no longer needed once the service is gone.
+        if getent passwd bitprotector >/dev/null; then
+            deluser bitprotector shadow 2>/dev/null || true
+        fi
+    ;;
+esac
+
+case "$1" in
     purge)
+        # Remove the service account and its primary group.
+        if getent passwd bitprotector >/dev/null; then
+            deluser --system bitprotector 2>/dev/null || true
+        fi
+        if getent group bitprotector >/dev/null; then
+            delgroup --system bitprotector 2>/dev/null || true
+        fi
+
         # Purge package-owned runtime state.
         rm -rf /etc/bitprotector
         rm -rf /var/lib/bitprotector

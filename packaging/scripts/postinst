@@ -16,6 +16,10 @@ case "$1" in
                 bitprotector
         fi
 
+        # PAM's pam_unix reads /etc/shadow to verify passwords.
+        # The shadow group grants read access without running as root.
+        adduser bitprotector shadow
+
         # Create directories
         # /var/lib/bitprotector is 0770 so group members can write the SQLite
         # WAL/SHM files needed for concurrent read access.
