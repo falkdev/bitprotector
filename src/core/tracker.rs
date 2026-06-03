@@ -443,7 +443,10 @@ mod tests {
         track_file(&repo, &pair, "script.sh", None).unwrap();
 
         let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o775, "0o770 should become 0o775 (world-read+execute added)");
+        assert_eq!(
+            mode, 0o775,
+            "0o770 should become 0o775 (world-read+execute added)"
+        );
     }
 
     #[cfg(unix)]
@@ -459,7 +462,10 @@ mod tests {
         track_file(&repo, &pair, "notes.txt", None).unwrap();
 
         let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o664, "Non-executable file must not gain world-execute");
+        assert_eq!(
+            mode, 0o664,
+            "Non-executable file must not gain world-execute"
+        );
         assert_eq!(mode & 0o001, 0, "World-execute bit must not be set");
     }
 
@@ -476,7 +482,10 @@ mod tests {
         track_file(&repo, &pair, "pub.txt", None).unwrap();
 
         let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o644, "Already world-readable file should remain unchanged");
+        assert_eq!(
+            mode, 0o644,
+            "Already world-readable file should remain unchanged"
+        );
     }
 
     #[cfg(unix)]
@@ -494,6 +503,9 @@ mod tests {
         auto_track_folder_files(&repo, &pair, &folder).unwrap();
 
         let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o664, "auto_track should normalize file to world-readable");
+        assert_eq!(
+            mode, 0o664,
+            "auto_track should normalize file to world-readable"
+        );
     }
 }

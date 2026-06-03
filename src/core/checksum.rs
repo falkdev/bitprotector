@@ -416,8 +416,7 @@ mod tests {
         let mut src_file = NamedTempFile::new().unwrap();
         src_file.write_all(b"permission test data").unwrap();
         src_file.flush().unwrap();
-        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o600))
-            .unwrap();
+        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
 
         let dst_file = NamedTempFile::new().unwrap();
         copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
@@ -427,7 +426,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(dst_mode, 0o600, "Destination should have same mode as source");
+        assert_eq!(
+            dst_mode, 0o600,
+            "Destination should have same mode as source"
+        );
     }
 
     #[cfg(unix)]
@@ -439,8 +441,7 @@ mod tests {
         let data = b"permission verify test";
         src_file.write_all(data).unwrap();
         src_file.flush().unwrap();
-        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o640))
-            .unwrap();
+        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o640)).unwrap();
 
         let dst_file = NamedTempFile::new().unwrap();
         let expected = checksum_bytes(data);
@@ -451,6 +452,9 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(dst_mode, 0o640, "Destination should have same mode as source");
+        assert_eq!(
+            dst_mode, 0o640,
+            "Destination should have same mode as source"
+        );
     }
 }

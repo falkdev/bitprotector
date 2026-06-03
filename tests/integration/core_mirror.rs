@@ -261,7 +261,10 @@ fn test_mirror_file_preserves_permissions() {
         .permissions()
         .mode()
         & 0o777;
-    assert_eq!(dst_mode, 0o600, "mirror_file must preserve source permissions");
+    assert_eq!(
+        dst_mode, 0o600,
+        "mirror_file must preserve source permissions"
+    );
 }
 
 #[cfg(unix)]

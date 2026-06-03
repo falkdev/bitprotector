@@ -428,6 +428,9 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(dst_mode, 0o600, "Mirror should preserve source file permissions");
+        assert_eq!(
+            dst_mode, 0o600,
+            "Mirror should preserve source file permissions"
+        );
     }
 }
