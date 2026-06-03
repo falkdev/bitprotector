@@ -92,8 +92,8 @@ The checksum module computes BLAKE3 digests of files on disk.
 - `checksum_file`: a file with known content produces the same digest as `checksum_bytes` on those bytes, for both small and large files (200 KB tested with chunked streaming). A nonexistent path returns an error.
 - `verify_file`: returns `true` when the file's checksum matches the stored value; returns `false` on a mismatch.
 - `ChecksumStrategy` selection: HDDs always use `Streaming` regardless of file size; SSDs use `MmapRayon` for small files and `Streaming` for files above the size threshold.
-- `copy_with_checksum`: copies a file and returns matching source and destination checksums; the destination bytes equal the source bytes.
-- `copy_and_verify_checksum`: copies a file and succeeds when the destination checksum matches the provided expected value; fails and removes the destination file when the checksums do not match.
+- `copy_with_checksum`: copies a file and returns matching source and destination checksums; the destination bytes equal the source bytes; the destination file's Unix permission mode matches the source.
+- `copy_and_verify_checksum`: copies a file and succeeds when the destination checksum matches the provided expected value, with the destination's Unix permission mode matching the source; fails and removes the destination file when the checksums do not match.
 
 ### core/mirror.rs
 
@@ -102,7 +102,7 @@ The mirror module copies files from the active drive to the standby drive and ha
 **What is tested:**
 
 - `validate_drive_pair`: a valid pair with distinct existing directories is accepted; a nonexistent primary returns an error; a nonexistent secondary returns an error; primary and secondary pointing to the same path returns an error.
-- `mirror_file`: copies a file from the active drive to the standby and returns the BLAKE3 checksum of the copied bytes; the destination content exactly matches the source. For files in nested subdirectories, the full intermediate directory tree is created on the secondary. A nonexistent source file returns an error.
+- `mirror_file`: copies a file from the active drive to the standby and returns the BLAKE3 checksum of the copied bytes; the destination content exactly matches the source; the destination file's Unix permission mode matches the source. For files in nested subdirectories, the full intermediate directory tree is created on the secondary. A nonexistent source file returns an error.
 - `restore_from_mirror`: copies a file from secondary back to primary (the rebuild path) and the restored bytes match the original.
 
 ### core/virtual_path.rs
@@ -124,9 +124,9 @@ The tracker module handles file and folder registration on the active drive (met
 
 **What is tested:**
 
-- `track_file`: creates a database record with the correct relative path, BLAKE3 checksum, and file size; `is_mirrored` is initially false. Providing a virtual path simultaneously calls `set_virtual_path` and creates the symlink. Attempting to track a nonexistent file returns an error.
+- `track_file`: creates a database record with the correct relative path, BLAKE3 checksum, and file size; `is_mirrored` is initially false. Providing a virtual path simultaneously calls `set_virtual_path` and creates the symlink. Attempting to track a nonexistent file returns an error. Before computing the checksum the file's permissions are normalised to world-readable: `0o660` → `0o664`, `0o770` → `0o775`; files that are already world-readable are left unchanged; non-executable files do not gain the world-execute bit.
 - `track_folder`: creates the folder record and returns it with no `last_scanned_at` timestamp. Providing a virtual path creates the directory symlink. Attempting to track a nonexistent directory returns an error.
-- `auto_track_folder_files`: discovers all files in a folder tree recursively (verified for files nested at arbitrary depth), creates tracked file records, enqueues an `adopt_mirror` item for each, and stamps `last_scanned_at` on the folder. Files that are already tracked are skipped without creating duplicate records or queue entries. A dedicated test (`test_auto_track_folder_queues_adopt_mirror`) confirms the action is `adopt_mirror` and not `mirror`, ensuring files already present on the standby are not unnecessarily re-copied.
+- `auto_track_folder_files`: discovers all files in a folder tree recursively (verified for files nested at arbitrary depth), creates tracked file records, enqueues an `adopt_mirror` item for each, and stamps `last_scanned_at` on the folder. Files that are already tracked are skipped without creating duplicate records or queue entries. A dedicated test (`test_auto_track_folder_queues_adopt_mirror`) confirms the action is `adopt_mirror` and not `mirror`, ensuring files already present on the standby are not unnecessarily re-copied. Permissions are also normalised to world-readable for every newly tracked file in the folder.
 
 ### core/sync_queue.rs
 

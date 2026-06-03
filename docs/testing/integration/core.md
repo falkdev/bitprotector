@@ -28,6 +28,7 @@ This test file exercises the two mirroring functions directly with real files on
 - *Checksum mismatch on source:* If the primary file has been tampered with (content differs from the stored checksum), the call returns an error whose message contains `checksum mismatch`. No stale copy is written to the secondary.
 - *Subdirectory creation:* A file nested under a multi-level path (e.g. `a/b/nested.txt`) is mirrored correctly and the directory tree is created on the secondary if it does not yet exist.
 - *Secondary drive failed:* When the secondary has been put through `mark_drive_quiescing` → `confirm_drive_failure`, the call returns an error. Mirroring to a failed drive is refused.
+- *Permission preservation:* The Unix permission mode of the secondary file matches the primary source file after mirroring.
 
 **`restore_from_mirror` — copy secondary → primary:**
 
@@ -35,10 +36,12 @@ This test file exercises the two mirroring functions directly with real files on
 - *Mirror missing:* If no file exists on the secondary, the call returns an error.
 - *Checksum mismatch on mirror:* If the secondary file is corrupted (content differs from the stored checksum), the call returns an error whose message contains `checksum mismatch`.
 - *Primary drive failed:* When the primary has been put through `mark_drive_quiescing` → `confirm_drive_failure`, the call returns an error.
+- *Permission preservation:* The Unix permission mode of the restored primary file matches the secondary source file.
 
 **`mirror_file` — standby readiness guard:**
 
 - When the secondary drive is in the `quiescing` state (not yet failed but no longer accepting syncs), `mirror_file` returns an error rather than attempting the copy.
+- *Permission preservation:* The Unix permission mode of the secondary file matches the primary source file after `mirror_file` completes.
 
 ---
 

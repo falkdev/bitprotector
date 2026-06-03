@@ -24,11 +24,13 @@ NoNewPrivileges=true
 # because drive paths and virtual-path symlinks can be at any absolute path.
 ProtectSystem=full
 ReadWritePaths=/var/lib/bitprotector /var/log/bitprotector
-# Allows the service to write to drive directories regardless of their
-# ownership (e.g. root-owned ext4 mount roots), so users do not need to
+# CAP_DAC_OVERRIDE: allows the service to read/write drive files regardless of
+# their ownership (e.g. root-owned ext4 mount roots), so users do not need to
 # manually chown mount points after install.
-AmbientCapabilities=CAP_DAC_OVERRIDE
-CapabilityBoundingSet=CAP_DAC_OVERRIDE
+# CAP_FOWNER: allows the service to chmod tracked files it does not own, so
+# world-read access can be guaranteed when a file is first tracked.
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_FOWNER
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER
 PrivateTmp=true
 
 [Install]

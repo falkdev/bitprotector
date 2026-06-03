@@ -235,3 +235,92 @@ fn test_mirror_file_standby_not_ready_returns_error() {
         "mirror_file should refuse when standby is quiescing"
     );
 }
+
+// ── permission preservation ────────────────────────────────────────────────
+
+#[cfg(unix)]
+#[test]
+fn test_mirror_file_preserves_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let content = b"restricted data";
+    let (_, pair, file) = setup(&primary, &secondary, "restricted.txt", content);
+
+    fs::set_permissions(
+        primary.path().join("restricted.txt"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+
+    mirror::mirror_file(&pair, &file.relative_path).unwrap();
+
+    let dst_mode = fs::metadata(secondary.path().join("restricted.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(dst_mode, 0o600, "mirror_file must preserve source permissions");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_restore_mirror_from_master_preserves_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let content = b"master content";
+    let (_, pair, file) = setup(&primary, &secondary, "perm.txt", content);
+
+    fs::set_permissions(
+        primary.path().join("perm.txt"),
+        fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+
+    mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum).unwrap();
+
+    let dst_mode = fs::metadata(secondary.path().join("perm.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        dst_mode, 0o640,
+        "restore_mirror_from_master must preserve source permissions"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_restore_from_mirror_preserves_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let content = b"mirror content";
+    let (_, pair, file) = setup(&primary, &secondary, "rperm.txt", content);
+
+    // Write to mirror with a specific mode, then remove primary to simulate restore
+    fs::write(secondary.path().join("rperm.txt"), content).unwrap();
+    fs::set_permissions(
+        secondary.path().join("rperm.txt"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    fs::remove_file(primary.path().join("rperm.txt")).unwrap();
+
+    mirror::restore_from_mirror(&pair, &file.relative_path, &file.checksum).unwrap();
+
+    let dst_mode = fs::metadata(primary.path().join("rperm.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        dst_mode, 0o600,
+        "restore_from_mirror must preserve source permissions"
+    );
+}

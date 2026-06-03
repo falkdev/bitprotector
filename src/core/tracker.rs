@@ -3,7 +3,25 @@ use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
 use anyhow::Context;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Ensure the file at `path` has world-read access (and world-execute if the
+/// owner can execute). This is required so that any service on the system can
+/// read tracked files through virtual-path symlinks.
+///
+/// Requires `CAP_FOWNER` when the file is not owned by the calling process.
+/// On non-Unix platforms this is a no-op.
+#[cfg(unix)]
+fn ensure_world_readable(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path)?.permissions().mode();
+    let normalized = mode | 0o004 | if mode & 0o100 != 0 { 0o001 } else { 0 };
+    if normalized != mode {
+        fs::set_permissions(path, fs::Permissions::from_mode(normalized))
+            .with_context(|| format!("Failed to normalize permissions on {}", path.display()))?;
+    }
+    Ok(())
+}
 
 fn create_tracked_file_from_disk(
     repo: &Repository,
@@ -21,6 +39,9 @@ fn create_tracked_file_from_disk(
             master_path.display()
         );
     }
+
+    #[cfg(unix)]
+    ensure_world_readable(&master_path)?;
 
     let file_checksum =
         checksum::checksum_file(&master_path, checksum::ChecksumStrategy::Streaming)
@@ -52,6 +73,11 @@ pub fn track_file(
     }
 
     if let Ok(existing) = repo.get_tracked_file_by_path(drive_pair.id, relative_path) {
+        #[cfg(unix)]
+        {
+            let file_path = PathBuf::from(drive_pair.active_path()).join(relative_path);
+            ensure_world_readable(&file_path)?;
+        }
         repo.update_tracked_file_sources(existing.id, true, false)?;
         if let Some(virtual_path) = virtual_path {
             virtual_path::set_virtual_path(repo, existing.id, virtual_path)?;
@@ -386,5 +412,88 @@ mod tests {
             queue[0].action, "adopt_mirror",
             "Folder scan should enqueue adopt_mirror, not mirror"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_track_file_normalizes_permissions_rw_group() {
+        use std::os::unix::fs::PermissionsExt;
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let file = primary.path().join("data.mkv");
+        fs::write(&file, b"content").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+
+        track_file(&repo, &pair, "data.mkv", None).unwrap();
+
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o664, "0o660 should become 0o664 (world-read added)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_track_file_normalizes_permissions_rwx_group() {
+        use std::os::unix::fs::PermissionsExt;
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let file = primary.path().join("script.sh");
+        fs::write(&file, b"#!/bin/sh").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o770)).unwrap();
+
+        track_file(&repo, &pair, "script.sh", None).unwrap();
+
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o775, "0o770 should become 0o775 (world-read+execute added)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_track_file_does_not_add_world_execute_for_non_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let file = primary.path().join("notes.txt");
+        fs::write(&file, b"notes").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+
+        track_file(&repo, &pair, "notes.txt", None).unwrap();
+
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o664, "Non-executable file must not gain world-execute");
+        assert_eq!(mode & 0o001, 0, "World-execute bit must not be set");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_track_file_already_world_readable_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let file = primary.path().join("pub.txt");
+        fs::write(&file, b"public").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+
+        track_file(&repo, &pair, "pub.txt", None).unwrap();
+
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644, "Already world-readable file should remain unchanged");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_auto_track_folder_normalizes_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        fs::create_dir(primary.path().join("media")).unwrap();
+        let file = primary.path().join("media/movie.mkv");
+        fs::write(&file, b"data").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+
+        let folder = track_folder(&repo, &pair, "media", None).unwrap();
+        auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o664, "auto_track should normalize file to world-readable");
     }
 }

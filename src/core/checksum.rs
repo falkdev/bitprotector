@@ -121,14 +121,21 @@ pub fn checksum_file<P: AsRef<Path>>(path: P, strategy: ChecksumStrategy) -> io:
     }
 }
 
+/// Copy src file permissions to dst (Unix only; ownership is not copied).
+#[cfg(unix)]
+fn copy_permissions(src: &Path, dst: &Path) -> io::Result<()> {
+    let perms = std::fs::metadata(src)?.permissions();
+    std::fs::set_permissions(dst, perms)
+}
+
 /// Copy src to dst while computing BLAKE3 checksums of both in a single pass.
 /// Returns `(src_checksum, dst_checksum)`.
 pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
     src: P,
     dst: Q,
 ) -> io::Result<(String, String)> {
-    let mut src_file = File::open(src)?;
-    let mut dst_file = File::create(dst)?;
+    let mut src_file = File::open(src.as_ref())?;
+    let mut dst_file = File::create(dst.as_ref())?;
     let mut src_hasher = blake3::Hasher::new();
     let mut dst_hasher = blake3::Hasher::new();
     let mut buf = [0u8; 65536];
@@ -144,6 +151,8 @@ pub fn copy_with_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
     dst_file.flush()?;
     #[cfg(unix)]
     fadvise_dontneed(&src_file);
+    #[cfg(unix)]
+    copy_permissions(src.as_ref(), dst.as_ref())?;
     Ok((
         src_hasher.finalize().to_hex().to_string(),
         dst_hasher.finalize().to_hex().to_string(),
@@ -162,7 +171,8 @@ pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
     dst: Q,
     expected_checksum: &str,
 ) -> io::Result<()> {
-    let mut src_file = File::open(&src)?;
+    let src_path = src.as_ref();
+    let mut src_file = File::open(src_path)?;
     let dst_path = dst.as_ref();
     let mut dst_file = File::create(dst_path)?;
     let mut hasher = blake3::Hasher::new();
@@ -187,6 +197,8 @@ pub fn copy_and_verify_checksum<P: AsRef<Path>, Q: AsRef<Path>>(
             format!("checksum mismatch: expected={expected_checksum} actual={actual}"),
         ));
     }
+    #[cfg(unix)]
+    copy_permissions(src_path, dst_path)?;
     Ok(())
 }
 
@@ -394,5 +406,51 @@ mod tests {
             !dst_path.exists(),
             "Destination should be removed on mismatch"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_with_checksum_preserves_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut src_file = NamedTempFile::new().unwrap();
+        src_file.write_all(b"permission test data").unwrap();
+        src_file.flush().unwrap();
+        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o600))
+            .unwrap();
+
+        let dst_file = NamedTempFile::new().unwrap();
+        copy_with_checksum(src_file.path(), dst_file.path()).unwrap();
+
+        let dst_mode = std::fs::metadata(dst_file.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dst_mode, 0o600, "Destination should have same mode as source");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_and_verify_checksum_preserves_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut src_file = NamedTempFile::new().unwrap();
+        let data = b"permission verify test";
+        src_file.write_all(data).unwrap();
+        src_file.flush().unwrap();
+        std::fs::set_permissions(src_file.path(), std::fs::Permissions::from_mode(0o640))
+            .unwrap();
+
+        let dst_file = NamedTempFile::new().unwrap();
+        let expected = checksum_bytes(data);
+        copy_and_verify_checksum(src_file.path(), dst_file.path(), &expected).unwrap();
+
+        let dst_mode = std::fs::metadata(dst_file.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dst_mode, 0o640, "Destination should have same mode as source");
     }
 }
