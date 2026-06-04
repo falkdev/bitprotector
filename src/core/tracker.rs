@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 /// read tracked files through virtual-path symlinks.
 ///
 /// Requires `CAP_FOWNER` when the file is not owned by the calling process.
-/// On non-Unix platforms this is a no-op.
 #[cfg(unix)]
 fn ensure_world_readable(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;

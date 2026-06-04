@@ -210,9 +210,12 @@ Each virtual path is the exact absolute filesystem path where BitProtector
 will create a symlink. There is no global virtual root — every file and folder
 gets its own explicit path.
 
-The service is granted `CAP_DAC_OVERRIDE` so it can create symlinks at any
-absolute path without requiring you to manually set permissions on the parent
-directories.
+The service is granted `CAP_DAC_OVERRIDE`, which helps when parent-directory
+permissions would otherwise block symlink creation.
+
+However, the shipped systemd unit uses `ProtectSystem=full`, so paths under
+`/usr`, `/boot`, `/efi`, and `/etc` are read-only in the service namespace.
+Use writable locations (for example under `/var` or `/mnt`) for virtual paths.
 
 ---
 
