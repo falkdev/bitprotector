@@ -4,10 +4,20 @@ set -e
 
 case "$1" in
     purge)
+        # Remove the service account and its primary group.
+        if getent passwd bitprotector >/dev/null; then
+            deluser --system bitprotector 2>/dev/null || true
+        fi
+        if getent group bitprotector >/dev/null; then
+            delgroup --system bitprotector 2>/dev/null || true
+        fi
+
         # Purge package-owned runtime state.
         rm -rf /etc/bitprotector
         rm -rf /var/lib/bitprotector
         rm -rf /var/log/bitprotector
+        # Remove any systemd drop-in overrides created by the administrator.
+        rm -rf /etc/systemd/system/bitprotector.service.d
     ;;
 esac
 

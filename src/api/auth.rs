@@ -176,9 +176,26 @@ pub fn authenticate_user(username: &str, password: &str) -> bool {
         PasswordConversation::new(username, password),
     ) {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(e) => {
+            tracing::warn!(
+                username = %username,
+                error = %e,
+                "PAM context initialization failed"
+            );
+            return false;
+        }
     };
-    context.authenticate(pam_client2::Flag::NONE).is_ok()
+    match context.authenticate(pam_client2::Flag::NONE) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(
+                username = %username,
+                error = %e,
+                "PAM authentication failed"
+            );
+            false
+        }
+    }
 }
 
 /// In unit-test builds the real PAM stack is never invoked — PAM is a system

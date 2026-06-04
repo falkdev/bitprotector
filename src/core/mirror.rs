@@ -396,4 +396,41 @@ mod tests {
             "Should fail when secondary drive is marked failed"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_mirror_file_preserves_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (primary_dir, secondary_dir) = setup_pair();
+        let file_path = primary_dir.path().join("secret.txt");
+        fs::write(&file_path, b"sensitive data").unwrap();
+        fs::set_permissions(&file_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let pair = DrivePair {
+            id: 1,
+            name: "test".to_string(),
+            primary_path: primary_dir.path().to_str().unwrap().to_string(),
+            secondary_path: secondary_dir.path().to_str().unwrap().to_string(),
+            primary_state: "active".to_string(),
+            secondary_state: "active".to_string(),
+            active_role: "primary".to_string(),
+            primary_media_type: "hdd".to_string(),
+            secondary_media_type: "hdd".to_string(),
+            created_at: "".to_string(),
+            updated_at: "".to_string(),
+        };
+
+        mirror_file(&pair, "secret.txt").unwrap();
+
+        let dst_mode = fs::metadata(secondary_dir.path().join("secret.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            dst_mode, 0o600,
+            "Mirror should preserve source file permissions"
+        );
+    }
 }
