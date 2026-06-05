@@ -6,6 +6,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 
 /// Create a connection pool for the given database path.
 pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
+    crate::db::backup::apply_pending_restore(db_path)?;
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
             "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
@@ -21,6 +22,7 @@ pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
 
 /// Create a single-connection pool for CLI commands that share the DB with a running service.
 pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
+    crate::db::backup::apply_pending_restore(db_path)?;
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
             "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",

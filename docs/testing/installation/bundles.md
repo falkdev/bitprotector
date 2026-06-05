@@ -209,17 +209,20 @@ After all resilience scenarios have run, calls the shared `journal_error_scraper
 ## Upgrade
 
 **Entry point:** `tests/installation/bundles/upgrade.sh`  
-**Scenarios:** `tests/installation/scenarios/upgrade/` (2 scenarios)  
-**Environment:** Requires `ALPHA1_DEB` pointing to an older build  
-**Purpose:** Validates that upgrading from an older package version to the current version preserves user data and configuration.
+**Scenarios:** `tests/installation/scenarios/upgrade/` (3 scenarios)  
+**Environment:** Requires `BASELINE_DEB` pointing to the previous tagged release build  
+**Purpose:** Validates that upgrading from an older package version to the current version preserves user data and configuration, keeps the database structurally valid, preserves schema compatibility, and keeps post-upgrade restore behavior functional.
 
 ### Scenarios
 
-**upgrade-01 — Alpha1 to current with live data**  
-Installs the older alpha package, creates drive pairs and tracked files, and then upgrades to the current package. Confirms all tracked data is still present and accessible after the upgrade, and the service starts correctly with the upgraded binary.
+**upgrade-01 — Baseline to current with live data**  
+Installs the older alpha package, creates drive pairs and tracked files, and then upgrades to the current package. Confirms the service starts correctly, tracked data remains visible, and post-upgrade integrity checks still run. Also verifies SQLite integrity before and after upgrade, validates key schema shape expectations (including `sync_queue` support for `adopt_mirror`), and asserts a post-upgrade write path by tracking a newly created file.
 
 **upgrade-02 — Reinstall config preservation**  
 Installs and configures the package, then reinstalls (not upgrade — same version) the package. Confirms the user's config file is preserved by the maintainer script and not overwritten with the package default.
+
+**upgrade-03 — Restore-path compatibility after upgrade**  
+Creates an upgrade database, snapshots a pre-change restore source, upgrades the package, stages a database restore, restarts the service to apply the staged restore, and verifies restore semantics by confirming post-snapshot data is rolled back while baseline data remains intact. Then performs a post-restore write assertion by tracking a new file and running integrity checks to confirm ongoing write/read compatibility.
 
 ---
 

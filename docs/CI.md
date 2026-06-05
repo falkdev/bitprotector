@@ -47,8 +47,21 @@ All workflow YAML lives in [.github/workflows/](.github/workflows/). QEMU jobs u
 | `workflow_dispatch` with `run_heavy_qemu=true` | 0 – 12 |
 | `workflow_dispatch` with `run_heavy_qemu=false` (default) | 0 – 5 (`qemu-smoke` only for QEMU layer) |
 | Nightly cron (03:00 UTC via `nightly.yml`) | Full CI (0 – 12) + nightly-only `qemu-scale` + `qemu-scale-lowmem` + `qemu-scheduled-load` + `qemu-drive-media-type` |
+| `push` tag `v*` (`release.yml`) | Release validation (`validate-tag`, `build-and-verify`, `qemu-upgrade`) then publish |
 
 PR runs use `cancel-in-progress: true` so a new push automatically cancels the previous run. Pushes to `main` never cancel (a heavy failover run mid-flight must finish).
+
+### Release Workflow Gate
+
+The release workflow (`.github/workflows/release.yml`) now includes a required `qemu-upgrade` matrix job (Ubuntu 24.04 and 26.04 guests) before the `publish` step. This gate re-runs the package upgrade bundle from the latest previously tagged GitHub release to the just-built release artifact and blocks publishing if upgrade compatibility fails.
+
+If you are tagging a release locally and want parity checks, run:
+
+```bash
+BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./scripts/run-tests.sh full
+```
+
+If `BASELINE_DEB` is unset for local runs, `scripts/run-tests.sh` attempts to auto-resolve baseline packages from the latest tagged release using `gh` (one per Ubuntu suffix).
 
 ---
 
@@ -65,7 +78,7 @@ PR runs use `cancel-in-progress: true` so a new push automatically cancels the p
 | 5 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
 | 6 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
 | 7 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
-| 8 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. alpha1 → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
+| 8 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. baseline release → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
 | 9 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
 | 10 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
 | 11 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |
