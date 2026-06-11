@@ -604,9 +604,10 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage = isAxiosError(error) && error.response?.data
-        ? String(error.response.data)
-        : 'Failed to update folder virtual path'
+      const errorMessage =
+        isAxiosError(error) && error.response?.data
+          ? String(error.response.data)
+          : 'Failed to update folder virtual path'
       toast.error(errorMessage)
     }
   }
@@ -757,9 +758,10 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage = isAxiosError(error) && error.response?.data
-        ? String(error.response.data)
-        : 'Failed to update virtual path'
+      const errorMessage =
+        isAxiosError(error) && error.response?.data
+          ? String(error.response.data)
+          : 'Failed to update virtual path'
       toast.error(errorMessage)
     }
   }
