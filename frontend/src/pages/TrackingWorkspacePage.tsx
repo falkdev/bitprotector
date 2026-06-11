@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import { isAxiosError } from 'axios'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
 import { foldersApi } from '@/api/folders'
@@ -602,8 +603,12 @@ export function TrackingWorkspacePage() {
       toast.success('Folder virtual path updated')
       await load(params)
       setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Failed to update folder virtual path')
+    } catch (error) {
+      const errorMessage =
+        isAxiosError(error) && error.response?.data
+          ? String(error.response.data)
+          : 'Failed to update folder virtual path'
+      toast.error(errorMessage)
     }
   }
 
@@ -752,8 +757,12 @@ export function TrackingWorkspacePage() {
       toast.success('Virtual path updated')
       await load(params)
       setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Failed to update virtual path')
+    } catch (error) {
+      const errorMessage =
+        isAxiosError(error) && error.response?.data
+          ? String(error.response.data)
+          : 'Failed to update virtual path'
+      toast.error(errorMessage)
     }
   }
 
