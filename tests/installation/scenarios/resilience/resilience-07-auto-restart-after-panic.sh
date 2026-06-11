@@ -27,5 +27,5 @@ exit 1
 '
 
     # Keep this expected crash out of the final journal error scrape.
-    expect_journal_error "${since}" "code=dumped"
+    expect_journal_error "${since}" "status=11"
 }
