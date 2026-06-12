@@ -216,7 +216,7 @@ After all resilience scenarios have run, calls the shared `journal_error_scraper
 ### Scenarios
 
 **upgrade-01 — Baseline to current with live data**  
-Installs the older alpha package, creates drive pairs and tracked files, and then upgrades to the current package. Confirms the service starts correctly, tracked data remains visible, and post-upgrade integrity checks still run. Also verifies SQLite integrity before and after upgrade, validates key schema shape expectations (including `sync_queue` support for `adopt_mirror`), and asserts a post-upgrade write path by tracking a newly created file.
+Installs the baseline package (previous tagged release), creates drive pairs and tracked files, and then upgrades to the current package. Confirms the service starts correctly, tracked data remains visible, and post-upgrade integrity checks still run. Also verifies SQLite integrity before and after upgrade, validates key schema shape expectations (including `sync_queue` support for `adopt_mirror`), and asserts a post-upgrade write path by tracking a newly created file.
 
 **upgrade-02 — Reinstall config preservation**  
 Installs and configures the package, then reinstalls (not upgrade — same version) the package. Confirms the user's config file is preserved by the maintainer script and not overwritten with the package default.
