@@ -20,6 +20,7 @@ import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { TrackFileModal } from '@/components/tracking/TrackFileModal'
 import { FolderFormModal } from '@/components/tracking/FolderFormModal'
 import { formatDate } from '@/lib/format'
+import { suggestVirtualPathFromParent } from '@/lib/path'
 import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
@@ -299,14 +300,14 @@ function FolderVirtualPathModal({
       <PathPickerDialog
         open={showPicker}
         title="Select Folder Virtual Path"
-        description="Choose the absolute virtual path for this tracked folder."
+        description="Choose a parent directory; BitProtector appends the tracked folder name."
         mode="directory"
         value={value}
         startPath={value || '/'}
         confirmLabel="Use Virtual Path"
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
-          setValue(path)
+          setValue(suggestVirtualPathFromParent(path, folder.folder_path))
           setShowPicker(false)
         }}
       />
