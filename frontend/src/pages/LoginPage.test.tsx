@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { LoginPage } from './LoginPage'
+import { authNavigation } from '@/api/client'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
 import { renderWithApp } from '@/test/render'
@@ -58,8 +59,9 @@ describe('LoginPage', () => {
     })
   })
 
-  it('shows inline error on login failure', async () => {
+  it('shows inline error on login failure without triggering global redirect', async () => {
     const user = userEvent.setup()
+    const redirectSpy = vi.spyOn(authNavigation, 'redirectToLogin').mockImplementation(() => {})
     server.use(
       api.post('/auth/login', () =>
         HttpResponse.json({ error: 'bad credentials' }, { status: 401 })
@@ -75,6 +77,13 @@ describe('LoginPage', () => {
     const errorEl = await screen.findByTestId('login-error')
     expect(errorEl).toBeInTheDocument()
     expect(errorEl).toHaveTextContent('Invalid username or password')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-error')).toBeInTheDocument()
+    })
+    expect(redirectSpy).not.toHaveBeenCalled()
+
+    redirectSpy.mockRestore()
   })
 
   it('clears inline error when user edits a field', async () => {
