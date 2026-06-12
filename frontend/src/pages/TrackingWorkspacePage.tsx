@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { isAxiosError } from 'axios'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
 import { foldersApi } from '@/api/folders'
@@ -21,6 +20,7 @@ import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { TrackFileModal } from '@/components/tracking/TrackFileModal'
 import { FolderFormModal } from '@/components/tracking/FolderFormModal'
 import { formatDate } from '@/lib/format'
+import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
 import type { TrackedFolder } from '@/types/folder'
@@ -332,8 +332,10 @@ function VirtualPathTree({
       const response = await virtualPathsApi.tree(parent)
       const children = response.children.map((child) => ({ ...child, loaded: false, children: [] }))
       setNodes((current) => updateTreeChildren(current, parent, children))
-    } catch {
-      toast.error('Failed to load virtual path tree')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to load virtual path tree')
+      toast.error(errorMessage)
     } finally {
       setNodes((current) => setTreeLoading(current, parent, false))
     }
@@ -440,8 +442,10 @@ export function TrackingWorkspacePage() {
     try {
       const nextResponse = await trackingApi.list(nextParams)
       setResponse(nextResponse)
-    } catch {
-      toast.error('Failed to load tracking workspace')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to load tracking workspace')
+      toast.error(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -453,8 +457,10 @@ export function TrackingWorkspacePage() {
       try {
         const next = await drivesApi.list()
         if (active) setDrives(next)
-      } catch {
-        toast.error('Failed to load drive pairs')
+      } catch (error) {
+        // Extract meaningful error message from backend response
+        const errorMessage = getErrorMessage(error, 'Failed to load drive pairs')
+        toast.error(errorMessage)
       }
     }
     void loadDrives()
@@ -560,8 +566,10 @@ export function TrackingWorkspacePage() {
       toast.success('File tracked')
       await load(params)
       setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Failed to track file')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to track file')
+      toast.error(errorMessage)
     }
   }
 
@@ -570,8 +578,10 @@ export function TrackingWorkspacePage() {
       await filesApi.mirror(file.id)
       toast.success('Mirror requested')
       await load(params)
-    } catch {
-      toast.error('Mirror failed')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Mirror failed')
+      toast.error(errorMessage)
     }
   }
 
@@ -581,8 +591,10 @@ export function TrackingWorkspacePage() {
       toast.success(`Scan complete: ${result.new_files} new, ${result.changed_files} changed`)
       await load(params)
       setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Scan failed')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Scan failed')
+      toast.error(errorMessage)
     }
   }
 
@@ -592,8 +604,10 @@ export function TrackingWorkspacePage() {
       toast.success(`Mirror complete: ${result.mirrored_files} file(s) mirrored`)
       await load(params)
       setTreeRefreshKey((current) => current + 1)
-    } catch {
-      toast.error('Folder mirror failed')
+    } catch (error) {
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Folder mirror failed')
+      toast.error(errorMessage)
     }
   }
 
@@ -604,10 +618,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to update folder virtual path'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to update folder virtual path')
       toast.error(errorMessage)
     }
   }
@@ -758,10 +770,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to update virtual path'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to update virtual path')
       toast.error(errorMessage)
     }
   }
@@ -1213,11 +1223,17 @@ export function TrackingWorkspacePage() {
           drives={drives}
           onClose={() => setShowFolderModal(false)}
           onSave={async (data) => {
-            await foldersApi.create(data)
-            toast.success('Folder added')
-            setShowFolderModal(false)
-            await load(params)
-            setTreeRefreshKey((current) => current + 1)
+            try {
+              await foldersApi.create(data)
+              toast.success('Folder added')
+              setShowFolderModal(false)
+              await load(params)
+              setTreeRefreshKey((current) => current + 1)
+            } catch (error) {
+              // Extract meaningful error message from backend response
+              const errorMessage = getErrorMessage(error, 'Failed to add folder')
+              toast.error(errorMessage)
+            }
           }}
         />
       ) : null}
