@@ -8,6 +8,7 @@ import {
   getActiveDrivePath,
   resolveAbsolutePathForPicker,
   resolveTrackedPathInput,
+  suggestVirtualPathFromParent,
 } from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
 import type { CreateFolderRequest } from '@/types/folder'
@@ -206,14 +207,15 @@ export function FolderFormModal({
       <PathPickerDialog
         open={showVirtualPicker}
         title="Select Folder Virtual Path"
-        description="Choose the absolute virtual path for this tracked folder."
+        description="Choose a parent directory; BitProtector appends the tracked folder name."
         mode="directory"
         value={rawVirtualPath}
         startPath={rawVirtualPath || '/'}
         confirmLabel="Use Virtual Path"
         onClose={() => setShowVirtualPicker(false)}
         onPick={(path) => {
-          setValue('virtual_path', path, { shouldDirty: true, shouldValidate: true })
+          const suggestedPath = suggestVirtualPathFromParent(path, rawPath)
+          setValue('virtual_path', suggestedPath, { shouldDirty: true, shouldValidate: true })
           clearErrors('virtual_path')
           setShowVirtualPicker(false)
         }}

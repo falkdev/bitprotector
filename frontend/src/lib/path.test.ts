@@ -5,6 +5,7 @@ import {
   normalizeAbsoluteFilesystemPath,
   resolveAbsolutePathForPicker,
   resolveTrackedPathInput,
+  suggestVirtualPathFromParent,
 } from './path'
 
 describe('path helpers', () => {
@@ -64,6 +65,14 @@ describe('path helpers', () => {
 
   it('returns root when relativePath is empty string', () => {
     expect(joinAbsoluteFilesystemPath('/mnt/drive', '')).toBe('/mnt/drive')
+  })
+
+  it('suggests a folder virtual path by appending the source folder name', () => {
+    expect(suggestVirtualPathFromParent('/mnt', 'documents/reports')).toBe('/mnt/reports')
+  })
+
+  it('returns the parent path when source path is empty', () => {
+    expect(suggestVirtualPathFromParent('/mnt', '')).toBe('/mnt')
   })
 
   it('resolveTrackedPathInput returns error when path has parent-dir traversal', () => {

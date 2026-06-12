@@ -26,7 +26,12 @@ export function getErrorMessage(error: unknown, defaultMessage: string): string 
         return data
       }
       if (data && typeof data === 'object') {
-        if ('error' in data && data.error && typeof data.error === 'object' && 'message' in data.error) {
+        if (
+          'error' in data &&
+          data.error &&
+          typeof data.error === 'object' &&
+          'message' in data.error
+        ) {
           const nestedMessage = data.error.message
           if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
             return nestedMessage

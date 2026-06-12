@@ -173,6 +173,29 @@ describe('FolderFormModal', () => {
     })
   })
 
+  it('appends the tracked folder name when virtual path is picked from browser', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+
+    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={onSave} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
+      '/mnt/secondary/documents'
+    )
+    const browseButtons = screen.getAllByRole('button', { name: 'Browse' })
+    await user.click(browseButtons[1])
+    await user.click(screen.getByRole('button', { name: 'Pick' }))
+    await user.click(screen.getByRole('button', { name: 'Add Folder' }))
+
+    expect(onSave).toHaveBeenCalledWith({
+      drive_pair_id: 1,
+      folder_path: 'documents',
+      virtual_path: '/mnt/secondary/selected/documents',
+    })
+  })
+
   it('calls onClose when the Cancel button is clicked', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
