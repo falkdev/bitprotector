@@ -65,11 +65,17 @@ function BackupFormModal({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setBackupPath(backup?.backup_path ?? '')
-    setDriveLabel(backup?.drive_label ?? '')
-    setEnabled(backup?.enabled ?? true)
-    setSaving(false)
-    setError(null)
+    const timer = window.setTimeout(() => {
+      setBackupPath(backup?.backup_path ?? '')
+      setDriveLabel(backup?.drive_label ?? '')
+      setEnabled(backup?.enabled ?? true)
+      setSaving(false)
+      setError(null)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [backup])
 
   const submit = async () => {
@@ -545,8 +551,14 @@ export function DatabaseBackupsPage() {
   }
 
   useEffect(() => {
-    void loadBackups()
-    void loadSettings()
+    const timer = window.setTimeout(() => {
+      void loadBackups()
+      void loadSettings()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [])
 
   const closeForm = () => {

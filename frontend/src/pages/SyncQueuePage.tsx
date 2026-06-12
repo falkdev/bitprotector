@@ -61,9 +61,15 @@ function ResolveDialog({
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    setResolution('keep_master')
-    setNewFilePath('')
-    setSubmitting(false)
+    const timer = window.setTimeout(() => {
+      setResolution('keep_master')
+      setNewFilePath('')
+      setSubmitting(false)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [item])
 
   if (!item) return null

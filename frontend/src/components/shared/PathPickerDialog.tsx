@@ -410,19 +410,28 @@ export function PathPickerDialog({
       return
     }
 
-    setShowHidden(false)
-    setBrowsingFilename(false)
+    const timer = window.setTimeout(() => {
+      setShowHidden(false)
+      setBrowsingFilename(false)
 
-    if (virtualFileMode && value.trim()) {
-      const trimmedValue = value.trim()
-      const lastSlash = trimmedValue.lastIndexOf('/')
-      const dir = lastSlash > 0 ? trimmedValue.slice(0, lastSlash) : trimmedValue
-      const basename = lastSlash >= 0 ? trimmedValue.slice(lastSlash + 1) : ''
-      setFilenameDraft(basename)
-      void initializeTree((startPath && startPath.trim()) || dir || scopedRootPath, false)
-    } else {
-      setFilenameDraft('')
-      void initializeTree((startPath && startPath.trim()) || value.trim() || scopedRootPath, false)
+      if (virtualFileMode && value.trim()) {
+        const trimmedValue = value.trim()
+        const lastSlash = trimmedValue.lastIndexOf('/')
+        const dir = lastSlash > 0 ? trimmedValue.slice(0, lastSlash) : trimmedValue
+        const basename = lastSlash >= 0 ? trimmedValue.slice(lastSlash + 1) : ''
+        setFilenameDraft(basename)
+        void initializeTree((startPath && startPath.trim()) || dir || scopedRootPath, false)
+      } else {
+        setFilenameDraft('')
+        void initializeTree(
+          (startPath && startPath.trim()) || value.trim() || scopedRootPath,
+          false
+        )
+      }
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
     }
   }, [initializeTree, open, scopedRootPath, startPath, value, virtualFileMode])
 

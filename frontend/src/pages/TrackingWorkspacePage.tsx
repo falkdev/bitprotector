@@ -214,8 +214,14 @@ function FolderVirtualPathModal({
   const [showPicker, setShowPicker] = useState(false)
 
   useEffect(() => {
-    setValue(folder?.virtual_path ?? '')
-    setSaving(false)
+    const timer = window.setTimeout(() => {
+      setValue(folder?.virtual_path ?? '')
+      setSaving(false)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [folder])
 
   if (!folder) return null
@@ -342,9 +348,15 @@ function VirtualPathTree({
   }, [])
 
   useEffect(() => {
-    setNodes([])
-    setOpen({})
-    void loadChildren('/')
+    const timer = window.setTimeout(() => {
+      setNodes([])
+      setOpen({})
+      void loadChildren('/')
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [loadChildren, refreshKey])
 
   const renderNode = (node: TreeNode, depth: number) => {
@@ -470,7 +482,13 @@ export function TrackingWorkspacePage() {
   }, [])
 
   useEffect(() => {
-    void load(params)
+    const timer = window.setTimeout(() => {
+      void load(params)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [load, params])
 
   const driveName = useCallback(
@@ -548,15 +566,28 @@ export function TrackingWorkspacePage() {
 
   useEffect(() => {
     const visibleKeys = new Set(items.map((item) => trackingRowKey(item)))
-    setSelectedRowKeys((current) => {
-      const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)))
-      return next.size === current.size ? current : next
-    })
+
+    const timer = window.setTimeout(() => {
+      setSelectedRowKeys((current) => {
+        const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)))
+        return next.size === current.size ? current : next
+      })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [items])
 
   useEffect(() => {
     if (selectedItems.length === 0 && confirmBulkDeleteOpen) {
-      setConfirmBulkDeleteOpen(false)
+      const timer = window.setTimeout(() => {
+        setConfirmBulkDeleteOpen(false)
+      }, 0)
+
+      return () => {
+        window.clearTimeout(timer)
+      }
     }
   }, [confirmBulkDeleteOpen, selectedItems.length])
 
@@ -746,21 +777,27 @@ export function TrackingWorkspacePage() {
   useEffect(() => {
     if (!postDeleteDetailAction) return
 
-    if (postDeleteDetailAction.type === 'close') {
-      setSelectedFile(null)
-      setPostDeleteDetailAction(null)
-      return
-    }
+    const timer = window.setTimeout(() => {
+      if (postDeleteDetailAction.type === 'close') {
+        setSelectedFile(null)
+        setPostDeleteDetailAction(null)
+        return
+      }
 
-    const nextItem = items.find(
-      (item) => item.kind === 'file' && item.id === postDeleteDetailAction.fileId
-    )
-    setPostDeleteDetailAction(null)
-    if (!nextItem) {
-      setSelectedFile(null)
-      return
+      const nextItem = items.find(
+        (item) => item.kind === 'file' && item.id === postDeleteDetailAction.fileId
+      )
+      setPostDeleteDetailAction(null)
+      if (!nextItem) {
+        setSelectedFile(null)
+        return
+      }
+      void openFileDetails(nextItem)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
     }
-    void openFileDetails(nextItem)
   }, [items, openFileDetails, postDeleteDetailAction])
 
   const handleSetFileVirtualPath = async (fileId: number, vpath: string) => {
@@ -1303,8 +1340,14 @@ function FileVirtualPathModal({
   const [showPicker, setShowPicker] = useState(false)
 
   useEffect(() => {
-    setValue(file?.virtual_path ?? '')
-    setSaving(false)
+    const timer = window.setTimeout(() => {
+      setValue(file?.virtual_path ?? '')
+      setSaving(false)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [file])
 
   if (!file) return null

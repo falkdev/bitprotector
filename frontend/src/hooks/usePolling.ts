@@ -34,11 +34,15 @@ export function usePolling<T>(fetchFn: () => Promise<T>, options: UsePollingOpti
 
   useEffect(() => {
     if (paused) return
+    let immediateTimer: ReturnType<typeof setTimeout> | null = null
     if (immediate) {
-      void runFetch()
+      immediateTimer = setTimeout(() => {
+        void runFetch()
+      }, 0)
     }
     timerRef.current = setInterval(() => void runFetch(), interval)
     return () => {
+      if (immediateTimer) clearTimeout(immediateTimer)
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [paused, interval, immediate, runFetch])

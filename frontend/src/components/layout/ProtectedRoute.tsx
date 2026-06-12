@@ -13,16 +13,25 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const [valid, setValid] = useState(false)
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setChecking(false)
+    if (!isAuthenticated || !checking) {
       return
     }
-    setChecking(true)
+
+    let active = true
     validate().then((ok) => {
+      if (!active) return
       setValid(ok)
       setChecking(false)
     })
-  }, [isAuthenticated, validate])
+
+    return () => {
+      active = false
+    }
+  }, [checking, isAuthenticated, validate])
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
 
   if (checking) {
     return (
@@ -32,7 +41,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     )
   }
 
-  if (!isAuthenticated || !valid) {
+  if (!valid) {
     return <Navigate to="/login" replace />
   }
 

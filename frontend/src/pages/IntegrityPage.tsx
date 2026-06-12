@@ -58,8 +58,15 @@ function StartRunDialog({
 
   useEffect(() => {
     if (!open) return
-    setSelectedDrive('all')
-    setRecover(true)
+
+    const timer = window.setTimeout(() => {
+      setSelectedDrive('all')
+      setRecover(true)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [open])
 
   if (!open) return null
