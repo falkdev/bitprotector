@@ -74,7 +74,9 @@ describe('getErrorMessage', () => {
   })
 
   it('falls back to Error.message when response has no usable message', () => {
-    expect(getErrorMessage(new Error('Network Error'), 'Failed to add folder')).toBe('Network Error')
+    expect(getErrorMessage(new Error('Network Error'), 'Failed to add folder')).toBe(
+      'Network Error'
+    )
   })
 
   it('falls back to default message for unknown error values', () => {
