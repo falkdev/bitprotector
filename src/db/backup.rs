@@ -587,6 +587,21 @@ pub fn apply_pending_restore(db_path: &str) -> anyhow::Result<Option<PathBuf>> {
         fs::copy(db_path, &applied_safety_path)
             .context("Failed to create pre-restore safety backup")?;
     }
+
+    // Remove stale WAL/SHM sidecars from the previous active database so old
+    // uncheckpointed pages cannot be replayed into the restored database.
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{db_path}{suffix}"));
+        if sidecar.exists() {
+            fs::remove_file(&sidecar).with_context(|| {
+                format!(
+                    "Failed to remove stale SQLite sidecar before restore apply: {}",
+                    sidecar.display()
+                )
+            })?;
+        }
+    }
+
     fs::rename(&staged_path, db_path).context("Failed to apply staged database restore")?;
     Ok(Some(applied_safety_path))
 }
@@ -794,6 +809,25 @@ mod tests {
             corrupt.path().to_str().unwrap(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_pending_restore_removes_sqlite_sidecars() {
+        let current_db = make_sqlite_file();
+        let restore_db = make_sqlite_file();
+        let db_path = current_db.path().to_str().unwrap();
+
+        let _ = stage_restore(db_path, restore_db.path().to_str().unwrap()).unwrap();
+
+        let wal_path = format!("{db_path}-wal");
+        let shm_path = format!("{db_path}-shm");
+        fs::write(&wal_path, b"stale wal").unwrap();
+        fs::write(&shm_path, b"stale shm").unwrap();
+
+        let applied = apply_pending_restore(db_path).unwrap();
+        assert!(applied.is_some());
+        assert!(!Path::new(&wal_path).exists());
+        assert!(!Path::new(&shm_path).exists());
     }
 
     #[test]

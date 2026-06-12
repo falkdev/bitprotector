@@ -106,6 +106,7 @@ Provides helpers used inside scenario scripts:
 - **`ssh_vm`**: Runs a command on the guest over SSH with a configurable timeout. Handles `StrictHostKeyChecking=no` and keepalive settings.
 - **`make_pair`**: Registers a drive pair via the CLI and returns the assigned pair ID. Used by scenarios that need to set up a drive configuration before testing a feature.
 - **`seed_file`**: Creates a file of a specified size on the guest using `dd if=/dev/urandom`. Used to set up test data for mirroring and integrity tests.
+- **`verify_sqlite`**: Runs SQLite `PRAGMA integrity_check` against a guest database path through Python's sqlite3 module. Used by backup-repair and upgrade scenarios to assert DB file integrity before and after disruptive operations.
 - **`api_login`**: Logs in through the API and returns a bearer token. Retries for up to 60 seconds to accommodate service startup races.
 - **`api_json`**: Generic API call wrapper. Takes a method, path, token, and optional JSON body. Returns the response body on success (2xx) and exits non-zero on HTTP error, with retries for transient connectivity failures.
 - **`assert_no_journal_errors`**: Queries `journalctl` for error-level entries from the bitprotector unit since a given timestamp and fails if any unexpected entries are found.
@@ -175,10 +176,12 @@ Full run commands for each bundle are documented in [bundles.md](bundles.md). Th
 ./tests/installation/qemu_uninstall_test.sh   # Uninstall bundle
 ./tests/installation/bundles/application_workflows.sh
 ./tests/installation/bundles/resilience.sh
-./tests/installation/bundles/upgrade.sh
+BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./tests/installation/bundles/upgrade.sh
 ./tests/installation/bundles/degraded_boot.sh
 ./tests/installation/bundles/drive_media_type.sh
 ```
+
+The upgrade bundle now validates schema compatibility, SQLite integrity, post-upgrade write behavior, and restore-path compatibility in addition to startup and data visibility checks.
 
 ---
 
@@ -206,9 +209,11 @@ These exist so that CI configuration and documentation written before the bundle
 | `SSH_PORT` | Bundle-specific (2222, 2223, etc.) | Host port for SSH forwarding |
 | `API_PORT` | Bundle-specific (18443, 18444, etc.) | Host port for HTTPS forwarding |
 | `TIMEOUT` | Bundle-specific (600, 900, etc.) | Maximum seconds to wait for SSH to become available |
-| `ALPHA1_DEB` | — | Path to the older `.deb` for the upgrade bundle |
+| `BASELINE_DEB` | — | Path to the previous tagged release `.deb` for the upgrade bundle |
 
 Port overrides are useful when running multiple bundles simultaneously or when another VM is using the default ports.
+For the upgrade bundle specifically, `BASELINE_DEB` should point to the previous tagged release package used as the compatibility baseline.
+When using `scripts/run-tests.sh full`, the runner can auto-resolve this baseline via `gh` if `BASELINE_DEB` is not set.
 
 ---
 

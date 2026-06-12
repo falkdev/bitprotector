@@ -335,7 +335,13 @@ pub async fn run_server(
     rate_limit_rps: usize,
     checksum_cfg: ChecksumConfig,
 ) -> anyhow::Result<()> {
-    crate::db::backup::apply_pending_restore(db_path)?;
+    if let Some(safety_backup) = crate::db::backup::apply_pending_restore(db_path)? {
+        tracing::info!(
+            "Applied pending database restore for {} (safety backup: {})",
+            db_path,
+            safety_backup.display()
+        );
+    }
     let pool = create_pool(db_path)?;
     {
         let conn = pool.get()?;

@@ -55,6 +55,7 @@ Layers are ordered from fastest and cheapest (bottom) to slowest and most realis
 | [frontend/e2e.md](frontend/e2e.md) | Coverage for each Playwright E2E spec and the user workflow it validates |
 | [installation/README.md](installation/README.md) | QEMU infrastructure: bundles, scenarios, shared helpers, prerequisites, and setup |
 | [installation/bundles.md](installation/bundles.md) | Scenario-by-scenario coverage for all QEMU test bundles |
+| [installation/qemu-upgrade-db-coverage-report.md](installation/qemu-upgrade-db-coverage-report.md) | Upgrade database compatibility investigation, risk matrix, and implementation tracking |
 
 ---
 
