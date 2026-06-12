@@ -4,32 +4,35 @@ use rusqlite::Result;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-/// Create a connection pool for the given database path.
-pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
-    crate::db::backup::apply_pending_restore(db_path)?;
-    let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
+fn file_connection_manager(db_path: &str) -> SqliteConnectionManager {
+    SqliteConnectionManager::file(db_path).with_init(|conn| {
         conn.execute_batch(
             "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
         )?;
         Ok(())
-    });
-    let pool = Pool::builder()
-        .max_size(10)
-        .min_idle(Some(1))
-        .build(manager)?;
-    Ok(pool)
+    })
+}
+
+fn create_file_pool(db_path: &str, max_size: u32, min_idle: Option<u32>) -> anyhow::Result<DbPool> {
+    crate::db::backup::apply_pending_restore(db_path)?;
+    let manager = file_connection_manager(db_path);
+
+    let mut builder = Pool::builder().max_size(max_size);
+    if let Some(min_idle) = min_idle {
+        builder = builder.min_idle(Some(min_idle));
+    }
+
+    Ok(builder.build(manager)?)
+}
+
+/// Create a connection pool for the given database path.
+pub fn create_pool(db_path: &str) -> anyhow::Result<DbPool> {
+    create_file_pool(db_path, 10, Some(1))
 }
 
 /// Create a single-connection pool for CLI commands that share the DB with a running service.
 pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
-    let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch(
-            "PRAGMA busy_timeout = 30000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
-        )?;
-        Ok(())
-    });
-    let pool = Pool::builder().max_size(1).build(manager)?;
-    Ok(pool)
+    create_file_pool(db_path, 1, None)
 }
 
 /// Create an in-memory pool for testing.
@@ -2388,8 +2391,9 @@ pub struct SystemStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::backup::{pending_restore_path, stage_restore};
     use crate::db::schema::initialize_schema;
-    use std::thread;
+    use std::{fs, thread};
     use tempfile::NamedTempFile;
 
     fn make_repo() -> Repository {
@@ -2749,6 +2753,55 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn test_cli_pool_applies_staged_restore_before_open() {
+        let db_file = NamedTempFile::new().unwrap();
+        let db_path = db_file.path().to_str().unwrap();
+        let snapshot_file = NamedTempFile::new().unwrap();
+        let snapshot_path = snapshot_file.path().to_str().unwrap();
+
+        let pair_id = {
+            let pool = create_pool(db_path).unwrap();
+            {
+                let conn = pool.get().unwrap();
+                initialize_schema(&conn).unwrap();
+            }
+
+            let repo = Repository::new(pool.clone());
+            let pair = repo
+                .create_drive_pair("restore-test", "/primary", "/secondary")
+                .unwrap();
+            repo.create_tracked_file(pair.id, "file-before-snapshot.txt", "hash-before", 10, None)
+                .unwrap();
+
+            {
+                let conn = pool.get().unwrap();
+                conn.execute_batch("PRAGMA wal_checkpoint(FULL)").unwrap();
+            }
+            fs::copy(db_path, snapshot_path).unwrap();
+
+            repo.create_tracked_file(pair.id, "file-after-snapshot.txt", "hash-after", 20, None)
+                .unwrap();
+
+            pair.id
+        };
+
+        stage_restore(db_path, snapshot_path).unwrap();
+        let pending_path = pending_restore_path(db_path);
+        assert!(pending_path.exists());
+
+        let cli_pool = create_cli_pool(db_path).unwrap();
+        let cli_repo = Repository::new(cli_pool);
+
+        assert!(cli_repo
+            .get_tracked_file_by_path(pair_id, "file-before-snapshot.txt")
+            .is_ok());
+        assert!(cli_repo
+            .get_tracked_file_by_path(pair_id, "file-after-snapshot.txt")
+            .is_err());
+        assert!(!pending_path.exists());
     }
 
     // ─── Event Log ────────────────────────────────────────────────────────────────
