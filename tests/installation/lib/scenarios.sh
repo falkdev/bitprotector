@@ -304,10 +304,11 @@ run_scenario() {
     local name="$1"
     local fn="$2"
     log GROUP "Scenario: ${name}"
-    # Call outside an 'if' context so that set -e propagates into the function.
-    # 'if fn; then' suppresses set -e inside fn, causing false-positive PASS results.
     set +e
-    "${fn}"
+    (
+        set -euo pipefail
+        "${fn}"
+    )
     local exit_code=$?
     set -e
     if [[ ${exit_code} -eq 0 ]]; then

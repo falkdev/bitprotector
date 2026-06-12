@@ -131,13 +131,82 @@ jobs:
           path: target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb
           retention-days: 30
 
+  qemu-upgrade:
+    name: QEMU Upgrade Validation (ubuntu-${{ matrix.ubuntu }})
+    needs: [validate-tag, build-and-verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            guest: ubuntu-24.04
+            ssh_port: 2242
+            api_port: 18643
+            deb_suffix: "24.04.1"
+          - ubuntu: "26.04"
+            guest: ubuntu-26.04
+            ssh_port: 2243
+            api_port: 18644
+            deb_suffix: "26.04.1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-qemu
+        with:
+          guest: ${{ matrix.guest }}
+
+      - name: Download current .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bitprotector-deb-release-ubuntu-${{ matrix.ubuntu }}
+          path: target/debian/ubuntu-${{ matrix.ubuntu }}/
+
+      - name: Resolve previous tagged release baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          BASELINE_TAG=$(gh release list --exclude-drafts --limit 20 --json tagName --jq '[.[].tagName | select(. != env.CURRENT_TAG)][0]')
+          if [[ -z "${BASELINE_TAG}" || "${BASELINE_TAG}" == "null" ]]; then
+            echo "ERROR: could not resolve a baseline release tag prior to ${CURRENT_TAG}" >&2
+            exit 1
+          fi
+          mkdir -p target/debian/baseline
+          gh release download "${BASELINE_TAG}" \
+            --pattern "*${{ matrix.deb_suffix }}*.deb" \
+            --dir target/debian/baseline
+          echo "Using baseline release tag: ${BASELINE_TAG}"
+          echo "BASELINE_DEB=$(ls -1 target/debian/baseline/*.deb | head -1)" >> "$GITHUB_ENV"
+
+      - name: QEMU upgrade test
+        env:
+          GUEST_IMAGE: ${{ matrix.guest }}
+          SSH_PORT: ${{ matrix.ssh_port }}
+          API_PORT: ${{ matrix.api_port }}
+          CI: '1'
+          BASELINE_DEB: ${{ env.BASELINE_DEB }}
+        run: ./tests/installation/bundles/upgrade.sh target/debian/ubuntu-${{ matrix.ubuntu }}/bitprotector_*.deb
+
+      - name: Upload VM logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-logs-release-upgrade-${{ matrix.guest }}
+          path: |
+            ${{ runner.temp }}/**/serial.log
+            ${{ runner.temp }}/**/qemu.log
+          retention-days: 7
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------------------
   # Create GitHub Release and attach the .deb.
   # Only this job needs contents:write.
   # ---------------------------------------------------------------------------
   publish:
     name: Publish Release
-    needs: [validate-tag, build-and-verify]
+    needs: [validate-tag, build-and-verify, qemu-upgrade]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

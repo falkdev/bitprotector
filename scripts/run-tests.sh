@@ -164,19 +164,76 @@ run_qemu_resilience() {
     echo "qemu-resilience: OK"
 }
 
+resolve_previous_release_deb() {
+    local deb_suffix="$1"
+    local cache_dir baseline_tag baseline_deb
+
+    cache_dir="${PROJECT_ROOT}/target/debian/previous-release"
+
+    if [[ -n "${BASELINE_DEB:-}" ]]; then
+        baseline_deb=$(ls -1 ${BASELINE_DEB} 2>/dev/null | head -1 || true)
+        if [[ -n "${baseline_deb}" ]]; then
+            printf '%s\n' "${baseline_deb}"
+            return 0
+        fi
+        echo "WARN: BASELINE_DEB is set but no file matches: ${BASELINE_DEB}" >&2
+    fi
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "WARN: gh CLI not found; cannot auto-resolve previous release baseline" >&2
+        return 1
+    fi
+
+    baseline_tag=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+    if [[ -z "${baseline_tag}" || "${baseline_tag}" == "null" ]]; then
+        echo "WARN: unable to determine previous tagged release baseline" >&2
+        return 1
+    fi
+
+    mkdir -p "${cache_dir}"
+    if ! gh release download "${baseline_tag}" --pattern "*${deb_suffix}*.deb" --dir "${cache_dir}" >/dev/null 2>&1; then
+        echo "WARN: failed to download baseline .deb for ${deb_suffix} from ${baseline_tag}" >&2
+        return 1
+    fi
+
+    baseline_deb=$(ls -1 "${cache_dir}"/*"${deb_suffix}"*.deb 2>/dev/null | head -1 || true)
+    if [[ -z "${baseline_deb}" ]]; then
+        echo "WARN: no downloaded baseline .deb matched suffix ${deb_suffix}" >&2
+        return 1
+    fi
+
+    echo "Using previous release baseline ${baseline_tag}: ${baseline_deb}" >&2
+    printf '%s\n' "${baseline_deb}"
+}
+
 run_qemu_upgrade() {
     echo "--- Layer 10: QEMU upgrade (ubuntu-24.04 + ubuntu-26.04) ---"
     cd "${PROJECT_ROOT}"
-    if [[ -z "${ALPHA1_DEB:-}" ]]; then
-        echo "WARN: ALPHA1_DEB is not set; skipping local upgrade bundle"
-        return 0
+
+    local baseline24 baseline26
+    baseline24=$(resolve_previous_release_deb "24.04.1" || true)
+    if [[ -z "${baseline24}" ]]; then
+        echo "WARN: could not resolve 24.04 baseline .deb; skipping 24.04 upgrade"
+    else
+        GUEST_IMAGE=ubuntu-24.04 BASELINE_DEB="${baseline24}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
     fi
-    GUEST_IMAGE=ubuntu-24.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-24.04/bitprotector_*.deb"
+
     if [[ -f "${HOME}/images/resolute-server-cloudimg-amd64.img" ]]; then
-        GUEST_IMAGE=ubuntu-26.04 ALPHA1_DEB="${ALPHA1_DEB}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
+        baseline26=$(resolve_previous_release_deb "26.04.1" || true)
+        if [[ -z "${baseline26}" ]]; then
+            echo "WARN: could not resolve 26.04 baseline .deb; skipping 26.04 upgrade"
+        else
+            GUEST_IMAGE=ubuntu-26.04 BASELINE_DEB="${baseline26}" ./tests/installation/bundles/upgrade.sh "${PROJECT_ROOT}/target/debian/ubuntu-26.04/bitprotector_*.deb"
+        fi
     else
         echo "WARN: 26.04 image not found — skipping 26.04 upgrade"
     fi
+
+    if [[ -z "${baseline24}" && -z "${baseline26}" ]]; then
+        echo "WARN: no upgrade baselines resolved; upgrade bundle was skipped"
+        return 0
+    fi
+
     echo "qemu-upgrade: OK"
 }
 

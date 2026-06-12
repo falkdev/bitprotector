@@ -150,10 +150,12 @@ The installation tests require a built `.deb` package and a QEMU-compatible Ubun
 ```bash
 ./tests/installation/bundles/application_workflows.sh
 ./tests/installation/bundles/resilience.sh
-./tests/installation/bundles/upgrade.sh
+BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./tests/installation/bundles/upgrade.sh
 ./tests/installation/bundles/degraded_boot.sh
 ./tests/installation/bundles/drive_media_type.sh
 ```
+
+The upgrade bundle requires `BASELINE_DEB` and includes explicit schema, SQLite integrity, post-upgrade write-path, and restore-path compatibility assertions.
 
 Nightly-only bundles (resource-heavy; not run in standard CI):
 
@@ -182,6 +184,12 @@ The `run-tests.sh` script mirrors the CI layer structure without Docker:
 ./scripts/run-tests.sh fast    # lint + unit + Rust integration
 ./scripts/run-tests.sh smoke   # fast + .deb build + QEMU smoke
 ./scripts/run-tests.sh full    # smoke + application_workflows + failover + uninstall + resilience + upgrade + degraded-boot + drive-media-type
+```
+
+For `full`, the runner now attempts to auto-resolve baseline packages from the latest tagged GitHub release via `gh` when `BASELINE_DEB` is unset. You can still pin a specific baseline explicitly:
+
+```bash
+BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./scripts/run-tests.sh full
 ```
 
 To run through `act` (Docker-based, uses the same GitHub Actions YAML as CI):

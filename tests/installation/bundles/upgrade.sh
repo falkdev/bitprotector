@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/installation/bundles/upgrade.sh
-# Upgrade bundle: alpha4 -> current package upgrade and config preservation checks.
+# Upgrade bundle: previous tagged release -> current package compatibility checks.
 
 set -euo pipefail
 
@@ -18,20 +18,26 @@ source "${LIB_DIR}/scenarios.sh"
 source "${LIB_DIR}/cloud-init-db-disk.sh"
 
 DEB_PATH="${1:-${PROJECT_ROOT}/target/debian/bitprotector_*.deb}"
-ALPHA1_GLOB="${ALPHA1_DEB:-${PROJECT_ROOT}/target/debian/bitprotector_1.0.0~alpha4*.deb}"
+BASELINE_GLOB="${BASELINE_DEB:-}"
 SSH_PORT="${SSH_PORT:-2225}"
 API_PORT="${API_PORT:-18446}"
 TIMEOUT="${TIMEOUT:-900}"
+
+if [[ -z "${BASELINE_GLOB}" ]]; then
+  log ERROR "BASELINE_DEB is required for upgrade bundle baseline selection"
+  echo "Provide BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb"
+  exit 1
+fi
 
 require_commands qemu-system-x86_64 qemu-img cloud-localds ssh ssh-keygen
 SSH_KEY="$(resolve_ssh_key)"
 UBUNTU_IMAGE="$(resolve_guest_image)"
 
-ALPHA1_DEB_FILE=$(ls -1 ${ALPHA1_GLOB} 2>/dev/null | head -1 || true)
-ALPHA1_DEB_REALPATH="$(readlink -f "${ALPHA1_DEB_FILE}" 2>/dev/null || true)"
+BASELINE_DEB_FILE=$(ls -1 ${BASELINE_GLOB} 2>/dev/null | head -1 || true)
+BASELINE_DEB_REALPATH="$(readlink -f "${BASELINE_DEB_FILE}" 2>/dev/null || true)"
 CURRENT_DEB=$(while IFS= read -r candidate; do
     candidate_realpath="$(readlink -f "${candidate}" 2>/dev/null || true)"
-    if [[ "${candidate_realpath}" != "${ALPHA1_DEB_REALPATH}" ]]; then
+  if [[ "${candidate_realpath}" != "${BASELINE_DEB_REALPATH}" ]]; then
         echo "${candidate}"
         break
     fi
@@ -41,9 +47,9 @@ if [[ -z "${CURRENT_DEB}" ]]; then
     echo "Build with: cargo deb"
     exit 1
 fi
-if [[ -z "${ALPHA1_DEB_FILE}" ]]; then
-    log ERROR "alpha4 .deb file not found at ${ALPHA1_GLOB}"
-    echo "Provide ALPHA1_DEB=/path/to/bitprotector_1.0.0~alpha4*.deb"
+if [[ -z "${BASELINE_DEB_FILE}" ]]; then
+  log ERROR "baseline .deb file not found at ${BASELINE_GLOB}"
+  echo "Provide BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb"
     exit 1
 fi
 
@@ -58,9 +64,9 @@ mkdir -p "${WORKDIR}" "${WORKDIR}/debpkg"
 trap '[[ "${CI:-}" != "1" ]] && rm -rf "${WORKDIR}"; if [[ -n "${QEMU_PID:-}" ]]; then kill "${QEMU_PID}" 2>/dev/null || true; fi' EXIT
 
 cp -f "${CURRENT_DEB}" "${WORKDIR}/debpkg/"
-cp -f "${ALPHA1_DEB_FILE}" "${WORKDIR}/debpkg/"
+cp -f "${BASELINE_DEB_FILE}" "${WORKDIR}/debpkg/"
 CURRENT_DEB_NAME="$(basename "${CURRENT_DEB}")"
-ALPHA1_DEB_NAME="$(basename "${ALPHA1_DEB_FILE}")"
+BASELINE_DEB_NAME="$(basename "${BASELINE_DEB_FILE}")"
 
 ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 qemu-img create -f qcow2 -b "${UBUNTU_IMAGE}" -F qcow2 "${WORKDIR}/test.qcow2"
@@ -82,7 +88,7 @@ write_files:
     permissions: '0644'
     content: |
       CURRENT_DEB_NAME=${CURRENT_DEB_NAME}
-      ALPHA1_DEB_NAME=${ALPHA1_DEB_NAME}
+      BASELINE_DEB_NAME=${BASELINE_DEB_NAME}
 $(cloudinit_bpdb_write_file)
 
 runcmd:
@@ -90,7 +96,7 @@ runcmd:
   - mount -t 9p -o trans=virtio debpkg /mnt/debpkg || true
   - /usr/local/bin/bitprotector-db-storage.sh
   - apt-get update -q
-  - apt-get install -y -q jq openssl curl /mnt/debpkg/${ALPHA1_DEB_NAME}
+  - apt-get install -y -q jq openssl curl /mnt/debpkg/${BASELINE_DEB_NAME}
   - mkdir -p /etc/bitprotector/tls
   - openssl req -x509 -nodes -newkey rsa:2048 -days 365 -subj '/CN=localhost' -keyout /etc/bitprotector/tls/key.pem -out /etc/bitprotector/tls/cert.pem
   - chown -R bitprotector:bitprotector /etc/bitprotector/tls
@@ -141,13 +147,17 @@ rm -f /mnt/bitprotector-db/db/.write-test
 
 BUNDLE_START_TIME="$(date -Iseconds)"
 
-# shellcheck source=tests/installation/scenarios/upgrade/upgrade-01-alpha1-to-current-with-live-data.sh
-source "${SCENARIOS_DIR}/upgrade-01-alpha1-to-current-with-live-data.sh"
-run_scenario "upgrade-01-alpha1-to-current-with-live-data" upgrade_01_alpha1_to_current_with_live_data
+# shellcheck source=tests/installation/scenarios/upgrade/upgrade-01-baseline-to-current-with-live-data.sh
+source "${SCENARIOS_DIR}/upgrade-01-baseline-to-current-with-live-data.sh"
+run_scenario "upgrade-01-baseline-to-current-with-live-data" upgrade_01_baseline_to_current_with_live_data
 
 # shellcheck source=tests/installation/scenarios/upgrade/upgrade-02-reinstall-preserves-config.sh
 source "${SCENARIOS_DIR}/upgrade-02-reinstall-preserves-config.sh"
 run_scenario "upgrade-02-reinstall-preserves-config" upgrade_02_reinstall_preserves_config
+
+# shellcheck source=tests/installation/scenarios/upgrade/upgrade-03-restore-path-compatibility.sh
+source "${SCENARIOS_DIR}/upgrade-03-restore-path-compatibility.sh"
+run_scenario "upgrade-03-restore-path-compatibility" upgrade_03_restore_path_compatibility
 
 run_scenario "journal-error-scraper" journal_error_scraper
 
