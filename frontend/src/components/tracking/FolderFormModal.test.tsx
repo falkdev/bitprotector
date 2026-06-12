@@ -20,7 +20,7 @@ vi.mock('@/components/shared/PathPickerDialog', () => ({
     return (
       <div data-testid="path-picker-dialog">
         <span>{title}</span>
-        <button onClick={() => onPick('/mnt/primary/selected')}>Pick</button>
+        <button onClick={() => onPick('/mnt/secondary/selected')}>Pick</button>
         <button onClick={onClose}>ClosePicker</button>
       </div>
     )
@@ -51,7 +51,7 @@ describe('FolderFormModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
+      '/mnt/secondary/documents'
     )
     await user.click(screen.getByRole('button', { name: 'Add Folder' }))
 
@@ -88,7 +88,7 @@ describe('FolderFormModal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows path resolution error when path is outside primary root', async () => {
+  it('shows path resolution error when path is outside active root', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
 
@@ -123,7 +123,7 @@ describe('FolderFormModal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows the primary root hint after selecting a drive', async () => {
+  it('shows the active root hint after selecting a drive', async () => {
     const user = userEvent.setup()
 
     render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={vi.fn()} />)
@@ -134,7 +134,7 @@ describe('FolderFormModal', () => {
 
     await user.selectOptions(screen.getByRole('combobox'), '1')
 
-    expect(screen.getByText('Primary root: /mnt/primary')).toBeInTheDocument()
+    expect(screen.getByText('Active root: /mnt/secondary')).toBeInTheDocument()
   })
 
   it('shows the resolved relative path hint when a valid path is entered', async () => {
@@ -145,7 +145,7 @@ describe('FolderFormModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
+      '/mnt/secondary/documents'
     )
 
     expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
@@ -161,7 +161,7 @@ describe('FolderFormModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
+      '/mnt/secondary/documents'
     )
     await user.type(screen.getByPlaceholderText('/docs'), '/virtual/docs')
     await user.click(screen.getByRole('button', { name: 'Add Folder' }))

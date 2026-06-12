@@ -20,7 +20,7 @@ vi.mock('@/components/shared/PathPickerDialog', () => ({
     return (
       <div data-testid="path-picker-dialog">
         <span>{title}</span>
-        <button onClick={() => onPick('/mnt/primary/picked-file.txt')}>Pick</button>
+        <button onClick={() => onPick('/mnt/secondary/picked-file.txt')}>Pick</button>
         <button onClick={onClose}>ClosePicker</button>
       </div>
     )
@@ -56,7 +56,7 @@ describe('TrackFileModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
-      '/mnt/primary/docs/report.pdf'
+      '/mnt/secondary/docs/report.pdf'
     )
     await user.click(screen.getByRole('button', { name: 'Track file' }))
 
@@ -75,7 +75,7 @@ describe('TrackFileModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
-      '/mnt/primary/docs/report.pdf'
+      '/mnt/secondary/docs/report.pdf'
     )
     await user.type(screen.getByPlaceholderText('/docs/report.pdf'), '/virtual/docs/report.pdf')
     await user.click(screen.getByRole('button', { name: 'Track file' }))
@@ -112,7 +112,7 @@ describe('TrackFileModal', () => {
     expect(onTrack).not.toHaveBeenCalled()
   })
 
-  it('shows path resolution error when path is outside primary root', async () => {
+  it('shows path resolution error when path is outside active root', async () => {
     const user = userEvent.setup()
     const onTrack = vi.fn()
 
@@ -137,7 +137,7 @@ describe('TrackFileModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
-      '/mnt/primary/docs/report.pdf'
+      '/mnt/secondary/docs/report.pdf'
     )
     await user.type(screen.getByPlaceholderText('/docs/report.pdf'), 'relative/path')
     await user.click(screen.getByRole('button', { name: 'Track file' }))
@@ -146,7 +146,7 @@ describe('TrackFileModal', () => {
     expect(onTrack).not.toHaveBeenCalled()
   })
 
-  it('shows the primary root hint after selecting a drive', async () => {
+  it('shows the active root hint after selecting a drive', async () => {
     const user = userEvent.setup()
 
     render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
@@ -157,7 +157,7 @@ describe('TrackFileModal', () => {
 
     await user.selectOptions(screen.getByRole('combobox'), '1')
 
-    expect(screen.getByText('Primary root: /mnt/primary')).toBeInTheDocument()
+    expect(screen.getByText('Active root: /mnt/secondary')).toBeInTheDocument()
   })
 
   it('shows the resolved path hint when a valid path is entered', async () => {
@@ -168,7 +168,7 @@ describe('TrackFileModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
-      '/mnt/primary/docs/report.pdf'
+      '/mnt/secondary/docs/report.pdf'
     )
 
     expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
