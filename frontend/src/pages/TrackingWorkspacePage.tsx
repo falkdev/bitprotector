@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { isAxiosError } from 'axios'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
 import { foldersApi } from '@/api/folders'
@@ -21,6 +20,7 @@ import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
 import { TrackFileModal } from '@/components/tracking/TrackFileModal'
 import { FolderFormModal } from '@/components/tracking/FolderFormModal'
 import { formatDate } from '@/lib/format'
+import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
 import type { TrackedFolder } from '@/types/folder'
@@ -333,10 +333,8 @@ function VirtualPathTree({
       const children = response.children.map((child) => ({ ...child, loaded: false, children: [] }))
       setNodes((current) => updateTreeChildren(current, parent, children))
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to load virtual path tree'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to load virtual path tree')
       toast.error(errorMessage)
     } finally {
       setNodes((current) => setTreeLoading(current, parent, false))
@@ -445,10 +443,8 @@ export function TrackingWorkspacePage() {
       const nextResponse = await trackingApi.list(nextParams)
       setResponse(nextResponse)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to load tracking workspace'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to load tracking workspace')
       toast.error(errorMessage)
     } finally {
       setLoading(false)
@@ -462,10 +458,8 @@ export function TrackingWorkspacePage() {
         const next = await drivesApi.list()
         if (active) setDrives(next)
       } catch (error) {
-        const errorMessage =
-          isAxiosError(error) && error.response?.data
-            ? String(error.response.data)
-            : 'Failed to load drive pairs'
+        // Extract meaningful error message from backend response
+        const errorMessage = getErrorMessage(error, 'Failed to load drive pairs')
         toast.error(errorMessage)
       }
     }
@@ -573,10 +567,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to track file'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to track file')
       toast.error(errorMessage)
     }
   }
@@ -587,8 +579,8 @@ export function TrackingWorkspacePage() {
       toast.success('Mirror requested')
       await load(params)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data ? String(error.response.data) : 'Mirror failed'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Mirror failed')
       toast.error(errorMessage)
     }
   }
@@ -600,8 +592,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data ? String(error.response.data) : 'Scan failed'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Scan failed')
       toast.error(errorMessage)
     }
   }
@@ -613,10 +605,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Folder mirror failed'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Folder mirror failed')
       toast.error(errorMessage)
     }
   }
@@ -628,10 +618,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to update folder virtual path'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to update folder virtual path')
       toast.error(errorMessage)
     }
   }
@@ -782,10 +770,8 @@ export function TrackingWorkspacePage() {
       await load(params)
       setTreeRefreshKey((current) => current + 1)
     } catch (error) {
-      const errorMessage =
-        isAxiosError(error) && error.response?.data
-          ? String(error.response.data)
-          : 'Failed to update virtual path'
+      // Extract meaningful error message from backend response
+      const errorMessage = getErrorMessage(error, 'Failed to update virtual path')
       toast.error(errorMessage)
     }
   }
@@ -1244,10 +1230,8 @@ export function TrackingWorkspacePage() {
               await load(params)
               setTreeRefreshKey((current) => current + 1)
             } catch (error) {
-              const errorMessage =
-                isAxiosError(error) && error.response?.data
-                  ? String(error.response.data)
-                  : 'Failed to add folder'
+              // Extract meaningful error message from backend response
+              const errorMessage = getErrorMessage(error, 'Failed to add folder')
               toast.error(errorMessage)
             }
           }}
