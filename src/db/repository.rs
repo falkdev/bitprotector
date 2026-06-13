@@ -2598,7 +2598,9 @@ mod tests {
     fn test_tracked_folder_scan_state_lifecycle() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
-        let folder = repo.create_tracked_folder(pair.id, "documents/", None).unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "documents/", None)
+            .unwrap();
 
         let started = repo.start_folder_scan(folder.id, 4).unwrap();
         assert!(started.scanning);

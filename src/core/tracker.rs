@@ -268,13 +268,16 @@ where
 
             match repo.get_tracked_file_by_path(drive_pair.id, &relative_path) {
                 Ok(existing) => {
-                    if let Some(new_hash) = checksum::checksum_file(
-                        &path,
-                        checksum::ChecksumStrategy::Streaming,
-                    )?
-                    .ne(&existing.checksum)
-                    .then(|| checksum::checksum_file(&path, checksum::ChecksumStrategy::Streaming))
-                    .transpose()?
+                    if let Some(new_hash) =
+                        checksum::checksum_file(&path, checksum::ChecksumStrategy::Streaming)?
+                            .ne(&existing.checksum)
+                            .then(|| {
+                                checksum::checksum_file(
+                                    &path,
+                                    checksum::ChecksumStrategy::Streaming,
+                                )
+                            })
+                            .transpose()?
                     {
                         let new_size = path.metadata()?.len() as i64;
                         repo.update_tracked_file_checksum(existing.id, &new_hash, new_size)?;
@@ -492,7 +495,10 @@ mod tests {
         assert_eq!(progress_updates.last().copied(), Some((2, 2)));
 
         let updated_existing = repo.get_tracked_file(existing.id).unwrap();
-        assert_eq!(updated_existing.checksum, checksum::checksum_bytes(b"after"));
+        assert_eq!(
+            updated_existing.checksum,
+            checksum::checksum_bytes(b"after")
+        );
         assert!(!updated_existing.is_mirrored);
 
         let scanned_folder = repo.get_tracked_folder(folder.id).unwrap();

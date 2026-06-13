@@ -54,9 +54,7 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
   }
 }
 
-export function makeFolderScanStatus(
-  overrides: Partial<FolderScanStatus> = {}
-): FolderScanStatus {
+export function makeFolderScanStatus(overrides: Partial<FolderScanStatus> = {}): FolderScanStatus {
   return {
     scanning: true,
     scanned: 0,

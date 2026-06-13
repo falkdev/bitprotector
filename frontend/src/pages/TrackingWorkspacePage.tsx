@@ -442,9 +442,7 @@ function VirtualPathTree({
 export function TrackingWorkspacePage() {
   const [scanningFolderIds, setScanningFolderIds] = useState<Set<number>>(new Set())
   const [mirroringFolderIds, setMirroringFolderIds] = useState<Set<number>>(new Set())
-  const [folderScanStatuses, setFolderScanStatuses] = useState<Record<number, FolderScanStatus>>(
-    {}
-  )
+  const [folderScanStatuses, setFolderScanStatuses] = useState<Record<number, FolderScanStatus>>({})
   const [response, setResponse] = useState<{
     items: TrackingItem[]
     total: number

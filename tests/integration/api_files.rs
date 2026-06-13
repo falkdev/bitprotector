@@ -104,7 +104,7 @@ async fn test_files_track_accepts_absolute_path_within_active_root() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
         .insert_header(("Authorization", bearer()))
@@ -135,7 +135,7 @@ async fn test_files_track_rejects_path_outside_active_root() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
         .insert_header(("Authorization", bearer()))
@@ -545,7 +545,7 @@ async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty
     let folder = repo
         .create_tracked_folder(pair.id, "empty-scan", Some("/virtual/empty-scan"))
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -572,7 +572,15 @@ async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
+
+    loop {
+        let current = repo.get_tracked_folder(folder.id).unwrap();
+        if !current.scanning {
+            break;
+        }
+        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -610,7 +618,7 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
 
     let req = test::TestRequest::post()
         .uri("/api/v1/folders")
@@ -630,7 +638,15 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
+
+    loop {
+        let current = repo.get_tracked_folder(folder_id).unwrap();
+        if !current.scanning {
+            break;
+        }
+        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 
     let req = test::TestRequest::get()
         .uri(&format!(
