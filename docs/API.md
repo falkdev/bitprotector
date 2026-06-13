@@ -157,8 +157,10 @@ Create a new drive pair.
 
 `primary_media_type` and `secondary_media_type` are optional (default: `"hdd"`). Only `"hdd"` and `"ssd"` are accepted. `skip_validation` is optional (default: `false`); when `true`, the server skips the filesystem reachability check for both paths.
 
+Create-time path uniqueness is enforced across both slots of all existing drive pairs. Once a physical path has been registered as either a primary or secondary path, a later `POST /drives` may not reuse that same path in either slot. This means `(A, B)`, `(B, A)`, `(A, C)`, and `(D, A)` are all rejected after the first successful registration.
+
 **Response `201`:** Created drive pair object.  
-**Errors:** `400 Bad Request`, `500 Internal Server Error` (database error, including duplicate name constraint violation)
+**Errors:** `400 Bad Request`, `409 Conflict` (registered path reuse), `500 Internal Server Error` (unexpected database error, including duplicate name constraint violation)
 
 ---
 
