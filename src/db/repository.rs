@@ -296,7 +296,8 @@ impl Repository {
     }
 
     pub fn is_duplicate_drive_path_error(err: &anyhow::Error) -> bool {
-        err.chain().any(|e| e.to_string() == DUPLICATE_DRIVE_PATH_ERROR)
+        err.chain()
+            .any(|e| e.to_string() == DUPLICATE_DRIVE_PATH_ERROR)
     }
 
     fn map_drive_pair_create_error(result: rusqlite::Result<usize>) -> anyhow::Result<usize> {
