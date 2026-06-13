@@ -8,14 +8,30 @@ import { server } from '@/test/msw/server'
 import { makeDrivePair, makeSyncQueueItem } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
-const queueResponse = (items: ReturnType<typeof makeSyncQueueItem>[], paused = false) =>
+interface QueueResponseOptions {
+  total?: number
+  page?: number
+  perPage?: number
+  paused?: boolean
+  activeItems?: number
+  inProgressItems?: number
+}
+
+const queueResponse = (
+  items: ReturnType<typeof makeSyncQueueItem>[],
+  options: QueueResponseOptions = {}
+) =>
   HttpResponse.json({
     queue: items,
-    total: items.length,
-    page: 1,
-    per_page: 50,
-    queue_paused: paused,
-    active_items: items.filter((i) => i.status === 'pending' || i.status === 'in_progress').length,
+    total: options.total ?? items.length,
+    page: options.page ?? 1,
+    per_page: options.perPage ?? 50,
+    queue_paused: options.paused ?? false,
+    active_items:
+      options.activeItems ??
+      items.filter((i) => i.status === 'pending' || i.status === 'in_progress').length,
+    in_progress_items:
+      options.inProgressItems ?? items.filter((i) => i.status === 'in_progress').length,
   })
 
 describe('SyncQueuePage', () => {
@@ -196,7 +212,9 @@ describe('SyncQueuePage', () => {
   })
 
   it('shows paused banner when queue is paused', async () => {
-    server.use(api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 40 })], true)))
+    server.use(
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 40 })], { paused: true }))
+    )
 
     renderWithApp(<SyncQueuePage />)
 
@@ -206,7 +224,11 @@ describe('SyncQueuePage', () => {
   })
 
   it('hides paused banner and shows pause button when queue is not paused', async () => {
-    server.use(api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 41 })], false)))
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 41 })], { paused: false })
+      )
+    )
 
     renderWithApp(<SyncQueuePage />)
 
@@ -220,7 +242,7 @@ describe('SyncQueuePage', () => {
     let paused = false
 
     server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 42 })], paused)),
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 42 })], { paused })),
       api.post('/sync/pause', () => {
         paused = true
         return HttpResponse.json({ queue_paused: true })
@@ -241,7 +263,7 @@ describe('SyncQueuePage', () => {
     let paused = true
 
     server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 43 })], paused)),
+      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 43 })], { paused })),
       api.post('/sync/resume', () => {
         paused = false
         return HttpResponse.json({ queue_paused: false })
@@ -259,16 +281,28 @@ describe('SyncQueuePage', () => {
     })
   })
 
-  it('filters queue items by selecting a filter option', async () => {
+  it('filters queue items by requesting a filtered page from the server', async () => {
     const user = userEvent.setup()
+    const requestedStatuses: Array<string | null> = []
 
     server.use(
-      api.get('/sync/queue', () =>
-        queueResponse([
-          makeSyncQueueItem({ id: 50, status: 'pending' }),
-          makeSyncQueueItem({ id: 51, status: 'completed' }),
-        ])
-      )
+      api.get('/sync/queue', ({ request }) => {
+        const url = new URL(request.url)
+        const status = url.searchParams.get('status')
+        requestedStatuses.push(status)
+
+        if (status === 'pending') {
+          return queueResponse([makeSyncQueueItem({ id: 50, status: 'pending' })], { total: 1 })
+        }
+
+        return queueResponse(
+          [
+            makeSyncQueueItem({ id: 50, status: 'pending' }),
+            makeSyncQueueItem({ id: 51, status: 'completed' }),
+          ],
+          { total: 2 }
+        )
+      })
     )
 
     renderWithApp(<SyncQueuePage />)
@@ -278,9 +312,60 @@ describe('SyncQueuePage', () => {
     await user.selectOptions(screen.getByRole('combobox'), 'pending')
 
     await waitFor(() => {
+      expect(requestedStatuses).toContain('pending')
       expect(screen.getByTestId('sync-queue-row-50')).toBeInTheDocument()
       expect(screen.queryByTestId('sync-queue-row-51')).not.toBeInTheDocument()
     })
+  })
+
+  it('shows the server-reported total count', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 52, status: 'pending' })], { total: 7 })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByText('7 item(s) total')).toBeInTheDocument()
+  })
+
+  it('requests the next page when Next is clicked', async () => {
+    const user = userEvent.setup()
+    const requestedPages: number[] = []
+
+    server.use(
+      api.get('/sync/queue', ({ request }) => {
+        const url = new URL(request.url)
+        const page = Number(url.searchParams.get('page') ?? '1')
+        requestedPages.push(page)
+
+        if (page === 2) {
+          return queueResponse([makeSyncQueueItem({ id: 91 })], {
+            total: 2,
+            page: 2,
+            perPage: 1,
+          })
+        }
+
+        return queueResponse([makeSyncQueueItem({ id: 90 })], {
+          total: 2,
+          page: 1,
+          perPage: 1,
+        })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('sync-queue-row-90')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => {
+      expect(requestedPages).toContain(2)
+      expect(screen.getByTestId('sync-queue-row-91')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument()
   })
 
   it('closes the resolve dialog when cancel is clicked', async () => {
@@ -310,7 +395,9 @@ describe('SyncQueuePage', () => {
     const user = userEvent.setup()
 
     server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 70 })])),
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 70 })], { activeItems: 1, inProgressItems: 0 })
+      ),
       api.post('/sync/process', () => HttpResponse.json({ processed: 3 }))
     )
 
@@ -324,7 +411,7 @@ describe('SyncQueuePage', () => {
   it('disables pause button when queue is not paused and no active items exist', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        queueResponse([makeSyncQueueItem({ id: 80, status: 'completed' })], false)
+        queueResponse([makeSyncQueueItem({ id: 80, status: 'completed' })], { paused: false })
       )
     )
 
@@ -337,7 +424,7 @@ describe('SyncQueuePage', () => {
   it('enables pause button when queue is not paused and there are pending items', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        queueResponse([makeSyncQueueItem({ id: 81, status: 'pending' })], false)
+        queueResponse([makeSyncQueueItem({ id: 81, status: 'pending' })], { paused: false })
       )
     )
 
@@ -350,7 +437,7 @@ describe('SyncQueuePage', () => {
   it('enables resume button even when no active items exist', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        queueResponse([makeSyncQueueItem({ id: 82, status: 'completed' })], true)
+        queueResponse([makeSyncQueueItem({ id: 82, status: 'completed' })], { paused: true })
       )
     )
 
@@ -364,7 +451,9 @@ describe('SyncQueuePage', () => {
     const user = userEvent.setup()
 
     server.use(
-      api.get('/sync/queue', () => queueResponse([makeSyncQueueItem({ id: 71 })], false)),
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 71 })], { paused: false })
+      ),
       api.post('/sync/pause', () => HttpResponse.json({}, { status: 500 }))
     )
 
@@ -397,5 +486,37 @@ describe('SyncQueuePage', () => {
     await user.click(resolveButtons[resolveButtons.length - 1])
 
     expect(await screen.findByText('Failed to resolve queue item #72')).toBeInTheDocument()
+  })
+
+  it('disables Process Queue while the backend already has in-progress work', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 83, status: 'in_progress' })], {
+          activeItems: 1,
+          inProgressItems: 1,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const processButton = await screen.findByRole('button', { name: 'Processing...' })
+    expect(processButton).toBeDisabled()
+  })
+
+  it('enables Process Queue when no backend work is in progress and active items exist', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 84, status: 'pending' })], {
+          activeItems: 1,
+          inProgressItems: 0,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    const processButton = await screen.findByRole('button', { name: 'Process Queue' })
+    expect(processButton).toBeEnabled()
   })
 })

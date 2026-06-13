@@ -217,6 +217,7 @@ export function makeSyncQueueItem(overrides: Partial<SyncQueueItem> = {}): SyncQ
   return {
     id: 1,
     tracked_file_id: 1,
+    relative_path: 'documents/report.pdf',
     action: 'mirror',
     status: 'pending',
     error_message: null,

@@ -9,6 +9,7 @@ function makeSyncItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
   return {
     id: 1,
     tracked_file_id: 1,
+    relative_path: 'documents/report.pdf',
     action: 'mirror',
     status: 'pending',
     error_message: null,
@@ -23,9 +24,13 @@ function resetStore() {
     items: [],
     queuePaused: false,
     activeItems: 0,
+    inProgressItems: 0,
     loading: false,
     error: null,
     filter: 'all',
+    page: 1,
+    perPage: 50,
+    total: 0,
   })
 }
 
@@ -38,7 +43,15 @@ describe('sync-store', () => {
     const item = makeSyncItem()
     server.use(
       api.get('/sync/queue', () =>
-        HttpResponse.json({ queue: [item], queue_paused: true, active_items: 1 })
+        HttpResponse.json({
+          queue: [item],
+          total: 1,
+          page: 1,
+          per_page: 50,
+          queue_paused: true,
+          active_items: 1,
+          in_progress_items: 0,
+        })
       )
     )
 
@@ -47,6 +60,8 @@ describe('sync-store', () => {
     expect(useSyncStore.getState().items).toEqual([item])
     expect(useSyncStore.getState().queuePaused).toBe(true)
     expect(useSyncStore.getState().activeItems).toBe(1)
+    expect(useSyncStore.getState().inProgressItems).toBe(0)
+    expect(useSyncStore.getState().total).toBe(1)
     expect(useSyncStore.getState().loading).toBe(false)
     expect(useSyncStore.getState().error).toBeNull()
   })
@@ -60,27 +75,42 @@ describe('sync-store', () => {
     expect(useSyncStore.getState().loading).toBe(false)
   })
 
-  it('setFilter updates filter', () => {
-    useSyncStore.getState().setFilter('completed')
+  it('setFilter updates filter', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [],
+          total: 0,
+          page: 1,
+          per_page: 50,
+          queue_paused: false,
+          active_items: 0,
+          in_progress_items: 0,
+        })
+      )
+    )
+
+    await useSyncStore.getState().setFilter('completed')
     expect(useSyncStore.getState().filter).toBe('completed')
   })
 
-  it('filteredItems returns all items when filter is all', () => {
-    const item1 = makeSyncItem({ id: 1, status: 'pending' })
-    const item2 = makeSyncItem({ id: 2, status: 'completed' })
-    useSyncStore.setState({ items: [item1, item2], filter: 'all' })
+  it('setPage updates page', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        HttpResponse.json({
+          queue: [],
+          total: 0,
+          page: 2,
+          per_page: 50,
+          queue_paused: false,
+          active_items: 0,
+          in_progress_items: 0,
+        })
+      )
+    )
 
-    expect(useSyncStore.getState().filteredItems()).toHaveLength(2)
-  })
-
-  it('filteredItems returns only matching status items', () => {
-    const item1 = makeSyncItem({ id: 1, status: 'pending' })
-    const item2 = makeSyncItem({ id: 2, status: 'completed' })
-    useSyncStore.setState({ items: [item1, item2], filter: 'completed' })
-
-    const filtered = useSyncStore.getState().filteredItems()
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0].id).toBe(2)
+    await useSyncStore.getState().setPage(2)
+    expect(useSyncStore.getState().page).toBe(2)
   })
 
   it('refreshItem updates existing item by id', () => {

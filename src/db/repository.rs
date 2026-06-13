@@ -144,6 +144,7 @@ pub struct VirtualPathTreeNode {
 pub struct SyncQueueItem {
     pub id: i64,
     pub tracked_file_id: i64,
+    pub relative_path: String,
     pub action: String,
     pub status: String,
     pub error_message: Option<String>,
@@ -1616,18 +1617,22 @@ impl Repository {
     pub fn get_sync_queue_item(&self, id: i64) -> anyhow::Result<SyncQueueItem> {
         let conn = self.conn()?;
         let item = conn.query_row(
-            "SELECT id, tracked_file_id, action, status, error_message, created_at, completed_at
-             FROM sync_queue WHERE id=?1",
+            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
+                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+             FROM sync_queue sq
+             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+             WHERE sq.id=?1",
             rusqlite::params![id],
             |row| {
                 Ok(SyncQueueItem {
                     id: row.get(0)?,
                     tracked_file_id: row.get(1)?,
-                    action: row.get(2)?,
-                    status: row.get(3)?,
-                    error_message: row.get(4)?,
-                    created_at: row.get(5)?,
-                    completed_at: row.get(6)?,
+                    relative_path: row.get(2)?,
+                    action: row.get(3)?,
+                    status: row.get(4)?,
+                    error_message: row.get(5)?,
+                    created_at: row.get(6)?,
+                    completed_at: row.get(7)?,
                 })
             },
         )?;
@@ -1643,15 +1648,19 @@ impl Repository {
         let conn = self.conn()?;
         let offset = (page - 1) * per_page;
         let (where_clause, params_status) = if let Some(s) = status {
-            (format!("WHERE status='{}'", s.replace('\'', "''")), true)
+            (format!("WHERE sq.status='{}'", s.replace('\'', "''")), true)
         } else {
             (String::new(), false)
         };
         let query = format!(
-            "SELECT id, tracked_file_id, action, status, error_message, created_at, completed_at
-             FROM sync_queue {where_clause} ORDER BY id LIMIT {per_page} OFFSET {offset}"
+            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
+                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+             FROM sync_queue sq
+             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+             {where_clause}
+             ORDER BY sq.id LIMIT {per_page} OFFSET {offset}"
         );
-        let count_query = format!("SELECT COUNT(*) FROM sync_queue {where_clause}");
+        let count_query = format!("SELECT COUNT(*) FROM sync_queue sq {where_clause}");
 
         let items = conn
             .prepare(&query)?
@@ -1659,11 +1668,12 @@ impl Repository {
                 Ok(SyncQueueItem {
                     id: row.get(0)?,
                     tracked_file_id: row.get(1)?,
-                    action: row.get(2)?,
-                    status: row.get(3)?,
-                    error_message: row.get(4)?,
-                    created_at: row.get(5)?,
-                    completed_at: row.get(6)?,
+                    relative_path: row.get(2)?,
+                    action: row.get(3)?,
+                    status: row.get(4)?,
+                    error_message: row.get(5)?,
+                    created_at: row.get(6)?,
+                    completed_at: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2024,6 +2034,16 @@ impl Repository {
         let conn = self.conn()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sync_queue WHERE status IN ('pending', 'in_progress')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn count_in_progress_sync_queue(&self) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE status='in_progress'",
             [],
             |r| r.get(0),
         )?;
@@ -2540,6 +2560,7 @@ mod tests {
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
         assert_eq!(item.action, "mirror");
         assert_eq!(item.status, "pending");
+        assert_eq!(item.relative_path, "f.txt");
 
         repo.update_sync_queue_status(item.id, "completed", None)
             .unwrap();
@@ -2613,6 +2634,7 @@ mod tests {
 
         let (remaining, total) = repo.list_sync_queue(None, 1, 50).unwrap();
         assert_eq!(total, 2);
+        assert_eq!(repo.count_in_progress_sync_queue().unwrap(), 1);
         assert!(remaining.iter().any(|item| item.id == in_progress.id));
         assert!(remaining.iter().any(|item| item.id == pending.id));
         assert!(remaining.iter().all(|item| item.status != "completed"));
