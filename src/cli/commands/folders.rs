@@ -1,6 +1,5 @@
 use crate::core::{change_detection, drive, mirror, tracker};
 use crate::db::repository::Repository;
-use crate::logging::event_logger;
 use clap::{Args, Subcommand};
 
 #[derive(Subcommand, Debug)]
@@ -11,7 +10,7 @@ pub enum FoldersCommand {
     List,
     /// Show details of a tracked folder
     Show { id: i64 },
-    /// Remove a tracked folder (does not delete files)
+    /// Remove a tracked folder and untrack folder-origin descendant files
     Remove { id: i64 },
     /// Scan a tracked folder for new or changed files
     Scan(ScanArgs),
@@ -92,15 +91,12 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("  Created:           {}", folder.created_at);
         }
         FoldersCommand::Remove { id } => {
-            let folder = repo.get_tracked_folder(id)?;
-            crate::core::virtual_path::remove_folder_virtual_path(repo, id)?;
-            repo.delete_tracked_folder(id)?;
-            let full_path = repo
-                .get_drive_pair(folder.drive_pair_id)
-                .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
-                .unwrap_or_else(|_| folder.folder_path.clone());
-            let _ = event_logger::log_folder_untracked(repo, id, &full_path);
-            println!("Removed tracked folder #{id}");
+            let result = tracker::untrack_folder_cascade(repo, id)?;
+            println!(
+                "Removed tracked folder #{} and untracked {} folder-origin descendant file(s)",
+                result.folder_id,
+                result.removed_file_count()
+            );
         }
         FoldersCommand::Scan(args) => {
             let folder = repo.get_tracked_folder(args.id)?;
@@ -260,6 +256,41 @@ mod tests {
         let folder = repo.create_tracked_folder(pair.id, "tmp", None).unwrap();
         handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
         assert!(repo.list_tracked_folders().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_remove_folder_cascades_folder_origin_descendants_only() {
+        let repo = make_repo();
+        let primary = TempDir::new().unwrap();
+        let secondary = TempDir::new().unwrap();
+        let pair = setup_pair(&repo, &primary, &secondary);
+
+        fs::create_dir_all(primary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/folder-only.txt"), b"folder").unwrap();
+        fs::write(primary.path().join("docs/direct.txt"), b"direct").unwrap();
+
+        let folder = tracker::track_folder(&repo, &pair, "docs", None).unwrap();
+        tracker::auto_track_folder_files(&repo, &pair, &folder).unwrap();
+        let direct = tracker::track_file(&repo, &pair, "docs/direct.txt", None).unwrap();
+        let folder_only = repo
+            .get_tracked_file_by_path(pair.id, "docs/folder-only.txt")
+            .unwrap();
+
+        let folder_only_queue = repo
+            .create_sync_queue_item(folder_only.id, "mirror")
+            .unwrap();
+        let direct_queue = repo.create_sync_queue_item(direct.id, "mirror").unwrap();
+
+        handle(FoldersCommand::Remove { id: folder.id }, &repo).unwrap();
+
+        assert!(repo.get_tracked_folder(folder.id).is_err());
+        assert!(repo.get_tracked_file(folder_only.id).is_err());
+        assert!(repo.get_sync_queue_item(folder_only_queue.id).is_err());
+        assert!(repo.get_sync_queue_item(direct_queue.id).is_ok());
+
+        let preserved = repo.get_tracked_file(direct.id).unwrap();
+        assert!(preserved.tracked_direct);
+        assert!(!preserved.tracked_via_folder);
     }
 
     #[test]

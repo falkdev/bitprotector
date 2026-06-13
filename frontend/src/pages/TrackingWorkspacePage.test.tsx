@@ -345,7 +345,15 @@ describe('TrackingWorkspacePage', () => {
         if (listCalls === 1) {
           return HttpResponse.json(
             makeTrackingListResponse([
-              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+              makeTrackingItem({
+                id: 12,
+                kind: 'file',
+                path: 'docs/folder-only.txt',
+                source: 'folder',
+                tracked_direct: false,
+                tracked_via_folder: true,
+              }),
               makeTrackingItem({
                 id: 21,
                 kind: 'folder',
@@ -358,7 +366,11 @@ describe('TrackingWorkspacePage', () => {
             ])
           )
         }
-        return HttpResponse.json(makeTrackingListResponse([]))
+        return HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+          ])
+        )
       }),
       api.delete('/files/11', () => {
         deletedFiles += 1
@@ -384,7 +396,8 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(deletedFiles).toBe(1)
       expect(deletedFolders).toBe(1)
-      expect(screen.queryByTestId('file-row-11')).not.toBeInTheDocument()
+      expect(screen.getByTestId('file-row-11')).toBeInTheDocument()
+      expect(screen.queryByTestId('file-row-12')).not.toBeInTheDocument()
       expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
     })
   })

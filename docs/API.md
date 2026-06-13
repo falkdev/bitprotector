@@ -628,6 +628,8 @@ Return one lazy tree level of virtual-path children under an absolute parent pre
 
 ## Tracked Folders
 
+Tracked folders can auto-track descendant files during scans. Removing a tracked folder untracks only descendant files that originated from that folder (`tracked_via_folder=true` and `tracked_direct=false`). Descendant files that were also explicitly tracked remain tracked.
+
 Tracked folders let BitProtector automatically discover and track new files added to a directory.
 
 ### GET `/folders`
@@ -740,7 +742,9 @@ After a successful mirror, pending/in-progress `mirror` queue rows for mirrored 
 
 ### DELETE `/folders/{id}`
 
-Stop tracking the folder. Already-tracked files are **not** removed.
+Stop tracking the folder.
+
+Folder-origin descendant files are untracked as part of this operation when they are still marked `tracked_via_folder=true` and `tracked_direct=false`. Descendant files that were explicitly tracked remain tracked.
 
 **Response `204`:** No content.  
 **Errors:** `404 Not Found`

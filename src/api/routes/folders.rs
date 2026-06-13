@@ -1,7 +1,6 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
 use crate::core::{change_detection, drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
-use crate::logging::event_logger;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -87,25 +86,18 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
 
-    if folder.virtual_path.is_some() {
-        if let Err(e) = virtual_path::remove_folder_virtual_path(&repo, id) {
-            return HttpResponse::BadRequest().body(e.to_string());
-        }
+    let drive_pair = match repo.get_drive_pair(folder.drive_pair_id) {
+        Ok(drive_pair) => drive_pair,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    if let Err(e) = drive::require_pair_mutation_allowed(&drive_pair) {
+        return HttpResponse::BadRequest().body(e.to_string());
     }
 
-    match repo.delete_tracked_folder(id) {
-        Ok(_) => {
-            let full_path = repo
-                .get_drive_pair(folder.drive_pair_id)
-                .map(|dp| format!("{}/{}", dp.primary_path, folder.folder_path))
-                .unwrap_or_else(|_| folder.folder_path.clone());
-            let _ = event_logger::log_folder_untracked(&repo, id, &full_path);
-            if let Err(e) = repo.recompute_folder_provenance_for_drive(folder.drive_pair_id) {
-                return HttpResponse::InternalServerError().body(e.to_string());
-            }
-            HttpResponse::NoContent().finish()
-        }
-        Err(e) => HttpResponse::NotFound().body(e.to_string()),
+    match tracker::untrack_folder_cascade(&repo, id) {
+        Ok(_) => HttpResponse::NoContent().finish(),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 

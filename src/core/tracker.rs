@@ -5,6 +5,19 @@ use anyhow::Context;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
+pub struct FolderUntrackResult {
+    pub folder_id: i64,
+    pub drive_pair_id: i64,
+    pub removed_file_ids: Vec<i64>,
+}
+
+impl FolderUntrackResult {
+    pub fn removed_file_count(&self) -> usize {
+        self.removed_file_ids.len()
+    }
+}
+
 /// Ensure the file at `path` has world-read access (and world-execute if the
 /// owner can execute). This is required so that any service on the system can
 /// read tracked files through virtual-path symlinks.
@@ -132,6 +145,45 @@ pub fn track_folder(
     let full_path = format!("{}/{}", drive_pair.primary_path, folder_path);
     let _ = event_logger::log_folder_tracked(repo, result.id, &full_path, drive_pair.id);
     Ok(result)
+}
+
+pub fn untrack_folder_cascade(
+    repo: &Repository,
+    folder_id: i64,
+) -> anyhow::Result<FolderUntrackResult> {
+    let folder = repo.get_tracked_folder(folder_id)?;
+    let drive_pair = repo.get_drive_pair(folder.drive_pair_id)?;
+    drive::require_pair_mutation_allowed(&drive_pair)?;
+
+    let descendants =
+        repo.list_folder_origin_descendant_files(folder.drive_pair_id, &folder.folder_path)?;
+    let mut removed_file_ids = Vec::with_capacity(descendants.len());
+
+    for file in descendants {
+        if file.virtual_path.is_some() {
+            virtual_path::remove_virtual_path(repo, file.id)?;
+        }
+        let full_path = format!("{}/{}", drive_pair.primary_path, file.relative_path);
+        let _ = event_logger::log_file_untracked(repo, file.id, &full_path);
+        repo.delete_tracked_file(file.id)?;
+        removed_file_ids.push(file.id);
+    }
+
+    if folder.virtual_path.is_some() {
+        virtual_path::remove_folder_virtual_path(repo, folder.id)?;
+    }
+
+    repo.delete_tracked_folder(folder.id)?;
+    repo.recompute_folder_provenance_for_drive(folder.drive_pair_id)?;
+
+    let full_path = format!("{}/{}", drive_pair.primary_path, folder.folder_path);
+    let _ = event_logger::log_folder_untracked(repo, folder.id, &full_path);
+
+    Ok(FolderUntrackResult {
+        folder_id: folder.id,
+        drive_pair_id: folder.drive_pair_id,
+        removed_file_ids,
+    })
 }
 
 /// Scan a tracked folder and auto-track any untracked files.
@@ -411,6 +463,75 @@ mod tests {
             queue[0].action, "adopt_mirror",
             "Folder scan should enqueue adopt_mirror, not mirror"
         );
+    }
+
+    #[test]
+    fn test_untrack_folder_cascade_removes_folder_origin_descendants_only() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let virtual_root = TempDir::new().unwrap();
+
+        fs::create_dir_all(primary.path().join("docs/sub")).unwrap();
+        fs::write(primary.path().join("docs/folder-only.txt"), b"folder-only").unwrap();
+        fs::write(primary.path().join("docs/direct.txt"), b"direct").unwrap();
+
+        let folder_virtual_path = virtual_root.path().join("virtual/docs");
+        let file_virtual_path = virtual_root.path().join("virtual/direct-child.txt");
+
+        let folder = track_folder(
+            &repo,
+            &pair,
+            "docs",
+            Some(folder_virtual_path.to_str().unwrap()),
+        )
+        .unwrap();
+        auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        let direct_file = track_file(
+            &repo,
+            &pair,
+            "docs/direct.txt",
+            Some(file_virtual_path.to_str().unwrap()),
+        )
+        .unwrap();
+        let folder_only_file = repo
+            .get_tracked_file_by_path(pair.id, "docs/folder-only.txt")
+            .unwrap();
+
+        let folder_only_queue = repo
+            .create_sync_queue_item(folder_only_file.id, "mirror")
+            .unwrap();
+        let direct_queue = repo
+            .create_sync_queue_item(direct_file.id, "mirror")
+            .unwrap();
+
+        let result = untrack_folder_cascade(&repo, folder.id).unwrap();
+
+        assert_eq!(result.folder_id, folder.id);
+        assert_eq!(result.drive_pair_id, pair.id);
+        assert_eq!(result.removed_file_count(), 1);
+        assert_eq!(result.removed_file_ids, vec![folder_only_file.id]);
+
+        assert!(repo.get_tracked_folder(folder.id).is_err());
+        assert!(repo.get_tracked_file(folder_only_file.id).is_err());
+        assert!(repo.get_sync_queue_item(folder_only_queue.id).is_err());
+        assert!(repo.get_sync_queue_item(direct_queue.id).is_ok());
+        assert!(!folder_virtual_path.exists());
+        assert!(file_virtual_path.is_symlink());
+
+        let preserved = repo.get_tracked_file(direct_file.id).unwrap();
+        assert!(preserved.tracked_direct);
+        assert!(!preserved.tracked_via_folder);
+
+        let (events, total_events) = repo.list_event_logs(None, None, None, None, 1, 20).unwrap();
+        assert!(total_events >= 2);
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "file_untracked"
+                && event.message.contains("docs/folder-only.txt")));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "folder_untracked" && event.message.contains("docs")));
     }
 
     #[cfg(unix)]

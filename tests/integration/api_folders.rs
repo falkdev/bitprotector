@@ -223,6 +223,83 @@ async fn test_folders_get_and_delete() {
 }
 
 #[actix_rt::test]
+async fn test_folders_delete_cascades_folder_origin_descendants_and_preserves_direct_files() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let virtual_root = TempDir::new().unwrap();
+    fs::create_dir_all(primary.path().join("docs")).unwrap();
+    fs::write(primary.path().join("docs/folder-only.txt"), b"folder-only").unwrap();
+    fs::write(primary.path().join("docs/direct.txt"), b"direct").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-cascade",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo
+        .create_tracked_folder(
+            pair.id,
+            "docs",
+            Some(virtual_root.path().join("virtual/docs").to_str().unwrap()),
+        )
+        .unwrap();
+    let checksum_folder = checksum::checksum_bytes(b"folder-only");
+    let checksum_direct = checksum::checksum_bytes(b"direct");
+    let folder_only = repo
+        .create_tracked_file_with_source(
+            pair.id,
+            "docs/folder-only.txt",
+            &checksum_folder,
+            11,
+            Some(
+                virtual_root
+                    .path()
+                    .join("virtual/docs-folder-only.txt")
+                    .to_str()
+                    .unwrap(),
+            ),
+            false,
+            true,
+        )
+        .unwrap();
+    let direct = repo
+        .create_tracked_file_with_source(
+            pair.id,
+            "docs/direct.txt",
+            &checksum_direct,
+            6,
+            None,
+            true,
+            false,
+        )
+        .unwrap();
+    let folder_queue = repo
+        .create_sync_queue_item(folder_only.id, "mirror")
+        .unwrap();
+    let direct_queue = repo.create_sync_queue_item(direct.id, "mirror").unwrap();
+    let app = make_app!(repo.clone()).await;
+
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/folders/{}", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 204);
+
+    assert!(repo.get_tracked_folder(folder.id).is_err());
+    assert!(repo.get_tracked_file(folder_only.id).is_err());
+    assert!(repo.get_sync_queue_item(folder_queue.id).is_err());
+    assert!(repo.get_sync_queue_item(direct_queue.id).is_ok());
+
+    let preserved = repo.get_tracked_file(direct.id).unwrap();
+    assert!(preserved.tracked_direct);
+    assert!(!preserved.tracked_via_folder);
+}
+
+#[actix_rt::test]
 async fn test_folders_scan() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();

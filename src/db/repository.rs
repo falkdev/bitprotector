@@ -1178,6 +1178,47 @@ impl Repository {
         Ok(files)
     }
 
+    pub fn list_folder_origin_descendant_files(
+        &self,
+        drive_pair_id: i64,
+        folder_path: &str,
+    ) -> anyhow::Result<Vec<TrackedFile>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_integrity_check_at, created_at, updated_at
+             FROM tracked_files
+             WHERE drive_pair_id = ?1
+               AND tracked_direct = 0
+               AND tracked_via_folder = 1
+               AND (
+                    relative_path = rtrim(?2, '/')
+                    OR relative_path LIKE rtrim(?2, '/') || '/%'
+               )
+             ORDER BY id",
+        )?;
+        let files = stmt
+            .query_map(rusqlite::params![drive_pair_id, folder_path], |row| {
+                Ok(TrackedFile {
+                    id: row.get(0)?,
+                    drive_pair_id: row.get(1)?,
+                    relative_path: row.get(2)?,
+                    checksum: row.get(3)?,
+                    file_size: row.get(4)?,
+                    virtual_path: row.get(5)?,
+                    is_mirrored: row.get::<_, i64>(6)? != 0,
+                    tracked_direct: row.get::<_, i64>(7)? != 0,
+                    tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                    last_integrity_check_at: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(files)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn list_tracking_items(
         &self,
@@ -2525,6 +2566,58 @@ mod tests {
 
         repo.delete_tracked_folder(folder.id).unwrap();
         assert!(repo.get_tracked_folder(folder.id).is_err());
+    }
+
+    #[test]
+    fn test_list_folder_origin_descendant_files_filters_direct_descendants() {
+        let repo = make_repo();
+        let pair = repo
+            .create_drive_pair("pair", "/primary", "/secondary")
+            .unwrap();
+
+        let folder_origin = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/folder-only.txt",
+                "hash-folder",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        let _direct = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/direct.txt",
+                "hash-direct",
+                10,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        let _outside = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "images/elsewhere.txt",
+                "hash-outside",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+
+        let files = repo
+            .list_folder_origin_descendant_files(pair.id, "docs")
+            .unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, folder_origin.id);
+        assert_eq!(files[0].relative_path, "docs/folder-only.txt");
+        assert!(!files[0].tracked_direct);
+        assert!(files[0].tracked_via_folder);
     }
 
     // ─── Sync Queue ───────────────────────────────────────────────────────────────
