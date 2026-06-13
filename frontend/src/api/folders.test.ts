@@ -3,7 +3,7 @@ import { HttpResponse } from 'msw'
 import { foldersApi } from './folders'
 import { server } from '@/test/msw/server'
 import { api, apiError } from '@/test/msw/http'
-import { makeTrackedFolder, makeScanFolderResult } from '@/test/factories'
+import { makeFolderScanStatus, makeTrackedFolder } from '@/test/factories'
 
 describe('foldersApi', () => {
   it('list/get/create/update/delete/scan/mirror return payloads', async () => {
@@ -14,7 +14,8 @@ describe('foldersApi', () => {
       api.post('/folders', () => HttpResponse.json(folder, { status: 201 })),
       api.put('/folders/:id', () => HttpResponse.json(folder)),
       api.delete('/folders/:id', () => new HttpResponse(null, { status: 204 })),
-      api.post('/folders/:id/scan', () => HttpResponse.json(makeScanFolderResult())),
+      api.post('/folders/:id/scan', () => HttpResponse.json(makeFolderScanStatus())),
+      api.get('/folders/:id/scan/active', () => HttpResponse.json(makeFolderScanStatus())),
       api.post('/folders/:id/mirror', () => HttpResponse.json({ mirrored_files: 3 }))
     )
 
@@ -25,7 +26,8 @@ describe('foldersApi', () => {
     ).resolves.toMatchObject({ id: 4 })
     await expect(foldersApi.update(4, { virtual_path: '/docs' })).resolves.toMatchObject({ id: 4 })
     await expect(foldersApi.delete(4)).resolves.toBeUndefined()
-    await expect(foldersApi.scan(4)).resolves.toMatchObject({ new_files: 2 })
+    await expect(foldersApi.scan(4)).resolves.toMatchObject({ scanning: true, total: 2 })
+    await expect(foldersApi.scanActive(4)).resolves.toMatchObject({ scanning: true, total: 2 })
     await expect(foldersApi.mirror(4)).resolves.toMatchObject({ mirrored_files: 3 })
   })
 

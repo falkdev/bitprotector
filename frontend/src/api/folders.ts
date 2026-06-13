@@ -3,7 +3,7 @@ import type {
   TrackedFolder,
   CreateFolderRequest,
   UpdateFolderRequest,
-  ScanFolderResult,
+  FolderScanStatus,
   MirrorFolderResult,
 } from '@/types/folder'
 
@@ -28,8 +28,12 @@ export const foldersApi = {
     return apiClient.delete(`/folders/${id}`).then(() => undefined)
   },
 
-  scan(id: number): Promise<ScanFolderResult> {
-    return apiClient.post<ScanFolderResult>(`/folders/${id}/scan`).then((r) => r.data)
+  scan(id: number): Promise<FolderScanStatus> {
+    return apiClient.post<FolderScanStatus>(`/folders/${id}/scan`).then((r) => r.data)
+  },
+
+  scanActive(id: number): Promise<FolderScanStatus> {
+    return apiClient.get<FolderScanStatus>(`/folders/${id}/scan/active`).then((r) => r.data)
   },
 
   mirror(id: number): Promise<MirrorFolderResult> {

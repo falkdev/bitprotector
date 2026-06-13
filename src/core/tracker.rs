@@ -196,6 +196,138 @@ pub fn auto_track_folder_files(
     Ok(newly_tracked)
 }
 
+pub struct FolderScanSummary {
+    pub new_files: usize,
+    pub changed_files: usize,
+}
+
+fn relative_path_for_entry(path: &Path, drive_pair: &DrivePair) -> anyhow::Result<String> {
+    path.strip_prefix(drive_pair.active_path())?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))
+}
+
+pub fn count_folder_files(drive_pair: &DrivePair, folder: &TrackedFolder) -> anyhow::Result<i64> {
+    let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
+    let mut count = 0i64;
+    let mut dirs_to_visit = vec![folder_full_path];
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("Cannot read folder: {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs_to_visit.push(path);
+                continue;
+            }
+            if path.is_file() {
+                count += 1;
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+pub fn scan_tracked_folder<F>(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+    folder: &TrackedFolder,
+    mut on_progress: F,
+) -> anyhow::Result<FolderScanSummary>
+where
+    F: FnMut(i64, i64) -> anyhow::Result<()>,
+{
+    drive::require_pair_mutation_allowed(drive_pair)?;
+
+    let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
+    let total_files = count_folder_files(drive_pair, folder)?;
+    let mut scanned_files = 0i64;
+    let mut new_files = 0usize;
+    let mut changed_files = 0usize;
+    let mut dirs_to_visit = vec![folder_full_path];
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("Cannot read folder: {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs_to_visit.push(path);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+
+            let relative_path = relative_path_for_entry(&path, drive_pair)?;
+
+            match repo.get_tracked_file_by_path(drive_pair.id, &relative_path) {
+                Ok(existing) => {
+                    if let Some(new_hash) = checksum::checksum_file(
+                        &path,
+                        checksum::ChecksumStrategy::Streaming,
+                    )?
+                    .ne(&existing.checksum)
+                    .then(|| checksum::checksum_file(&path, checksum::ChecksumStrategy::Streaming))
+                    .transpose()?
+                    {
+                        let new_size = path.metadata()?.len() as i64;
+                        repo.update_tracked_file_checksum(existing.id, &new_hash, new_size)?;
+                        repo.update_tracked_file_mirror_status(existing.id, false)?;
+                        let _ = event_logger::log_event(
+                            repo,
+                            "change_detected",
+                            Some(existing.id),
+                            &format!(
+                                "Change detected on active {} drive: {}/{}",
+                                drive_pair.active_role, drive_pair.primary_path, relative_path
+                            ),
+                            Some(&new_hash),
+                        );
+                        if drive_pair.standby_accepts_sync() {
+                            let _ = sync_queue::create_from_change(repo, existing.id)?;
+                        }
+                        changed_files += 1;
+                    }
+                }
+                Err(_) => {
+                    let file = create_tracked_file_from_disk(
+                        repo,
+                        drive_pair,
+                        &relative_path,
+                        false,
+                        true,
+                    )?;
+                    let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
+                    let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
+                    if drive_pair.standby_accepts_sync() {
+                        let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
+                    } else {
+                        repo.update_tracked_file_mirror_status(file.id, false)?;
+                    }
+                    new_files += 1;
+                }
+            }
+
+            scanned_files += 1;
+            on_progress(scanned_files, total_files)?;
+        }
+    }
+
+    repo.recompute_folder_provenance_for_drive(drive_pair.id)?;
+    repo.mark_tracked_folder_scanned(folder.id)?;
+
+    Ok(FolderScanSummary {
+        new_files,
+        changed_files,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +467,38 @@ mod tests {
             Some(virtual_path_on_disk.to_string_lossy().to_string())
         );
         assert!(virtual_path_on_disk.is_symlink());
+    }
+
+    #[test]
+    fn test_scan_tracked_folder_records_new_and_changed_files() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        fs::create_dir(primary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/existing.txt"), b"before").unwrap();
+        let existing = track_file(&repo, &pair, "docs/existing.txt", None).unwrap();
+        fs::write(primary.path().join("docs/existing.txt"), b"after").unwrap();
+        fs::write(primary.path().join("docs/new.txt"), b"new").unwrap();
+        let folder = track_folder(&repo, &pair, "docs", None).unwrap();
+
+        let mut progress_updates = Vec::new();
+        let summary = scan_tracked_folder(&repo, &pair, &folder, |scanned, total| {
+            progress_updates.push((scanned, total));
+            repo.update_scan_progress(folder.id, scanned, total)
+        })
+        .unwrap();
+
+        assert_eq!(summary.new_files, 1);
+        assert_eq!(summary.changed_files, 1);
+        assert_eq!(progress_updates.last().copied(), Some((2, 2)));
+
+        let updated_existing = repo.get_tracked_file(existing.id).unwrap();
+        assert_eq!(updated_existing.checksum, checksum::checksum_bytes(b"after"));
+        assert!(!updated_existing.is_mirrored);
+
+        let scanned_folder = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(scanned_folder.scan_scanned_files, 2);
+        assert_eq!(scanned_folder.scan_total_files, 2);
+        assert!(scanned_folder.last_scanned_at.is_some());
     }
 
     #[test]

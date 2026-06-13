@@ -7,7 +7,7 @@ import type {
 } from '@/types/database'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
-import type { TrackedFolder, ScanFolderResult } from '@/types/folder'
+import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type {
   IntegrityRun,
   IntegrityRunResult,
@@ -45,16 +45,22 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
     drive_pair_id: 1,
     folder_path: 'documents',
     virtual_path: null,
+    scanning: false,
+    scan_scanned_files: 0,
+    scan_total_files: 0,
     last_scanned_at: null,
     created_at: DEFAULT_DATE,
     ...overrides,
   }
 }
 
-export function makeScanFolderResult(overrides: Partial<ScanFolderResult> = {}): ScanFolderResult {
+export function makeFolderScanStatus(
+  overrides: Partial<FolderScanStatus> = {}
+): FolderScanStatus {
   return {
-    new_files: 2,
-    changed_files: 1,
+    scanning: true,
+    scanned: 0,
+    total: 2,
     ...overrides,
   }
 }

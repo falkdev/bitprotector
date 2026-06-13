@@ -1,5 +1,5 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
-use crate::core::{change_detection, drive, mirror, tracker, virtual_path};
+use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use crate::logging::event_logger;
 use actix_web::{web, HttpResponse};
@@ -28,14 +28,25 @@ where
 }
 
 #[derive(Serialize)]
-struct ScanResult {
-    new_files: usize,
-    changed_files: usize,
+struct ScanActiveResponse {
+    scanning: bool,
+    scanned: i64,
+    total: i64,
 }
 
 #[derive(Serialize)]
 struct MirrorResult {
     mirrored_files: usize,
+}
+
+impl From<&crate::db::repository::TrackedFolder> for ScanActiveResponse {
+    fn from(folder: &crate::db::repository::TrackedFolder) -> Self {
+        Self {
+            scanning: folder.scanning,
+            scanned: folder.scan_scanned_files,
+            total: folder.scan_total_files,
+        }
+    }
 }
 
 /// GET /folders
@@ -142,7 +153,8 @@ async fn update_folder(
 
 /// POST /folders/{id}/scan
 async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
-    let folder = match repo.get_tracked_folder(path.into_inner()) {
+    let folder_id = path.into_inner();
+    let folder = match repo.get_tracked_folder(folder_id) {
         Ok(f) => f,
         Err(e) => return HttpResponse::NotFound().body(e.to_string()),
     };
@@ -150,26 +162,46 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         Ok(p) => p,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
-    let new_files = match tracker::auto_track_folder_files(&repo, &pair, &folder) {
+    let total_files = match tracker::count_folder_files(&pair, &folder) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
-    let changes = match change_detection::scan_and_record_changes(&repo, &pair) {
-        Ok(v) => v,
+    let status = match repo.start_folder_scan(folder.id, total_files) {
+        Ok(status) => status,
+        Err(e) if e.to_string().contains("already active") => {
+            return HttpResponse::Conflict().body(e.to_string());
+        }
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
-    let folder_changes = changes
-        .iter()
-        .filter(|(f, _)| {
-            f.relative_path
-                .starts_with(&format!("{}/", folder.folder_path))
-        })
-        .count();
 
-    HttpResponse::Ok().json(ScanResult {
-        new_files: new_files.len(),
-        changed_files: folder_changes,
-    })
+    let repo_clone = repo.get_ref().clone();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<()> {
+            let folder = repo_clone.get_tracked_folder(folder_id)?;
+            let pair = drive::load_operational_pair(&repo_clone, folder.drive_pair_id)?;
+            let total_files = folder.scan_total_files;
+            tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned, _| {
+                repo_clone.update_scan_progress(folder_id, scanned, total_files)
+            })?;
+            Ok(())
+        })();
+
+        if let Err(error) = result {
+            eprintln!("folder scan #{folder_id} failed: {error}");
+        }
+
+        let _ = repo_clone.finish_folder_scan(folder_id);
+    });
+
+    HttpResponse::Accepted().json(ScanActiveResponse::from(&status))
+}
+
+/// GET /folders/{id}/scan/active
+async fn scan_folder_active(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
+    match repo.get_tracked_folder(path.into_inner()) {
+        Ok(folder) => HttpResponse::Ok().json(ScanActiveResponse::from(&folder)),
+        Err(e) => HttpResponse::NotFound().body(e.to_string()),
+    }
 }
 
 /// POST /folders/{id}/mirror
@@ -216,6 +248,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::put().to(update_folder))
             .route("/{id}", web::delete().to(delete_folder))
             .route("/{id}/mirror", web::post().to(mirror_folder))
+            .route("/{id}/scan/active", web::get().to(scan_folder_active))
             .route("/{id}/scan", web::post().to(scan_folder)),
     );
 }

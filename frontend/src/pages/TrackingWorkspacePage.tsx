@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
@@ -24,7 +24,7 @@ import { suggestVirtualPathFromParent } from '@/lib/path'
 import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
-import type { TrackedFolder } from '@/types/folder'
+import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type { TrackingItem, TrackingListParams } from '@/types/tracking'
 import type { VirtualPathTreeNode } from '@/types/virtual-path'
 
@@ -164,6 +164,35 @@ function FolderStatusBadge({
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
       {label}
       {ratio}
+    </span>
+  )
+}
+
+function FolderScanningStatus({ scanned, total }: { scanned: number; total: number }) {
+  if (total > 0) {
+    const progress = Math.min(100, Math.max(0, (scanned / total) * 100))
+
+    return (
+      <div className="min-w-32 space-y-1">
+        <div className="flex items-center gap-2 text-xs font-medium text-blue-700 dark:text-blue-300">
+          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          <span>Scanning...</span>
+          <span className="font-mono">{`${scanned} / ${total}`}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/30">
+          <div
+            className="h-full rounded-full bg-blue-600 transition-[width] duration-300 dark:bg-blue-400"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+      Scanning...
     </span>
   )
 }
@@ -411,6 +440,11 @@ function VirtualPathTree({
 }
 
 export function TrackingWorkspacePage() {
+  const [scanningFolderIds, setScanningFolderIds] = useState<Set<number>>(new Set())
+  const [mirroringFolderIds, setMirroringFolderIds] = useState<Set<number>>(new Set())
+  const [folderScanStatuses, setFolderScanStatuses] = useState<Record<number, FolderScanStatus>>(
+    {}
+  )
   const [response, setResponse] = useState<{
     items: TrackingItem[]
     total: number
@@ -492,6 +526,66 @@ export function TrackingWorkspacePage() {
     }
   }, [load, params])
 
+  const activeFolderScanIds = useMemo(
+    () =>
+      Object.entries(folderScanStatuses)
+        .filter(([, status]) => status.scanning)
+        .map(([id]) => Number(id)),
+    [folderScanStatuses]
+  )
+
+  useEffect(() => {
+    if (activeFolderScanIds.length === 0) return
+
+    let active = true
+
+    const poll = async () => {
+      try {
+        const scanStatuses = await Promise.all(
+          activeFolderScanIds.map(async (folderId) => ({
+            folderId,
+            status: await foldersApi.scanActive(folderId),
+          }))
+        )
+        if (!active) return
+
+        const completedFolderIds = scanStatuses
+          .filter(({ status }) => !status.scanning)
+          .map(({ folderId }) => folderId)
+
+        setFolderScanStatuses((current) => {
+          const next = { ...current }
+          for (const { folderId, status } of scanStatuses) {
+            if (status.scanning) {
+              next[folderId] = status
+            } else {
+              delete next[folderId]
+            }
+          }
+          return next
+        })
+
+        if (completedFolderIds.length > 0) {
+          await load(params)
+          if (!active) return
+          setTreeRefreshKey((current) => current + 1)
+        }
+      } catch {
+        // Polling is best-effort; the table loader reports fetch failures.
+      }
+    }
+
+    void poll()
+    const timer = window.setInterval(() => {
+      void poll()
+    }, 1000)
+
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [activeFolderScanIds, load, params])
+
   const driveName = useCallback(
     (id: number) => drives.find((drive) => drive.id === id)?.name ?? `Drive #${id}`,
     [drives]
@@ -517,6 +611,9 @@ export function TrackingWorkspacePage() {
               drive_pair_id: item.drive_pair_id,
               folder_path: item.path,
               virtual_path: item.virtual_path,
+              scanning: false,
+              scan_scanned_files: 0,
+              scan_total_files: 0,
               last_scanned_at: null,
               created_at: item.created_at,
             }) satisfies TrackedFolder
@@ -618,19 +715,29 @@ export function TrackingWorkspacePage() {
   }
 
   const handleScanFolder = async (folder: TrackedFolder) => {
+    setScanningFolderIds((current) => new Set(current).add(folder.id))
     try {
-      const result = await foldersApi.scan(folder.id)
-      toast.success(`Scan complete: ${result.new_files} new, ${result.changed_files} changed`)
-      await load(params)
-      setTreeRefreshKey((current) => current + 1)
+      const status = await foldersApi.scan(folder.id)
+      setFolderScanStatuses((current) => ({
+        ...current,
+        [folder.id]: status,
+      }))
+      toast.success('Folder scan started')
     } catch (error) {
       // Extract meaningful error message from backend response
       const errorMessage = getErrorMessage(error, 'Scan failed')
       toast.error(errorMessage)
+    } finally {
+      setScanningFolderIds((current) => {
+        const next = new Set(current)
+        next.delete(folder.id)
+        return next
+      })
     }
   }
 
   const handleMirrorFolder = async (folder: TrackedFolder) => {
+    setMirroringFolderIds((current) => new Set(current).add(folder.id))
     try {
       const result = await foldersApi.mirror(folder.id)
       toast.success(`Mirror complete: ${result.mirrored_files} file(s) mirrored`)
@@ -640,6 +747,12 @@ export function TrackingWorkspacePage() {
       // Extract meaningful error message from backend response
       const errorMessage = getErrorMessage(error, 'Folder mirror failed')
       toast.error(errorMessage)
+    } finally {
+      setMirroringFolderIds((current) => {
+        const next = new Set(current)
+        next.delete(folder.id)
+        return next
+      })
     }
   }
 
@@ -1086,6 +1199,19 @@ export function TrackingWorkspacePage() {
                           )
                         }
 
+                        const scanStatus = folderScanStatuses[item.id]
+                        const isFolderScanning =
+                          scanningFolderIds.has(item.id) || scanStatus?.scanning === true
+
+                        if (isFolderScanning) {
+                          return (
+                            <FolderScanningStatus
+                              scanned={scanStatus?.scanned ?? 0}
+                              total={scanStatus?.total ?? 0}
+                            />
+                          )
+                        }
+
                         const status = item.folder_status ?? 'not_scanned'
                         const total = item.folder_total_files ?? 0
                         const mirrored = item.folder_mirrored_files ?? 0
@@ -1124,25 +1250,49 @@ export function TrackingWorkspacePage() {
                             >
                               Set Path
                             </button>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                const folder = folderItems.find((entry) => entry.id === item.id)
-                                if (!folder) return
-                                const status = item.folder_status ?? 'not_scanned'
-                                if (status === 'tracked' || status === 'partial') {
-                                  void handleMirrorFolder(folder)
-                                  return
-                                }
-                                void handleScanFolder(folder)
-                              }}
-                              className="rounded-md border border-input px-2 py-1 text-xs hover:bg-accent"
-                              data-testid={`folder-action-${item.id}`}
-                            >
-                              {item.folder_status === 'tracked' || item.folder_status === 'partial'
-                                ? 'Mirror'
-                                : 'Scan'}
-                            </button>
+                            {(() => {
+                              const folder = folderItems.find((entry) => entry.id === item.id)
+                              const wantsMirror =
+                                item.folder_status === 'tracked' || item.folder_status === 'partial'
+                              const scanStatus = folderScanStatuses[item.id]
+                              const isFolderScanning =
+                                scanningFolderIds.has(item.id) || scanStatus?.scanning === true
+                              const isFolderMirroring = mirroringFolderIds.has(item.id)
+                              const isFolderBusy = isFolderScanning || isFolderMirroring
+
+                              return (
+                                <button
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    if (!folder || isFolderBusy) return
+                                    if (wantsMirror) {
+                                      void handleMirrorFolder(folder)
+                                      return
+                                    }
+                                    void handleScanFolder(folder)
+                                  }}
+                                  disabled={isFolderBusy}
+                                  className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                  data-testid={`folder-action-${item.id}`}
+                                >
+                                  {isFolderScanning ? (
+                                    <>
+                                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                      Scanning...
+                                    </>
+                                  ) : isFolderMirroring ? (
+                                    <>
+                                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                      Mirroring...
+                                    </>
+                                  ) : wantsMirror ? (
+                                    'Mirror'
+                                  ) : (
+                                    'Scan'
+                                  )}
+                                </button>
+                              )
+                            })()}
                             <button
                               onClick={(event) => {
                                 event.stopPropagation()
