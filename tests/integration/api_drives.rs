@@ -59,8 +59,12 @@ async fn test_drives_create_validation_failure_returns_400() {
 #[actix_rt::test]
 async fn test_drives_create_duplicate_path_returns_409() {
     let repo = make_repo();
-    repo.create_drive_pair("existing", "/tmp/existing-primary", "/tmp/existing-secondary")
-        .unwrap();
+    repo.create_drive_pair(
+        "existing",
+        "/tmp/existing-primary",
+        "/tmp/existing-secondary",
+    )
+    .unwrap();
     let app = make_app!(repo).await;
 
     let req = test::TestRequest::post()
