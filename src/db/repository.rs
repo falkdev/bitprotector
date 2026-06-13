@@ -296,13 +296,19 @@ impl Repository {
     }
 
     pub fn is_duplicate_drive_path_error(err: &anyhow::Error) -> bool {
-        err.to_string() == DUPLICATE_DRIVE_PATH_ERROR
+        err.chain().any(|e| e.to_string() == DUPLICATE_DRIVE_PATH_ERROR)
     }
 
     fn map_drive_pair_create_error(result: rusqlite::Result<usize>) -> anyhow::Result<usize> {
         match result {
             Ok(rows) => Ok(rows),
-            Err(err) if err.to_string().contains("drive path already registered") => {
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    extended_code: rusqlite::ffi::SQLITE_CONSTRAINT_TRIGGER,
+                    ..
+                },
+                Some(ref msg),
+            )) if msg.contains("drive path already registered") => {
                 anyhow::bail!(DUPLICATE_DRIVE_PATH_ERROR)
             }
             Err(err) => Err(err.into()),
