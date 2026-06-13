@@ -57,7 +57,6 @@ export function TrackFileModal({
         selectedDrive.active_role
       )
     : null
-  const pathResolution = resolveTrackedPathInput(activeRoot, rawPath)
 
   if (!open) return null
 
@@ -133,19 +132,6 @@ export function TrackFileModal({
                   Browse
                 </button>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {selectedDrive
-                  ? `Active root: ${activeRoot}`
-                  : 'Select a drive pair before browsing or submitting.'}
-              </p>
-              {selectedDrive &&
-              rawPath.trim() &&
-              !pathResolution.error &&
-              pathResolution.relativePath ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
-                </p>
-              ) : null}
               {errors.relative_path ? (
                 <p className="mt-1 text-xs text-destructive">{errors.relative_path.message}</p>
               ) : null}

@@ -146,34 +146,6 @@ describe('TrackFileModal', () => {
     expect(onTrack).not.toHaveBeenCalled()
   })
 
-  it('shows the active root hint after selecting a drive', async () => {
-    const user = userEvent.setup()
-
-    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
-
-    expect(
-      screen.getByText('Select a drive pair before browsing or submitting.')
-    ).toBeInTheDocument()
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-
-    expect(screen.getByText('Active root: /mnt/secondary')).toBeInTheDocument()
-  })
-
-  it('shows the resolved path hint when a valid path is entered', async () => {
-    const user = userEvent.setup()
-
-    render(<TrackFileModal open onClose={() => {}} onTrack={vi.fn()} drives={[drive]} />)
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-    await user.type(
-      screen.getByPlaceholderText('docs/report.pdf or /mnt/drive-a/docs/report.pdf'),
-      '/mnt/secondary/docs/report.pdf'
-    )
-
-    expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
-  })
-
   it('calls onClose when the Cancel button is clicked', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

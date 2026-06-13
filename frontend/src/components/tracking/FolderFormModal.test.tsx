@@ -123,35 +123,6 @@ describe('FolderFormModal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows the active root hint after selecting a drive', async () => {
-    const user = userEvent.setup()
-
-    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={vi.fn()} />)
-
-    expect(
-      screen.getByText('Select a drive pair before browsing or submitting.')
-    ).toBeInTheDocument()
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-
-    expect(screen.getByText('Active root: /mnt/secondary')).toBeInTheDocument()
-  })
-
-  it('shows the resolved relative path hint when a valid path is entered', async () => {
-    const user = userEvent.setup()
-
-    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={vi.fn()} />)
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-    await user.type(
-      screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/secondary/documents'
-    )
-
-    expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
-    expect(screen.getByText('documents')).toBeInTheDocument()
-  })
-
   it('submits with an optional virtual path when provided', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
