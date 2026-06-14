@@ -2,6 +2,8 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Result;
 
+const DUPLICATE_DRIVE_PATH_ERROR: &str = "Drive path is already registered to another drive pair";
+
 pub type DbPool = Pool<SqliteConnectionManager>;
 
 fn file_connection_manager(db_path: &str) -> SqliteConnectionManager {
@@ -274,7 +276,7 @@ impl Repository {
     ) -> anyhow::Result<DrivePair> {
         let id = {
             let conn = self.conn()?;
-            conn.execute(
+            Self::map_drive_pair_create_error(conn.execute(
                 "INSERT INTO drive_pairs (
                     name, primary_path, secondary_path,
                     primary_state, secondary_state, active_role,
@@ -287,10 +289,31 @@ impl Repository {
                     primary_media_type,
                     secondary_media_type
                 ],
-            )?;
+            ))?;
             conn.last_insert_rowid()
         };
         self.get_drive_pair(id)
+    }
+
+    pub fn is_duplicate_drive_path_error(err: &anyhow::Error) -> bool {
+        err.chain()
+            .any(|e| e.to_string() == DUPLICATE_DRIVE_PATH_ERROR)
+    }
+
+    fn map_drive_pair_create_error(result: rusqlite::Result<usize>) -> anyhow::Result<usize> {
+        match result {
+            Ok(rows) => Ok(rows),
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    extended_code: rusqlite::ffi::SQLITE_CONSTRAINT_TRIGGER,
+                    ..
+                },
+                Some(ref msg),
+            )) if msg.contains("drive path already registered") => {
+                anyhow::bail!(DUPLICATE_DRIVE_PATH_ERROR)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn get_drive_pair(&self, id: i64) -> anyhow::Result<DrivePair> {
@@ -2437,6 +2460,29 @@ mod tests {
         repo.delete_drive_pair(pair.id).unwrap();
         let pairs_after = repo.list_drive_pairs().unwrap();
         assert!(pairs_after.is_empty());
+    }
+
+    #[test]
+    fn test_create_drive_pair_rejects_reused_path_with_stable_message() {
+        let repo = make_repo();
+
+        repo.create_drive_pair("pair-a", "/a", "/b").unwrap();
+
+        let err = repo
+            .create_drive_pair("pair-b", "/c", "/a")
+            .expect_err("create should reject reused path");
+        assert_eq!(err.to_string(), DUPLICATE_DRIVE_PATH_ERROR);
+        assert!(Repository::is_duplicate_drive_path_error(&err));
+    }
+
+    #[test]
+    fn test_create_drive_pair_allows_distinct_paths() {
+        let repo = make_repo();
+
+        repo.create_drive_pair("pair-a", "/a", "/b").unwrap();
+        let pair = repo.create_drive_pair("pair-b", "/c", "/d").unwrap();
+
+        assert_eq!(pair.name, "pair-b");
     }
 
     #[test]

@@ -91,6 +91,9 @@ pub async fn create_drive_pair(
             );
             HttpResponse::Created().json(pair)
         }
+        Err(e) if Repository::is_duplicate_drive_path_error(&e) => {
+            HttpResponse::Conflict().json(ApiError::new("CONFLICT", &e.to_string()))
+        }
         Err(e) => HttpResponse::InternalServerError()
             .json(ApiError::new("INTERNAL_ERROR", &e.to_string())),
     }
