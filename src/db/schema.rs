@@ -73,6 +73,9 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
             folder_path     TEXT NOT NULL,
             virtual_path    TEXT,
+            scanning        INTEGER NOT NULL DEFAULT 0,
+            scan_scanned_files INTEGER NOT NULL DEFAULT 0,
+            scan_total_files INTEGER NOT NULL DEFAULT 0,
             last_scanned_at TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
@@ -200,6 +203,18 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE drive_pairs ADD COLUMN secondary_media_type TEXT NOT NULL DEFAULT 'hdd' CHECK(secondary_media_type IN ('hdd', 'ssd'))",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN scanning INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN scan_scanned_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN scan_total_files INTEGER NOT NULL DEFAULT 0",
         [],
     );
     let _ = conn.execute_batch(
