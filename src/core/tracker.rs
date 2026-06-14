@@ -2,6 +2,7 @@ use crate::core::{checksum, drive, sync_queue, virtual_path};
 use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
 use anyhow::Context;
+use rusqlite::Error as SqlError;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -268,19 +269,11 @@ where
 
             match repo.get_tracked_file_by_path(drive_pair.id, &relative_path) {
                 Ok(existing) => {
-                    if let Some(new_hash) =
-                        checksum::checksum_file(&path, checksum::ChecksumStrategy::Streaming)?
-                            .ne(&existing.checksum)
-                            .then(|| {
-                                checksum::checksum_file(
-                                    &path,
-                                    checksum::ChecksumStrategy::Streaming,
-                                )
-                            })
-                            .transpose()?
-                    {
+                    let current_hash =
+                        checksum::checksum_file(&path, checksum::ChecksumStrategy::Streaming)?;
+                    if current_hash != existing.checksum {
                         let new_size = path.metadata()?.len() as i64;
-                        repo.update_tracked_file_checksum(existing.id, &new_hash, new_size)?;
+                        repo.update_tracked_file_checksum(existing.id, &current_hash, new_size)?;
                         repo.update_tracked_file_mirror_status(existing.id, false)?;
                         let _ = event_logger::log_event(
                             repo,
@@ -290,7 +283,7 @@ where
                                 "Change detected on active {} drive: {}/{}",
                                 drive_pair.active_role, drive_pair.primary_path, relative_path
                             ),
-                            Some(&new_hash),
+                            Some(&current_hash),
                         );
                         if drive_pair.standby_accepts_sync() {
                             let _ = sync_queue::create_from_change(repo, existing.id)?;
@@ -298,23 +291,26 @@ where
                         changed_files += 1;
                     }
                 }
-                Err(_) => {
-                    let file = create_tracked_file_from_disk(
-                        repo,
-                        drive_pair,
-                        &relative_path,
-                        false,
-                        true,
-                    )?;
-                    let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
-                    let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
-                    if drive_pair.standby_accepts_sync() {
-                        let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
-                    } else {
-                        repo.update_tracked_file_mirror_status(file.id, false)?;
+                Err(error) => match error.downcast_ref::<SqlError>() {
+                    Some(SqlError::QueryReturnedNoRows) => {
+                        let file = create_tracked_file_from_disk(
+                            repo,
+                            drive_pair,
+                            &relative_path,
+                            false,
+                            true,
+                        )?;
+                        let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
+                        let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
+                        if drive_pair.standby_accepts_sync() {
+                            let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
+                        } else {
+                            repo.update_tracked_file_mirror_status(file.id, false)?;
+                        }
+                        new_files += 1;
                     }
-                    new_files += 1;
-                }
+                    _ => return Err(error),
+                },
             }
 
             scanned_files += 1;

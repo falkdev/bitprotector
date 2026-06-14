@@ -4,6 +4,7 @@ use actix_web::test;
 use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
+use std::time::Duration;
 use tempfile::TempDir;
 
 // ── Files ──────────────────────────────────────────────────────────────────
@@ -574,13 +575,17 @@ async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 202);
 
-    loop {
-        let current = repo.get_tracked_folder(folder.id).unwrap();
-        if !current.scanning {
-            break;
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder.id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
         }
-        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -640,13 +645,17 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 202);
 
-    loop {
-        let current = repo.get_tracked_folder(folder_id).unwrap();
-        if !current.scanning {
-            break;
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder_id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
         }
-        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let req = test::TestRequest::get()
         .uri(&format!(

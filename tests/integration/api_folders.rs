@@ -4,6 +4,7 @@ use actix_web::test;
 use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
+use std::time::Duration;
 use tempfile::TempDir;
 
 // ── Folders ────────────────────────────────────────────────────────────────
@@ -259,13 +260,17 @@ async fn test_folders_scan() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
 
-    let updated_folder = loop {
-        let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
-        if !updated_folder.scanning {
-            break updated_folder;
+    let updated_folder = actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+            if !updated_folder.scanning {
+                break updated_folder;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
         }
-        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
-    };
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     assert!(
         updated_folder.last_scanned_at.is_some(),
@@ -359,13 +364,17 @@ async fn test_folders_scan_pre_existing_mirror_queues_adopt_mirror() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 202);
 
-    loop {
-        let current = repo.get_tracked_folder(folder.id).unwrap();
-        if !current.scanning {
-            break;
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder.id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
         }
-        actix_rt::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let (queue, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total, 1);

@@ -528,19 +528,23 @@ export function TrackingWorkspacePage() {
     () =>
       Object.entries(folderScanStatuses)
         .filter(([, status]) => status.scanning)
-        .map(([id]) => Number(id)),
+        .map(([id]) => Number(id))
+        .sort((a, b) => a - b),
     [folderScanStatuses]
   )
+  const activeFolderScanIdsKey = useMemo(() => activeFolderScanIds.join(','), [activeFolderScanIds])
 
   useEffect(() => {
-    if (activeFolderScanIds.length === 0) return
+    if (!activeFolderScanIdsKey) return
+
+    const scanFolderIds = activeFolderScanIdsKey.split(',').map(Number)
 
     let active = true
 
     const poll = async () => {
       try {
         const scanStatuses = await Promise.all(
-          activeFolderScanIds.map(async (folderId) => ({
+          scanFolderIds.map(async (folderId) => ({
             folderId,
             status: await foldersApi.scanActive(folderId),
           }))
@@ -582,7 +586,7 @@ export function TrackingWorkspacePage() {
       active = false
       window.clearInterval(timer)
     }
-  }, [activeFolderScanIds, load, params])
+  }, [activeFolderScanIdsKey, load, params])
 
   const driveName = useCallback(
     (id: number) => drives.find((drive) => drive.id === id)?.name ?? `Drive #${id}`,

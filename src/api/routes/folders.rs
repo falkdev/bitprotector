@@ -179,9 +179,8 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         let result = (|| -> anyhow::Result<()> {
             let folder = repo_clone.get_tracked_folder(folder_id)?;
             let pair = drive::load_operational_pair(&repo_clone, folder.drive_pair_id)?;
-            let total_files = folder.scan_total_files;
-            tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned, _| {
-                repo_clone.update_scan_progress(folder_id, scanned, total_files)
+            tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned, total| {
+                repo_clone.update_scan_progress(folder_id, scanned, total)
             })?;
             Ok(())
         })();
