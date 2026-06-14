@@ -137,6 +137,8 @@ The minimal path to protected, mirrored storage is three steps: register a drive
 
 ```bash
 # Register a drive pair. Specifying the media type lets BitProtector tune
+# Each physical path may belong to only one registered drive pair. Reusing a
+# path in either slot of a later pair is rejected until the original pair is removed.
 # BLAKE3 checksum parallelism (HDDs benefit from lower concurrency than SSDs).
 bitprotector drives add mybackup /mnt/primary /mnt/mirror \
   --primary-media-type hdd --secondary-media-type hdd

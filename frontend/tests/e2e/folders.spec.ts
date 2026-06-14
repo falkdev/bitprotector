@@ -26,7 +26,7 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await expect(row).toBeVisible()
 
   await row.getByRole('button', { name: 'Scan' }).click()
-  await expectToast(page, /Scan complete:/)
+  await expectToast(page, 'Folder scan started')
   const trackedFileRow = page
     .locator('[data-testid^="file-row-"]')
     .filter({ hasText: `${fixture.folderRelativePath}/${fileName}` })
