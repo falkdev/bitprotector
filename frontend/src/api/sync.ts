@@ -9,9 +9,23 @@ import type {
   SyncQueueListResponse,
 } from '@/types/sync'
 
+interface ListQueueParams {
+  status?: string
+  page?: number
+  perPage?: number
+}
+
 export const syncApi = {
-  listQueue(): Promise<SyncQueueListResponse> {
-    return apiClient.get<SyncQueueListResponse>('/sync/queue').then((r) => r.data)
+  listQueue(params: ListQueueParams = {}): Promise<SyncQueueListResponse> {
+    return apiClient
+      .get<SyncQueueListResponse>('/sync/queue', {
+        params: {
+          status: params.status,
+          page: params.page,
+          per_page: params.perPage,
+        },
+      })
+      .then((r) => r.data)
   },
 
   addQueueItem(data: AddQueueItemRequest): Promise<SyncQueueItem> {
