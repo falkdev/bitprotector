@@ -457,3 +457,81 @@ async fn test_folders_scan_pre_existing_mirror_queues_adopt_mirror() {
     assert_eq!(total, 1);
     assert_eq!(queue[0].action, "adopt_mirror");
 }
+
+#[actix_rt::test]
+async fn test_folders_delete_preserves_files_under_nested_tracked_subfolder() {
+    // Deleting a parent tracked folder must NOT remove files that belong to a
+    // separately tracked nested subfolder.
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir_all(primary.path().join("docs/sub")).unwrap();
+    fs::write(primary.path().join("docs/parent-only.txt"), b"parent").unwrap();
+    fs::write(primary.path().join("docs/sub/sub-file.txt"), b"sub").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "fp-nested",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+
+    // Track parent folder "docs" and nested subfolder "docs/sub".
+    let parent_folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    let sub_folder = repo
+        .create_tracked_folder(pair.id, "docs/sub", None)
+        .unwrap();
+
+    let checksum_parent = checksum::checksum_bytes(b"parent");
+    let checksum_sub = checksum::checksum_bytes(b"sub");
+
+    // parent-only.txt is tracked via the parent folder only.
+    let parent_file = repo
+        .create_tracked_file_with_source(
+            pair.id,
+            "docs/parent-only.txt",
+            &checksum_parent,
+            6,
+            None,
+            false,
+            true,
+        )
+        .unwrap();
+    // sub-file.txt is tracked via the nested subfolder.
+    let sub_file = repo
+        .create_tracked_file_with_source(
+            pair.id,
+            "docs/sub/sub-file.txt",
+            &checksum_sub,
+            3,
+            None,
+            false,
+            true,
+        )
+        .unwrap();
+
+    let parent_queue = repo
+        .create_sync_queue_item(parent_file.id, "mirror")
+        .unwrap();
+    let sub_queue = repo.create_sync_queue_item(sub_file.id, "mirror").unwrap();
+
+    let app = make_app!(repo.clone()).await;
+
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/folders/{}", parent_folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 204);
+
+    // Parent folder and its exclusive file must be gone.
+    assert!(repo.get_tracked_folder(parent_folder.id).is_err());
+    assert!(repo.get_tracked_file(parent_file.id).is_err());
+    assert!(repo.get_sync_queue_item(parent_queue.id).is_err());
+
+    // Nested subfolder and its file must survive.
+    assert!(repo.get_tracked_folder(sub_folder.id).is_ok());
+    assert!(repo.get_tracked_file(sub_file.id).is_ok());
+    assert!(repo.get_sync_queue_item(sub_queue.id).is_ok());
+}

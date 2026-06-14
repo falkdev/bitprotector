@@ -749,7 +749,7 @@ Stop tracking the folder.
 Folder-origin descendant files are untracked as part of this operation when they are still marked `tracked_via_folder=true` and `tracked_direct=false`. Descendant files that were explicitly tracked remain tracked.
 
 **Response `204`:** No content.  
-**Errors:** `404 Not Found`
+**Errors:** `404 Not Found`, `400 Bad Request` (drive pair quiescing), `500 Internal Server Error`
 
 ---
 
