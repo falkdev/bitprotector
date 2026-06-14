@@ -152,6 +152,36 @@ fn test_drives_add_same_path_fails() {
 }
 
 #[test]
+fn test_drives_add_duplicate_registered_path_fails_with_message() {
+    let db = temp_db();
+
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "drives",
+            "add",
+            "--no-validate",
+            "existing",
+            "/tmp/existing-primary",
+            "/tmp/existing-secondary",
+        ])
+        .assert()
+        .success();
+
+    cmd(db.path().to_str().unwrap())
+        .args([
+            "drives",
+            "add",
+            "--no-validate",
+            "duplicate",
+            "/tmp/new-primary",
+            "/tmp/existing-primary",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already registered"));
+}
+
+#[test]
 fn test_drives_show() {
     let db = temp_db();
     let p = TempDir::new().unwrap();

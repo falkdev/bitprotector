@@ -23,6 +23,33 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     )?;
 
     conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS prevent_duplicate_drive_paths_on_insert_primary
+         BEFORE INSERT ON drive_pairs
+         FOR EACH ROW
+         WHEN EXISTS (
+             SELECT 1
+             FROM drive_pairs
+             WHERE primary_path = NEW.primary_path
+                OR secondary_path = NEW.primary_path
+         )
+         BEGIN
+             SELECT RAISE(ABORT, 'drive path already registered');
+         END;
+         CREATE TRIGGER IF NOT EXISTS prevent_duplicate_drive_paths_on_insert_secondary
+         BEFORE INSERT ON drive_pairs
+         FOR EACH ROW
+         WHEN EXISTS (
+             SELECT 1
+             FROM drive_pairs
+             WHERE primary_path = NEW.secondary_path
+                OR secondary_path = NEW.secondary_path
+         )
+         BEGIN
+             SELECT RAISE(ABORT, 'drive path already registered');
+         END;",
+    )?;
+
+    conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracked_files (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
@@ -380,6 +407,58 @@ mod tests {
             [],
         );
         assert!(result.is_err(), "Unique name constraint should have failed");
+    }
+
+    #[test]
+    fn test_drive_pair_insert_rejects_reused_paths_in_any_slot() {
+        let conn = open_memory_db();
+        initialize_schema(&conn).expect("Schema creation failed");
+
+        conn.execute(
+            "INSERT INTO drive_pairs (name, primary_path, secondary_path)
+             VALUES ('pair1', '/primary', '/secondary')",
+            [],
+        )
+        .expect("First insert failed");
+
+        for (name, primary, secondary) in [
+            ("same-primary", "/primary", "/other-a"),
+            ("swapped", "/secondary", "/primary"),
+            ("reuse-primary-as-secondary", "/other-b", "/primary"),
+            ("reuse-secondary-as-secondary", "/other-c", "/secondary"),
+        ] {
+            let err = conn
+                .execute(
+                    "INSERT INTO drive_pairs (name, primary_path, secondary_path)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![name, primary, secondary],
+                )
+                .expect_err("Path reuse should be rejected");
+            assert!(
+                err.to_string().contains("drive path already registered"),
+                "Unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_drive_pair_insert_allows_non_overlapping_paths() {
+        let conn = open_memory_db();
+        initialize_schema(&conn).expect("Schema creation failed");
+
+        conn.execute(
+            "INSERT INTO drive_pairs (name, primary_path, secondary_path)
+             VALUES ('pair1', '/primary', '/secondary')",
+            [],
+        )
+        .expect("First insert failed");
+
+        conn.execute(
+            "INSERT INTO drive_pairs (name, primary_path, secondary_path)
+             VALUES ('pair2', '/other-primary', '/other-secondary')",
+            [],
+        )
+        .expect("Distinct paths should succeed");
     }
 
     #[test]

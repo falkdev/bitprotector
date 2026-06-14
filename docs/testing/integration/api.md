@@ -28,7 +28,7 @@ For an explanation of the harness and isolation strategy, see [README.md](README
 
 **`GET /api/v1/drives`** — Returns an empty array when no drive pairs exist. Returns the full list when pairs have been created, with each pair's ID, name, paths, media types, states, and active role.
 
-**`POST /api/v1/drives`** — Creating a drive pair with `skip_validation: true` bypasses the on-disk path check and returns `201 Created` with the full pair object including default media types (`hdd`). Creating without `skip_validation` when the paths do not exist returns `400 Bad Request`.
+**`POST /api/v1/drives`** — Creating a drive pair with `skip_validation: true` bypasses the on-disk path check and returns `201 Created` with the full pair object including default media types (`hdd`). Creating without `skip_validation` when the paths do not exist returns `400 Bad Request`. Reusing any already-registered primary or secondary path in a new create request returns `409 Conflict` with a `CONFLICT` API error code.
 
 **`PUT /api/v1/drives/{id}`** — Updates name, paths, or media types. The response contains the updated pair. Updating a non-existent ID returns `404`.
 

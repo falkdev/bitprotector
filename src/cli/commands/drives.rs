@@ -151,7 +151,16 @@ pub fn handle(cmd: DrivesCommand, repo: &Repository) -> anyhow::Result<()> {
                 &args.secondary,
                 &args.primary_media_type,
                 &args.secondary_media_type,
-            )?;
+            )
+            .map_err(|err| {
+                if Repository::is_duplicate_drive_path_error(&err) {
+                    anyhow::anyhow!(
+                        "Drive path is already registered: each physical path may belong to only one drive pair"
+                    )
+                } else {
+                    err
+                }
+            })?;
             let _ = event_logger::log_drive_created(
                 repo,
                 pair.id,
@@ -401,5 +410,41 @@ mod tests {
             &repo,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_duplicate_path_fails_with_clear_message() {
+        let repo = make_repo();
+
+        handle(
+            DrivesCommand::Add(AddArgs {
+                name: "pair-a".to_string(),
+                primary: "/tmp/a".to_string(),
+                secondary: "/tmp/b".to_string(),
+                no_validate: true,
+                primary_media_type: "hdd".to_string(),
+                secondary_media_type: "hdd".to_string(),
+            }),
+            &repo,
+        )
+        .unwrap();
+
+        let err = handle(
+            DrivesCommand::Add(AddArgs {
+                name: "pair-b".to_string(),
+                primary: "/tmp/c".to_string(),
+                secondary: "/tmp/a".to_string(),
+                no_validate: true,
+                primary_media_type: "hdd".to_string(),
+                secondary_media_type: "hdd".to_string(),
+            }),
+            &repo,
+        )
+        .expect_err("duplicate path should fail");
+
+        assert!(
+            err.to_string().contains("Drive path is already registered"),
+            "Unexpected message: {err}"
+        );
     }
 }

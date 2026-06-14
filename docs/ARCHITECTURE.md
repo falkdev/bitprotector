@@ -134,6 +134,11 @@ CREATE TABLE drive_pairs (
     updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Create-time invariant: primary_path and secondary_path form one shared
+-- uniqueness set across all drive pairs. Once a physical path is registered in
+-- either slot, later INSERTs may not reuse it in either slot. Replacement and
+-- explicit update flows continue to use UPDATE statements and are unchanged.
+
 -- Tracked files
 CREATE TABLE tracked_files (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
