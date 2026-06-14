@@ -1301,7 +1301,7 @@ impl Repository {
                       AND other.id != ?4
                       AND (
                            tracked_files.relative_path = rtrim(other.folder_path, '/')
-                           OR tracked_files.relative_path LIKE rtrim(other.folder_path, '/') || '/%' ESCAPE '\\'
+                      OR tracked_files.relative_path LIKE replace(replace(replace(rtrim(other.folder_path, '/'), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '/%' ESCAPE '\\'
                       )
                )
              ORDER BY id",

@@ -193,8 +193,14 @@ pub fn untrack_folder_cascade(
         }
     }
 
-    // Phase D: recompute folder provenance and log the folder untrack event.
-    repo.recompute_folder_provenance_for_drive(folder.drive_pair_id)?;
+    // Phase D: recompute folder provenance best-effort; deletion has already committed.
+    if let Err(e) = repo.recompute_folder_provenance_for_drive(folder.drive_pair_id) {
+        tracing::warn!(
+            "Failed to recompute folder provenance for drive_pair {} after untrack cascade: {}",
+            folder.drive_pair_id,
+            e
+        );
+    }
     let full_path = format!("{}/{}", drive_pair.primary_path, folder.folder_path);
     let _ = event_logger::log_folder_untracked(repo, folder.id, &full_path);
 
