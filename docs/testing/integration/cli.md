@@ -31,7 +31,7 @@ This file covers the full lifecycle of drive pairs through the CLI, including th
 
 **Add and list:** `drives add` with a name, primary path, and secondary path creates a drive pair. The output contains the assigned ID. A subsequent `drives list` shows the pair by name.
 
-**Path validation:** `drives add` with paths that do not exist on disk is rejected with a descriptive error. The `--no-validate` flag bypasses this check. Passing the same path for both primary and secondary is also rejected.
+**Path validation:** `drives add` with paths that do not exist on disk is rejected with a descriptive error. The `--no-validate` flag bypasses this check. Passing the same path for both primary and secondary is also rejected. Reusing a path that is already registered in another drive pair also fails and reports that the path is already registered.
 
 **Show a drive pair:** `drives show <id>` prints the full details of one drive pair, including `Primary media:` and `Secondary media:` labels. Requesting an unknown ID exits with failure.
 
