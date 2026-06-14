@@ -12,6 +12,7 @@ export type SyncResolution = 'keep_master' | 'keep_mirror' | 'provide_new'
 export interface SyncQueueItem {
   id: number
   tracked_file_id: number
+  relative_path: string
   action: SyncAction
   status: SyncStatus
   error_message: string | null
@@ -48,4 +49,5 @@ export interface SyncQueueListResponse {
   per_page: number
   queue_paused: boolean
   active_items: number
+  in_progress_items: number
 }
