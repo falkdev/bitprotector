@@ -6,6 +6,19 @@ use rusqlite::Error as SqlError;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
+pub struct FolderUntrackResult {
+    pub folder_id: i64,
+    pub drive_pair_id: i64,
+    pub removed_file_ids: Vec<i64>,
+}
+
+impl FolderUntrackResult {
+    pub fn removed_file_count(&self) -> usize {
+        self.removed_file_ids.len()
+    }
+}
+
 /// Ensure the file at `path` has world-read access (and world-execute if the
 /// owner can execute). This is required so that any service on the system can
 /// read tracked files through virtual-path symlinks.
@@ -133,6 +146,69 @@ pub fn track_folder(
     let full_path = format!("{}/{}", drive_pair.primary_path, folder_path);
     let _ = event_logger::log_folder_tracked(repo, result.id, &full_path, drive_pair.id);
     Ok(result)
+}
+
+pub fn untrack_folder_cascade(
+    repo: &Repository,
+    folder_id: i64,
+) -> anyhow::Result<FolderUntrackResult> {
+    // Failure semantics:
+    // - DB failure in Phase B → clean abort; no deletion has occurred (pre-logged events
+    //   are stale but harmless, matching the existing best-effort log behaviour).
+    // - Symlink failure in Phase C (after DB commit) → orphaned symlinks are logged and
+    //   skipped; DB remains the source of truth and symlinks are recoverable via refresh.
+    let folder = repo.get_tracked_folder(folder_id)?;
+    let drive_pair = repo.get_drive_pair(folder.drive_pair_id)?;
+    drive::require_pair_mutation_allowed(&drive_pair)?;
+
+    // Phase A (read): query descendants and collect symlink paths — no DB mutation.
+    let descendants = repo.list_folder_origin_descendant_files(
+        folder.drive_pair_id,
+        &folder.folder_path,
+        folder.id,
+    )?;
+    let file_ids: Vec<i64> = descendants.iter().map(|f| f.id).collect();
+
+    let symlinks_to_remove: Vec<String> = descendants
+        .iter()
+        .filter_map(|f| f.virtual_path.clone())
+        .chain(folder.virtual_path.iter().cloned())
+        .collect();
+
+    // Log file events before deletion so tracked_file_id FKs remain valid.
+    for file in &descendants {
+        let full_path = format!("{}/{}", drive_pair.primary_path, file.relative_path);
+        let _ = event_logger::log_file_untracked(repo, file.id, &full_path);
+    }
+
+    // Phase B (DB): atomically delete sync_queue rows, tracked_files, and tracked_folder.
+    // If this fails, return the error immediately; no partial state is left behind.
+    repo.delete_folder_cascade_tx(folder.id, &file_ids)?;
+
+    // Phase C (symlinks): best-effort removal — log warnings but do not abort.
+    // DB is already committed; orphaned symlinks are recoverable.
+    for vp in &symlinks_to_remove {
+        if let Err(e) = virtual_path::remove_symlink(vp) {
+            tracing::warn!("Failed to remove symlink {}: {}", vp, e);
+        }
+    }
+
+    // Phase D: recompute folder provenance best-effort; deletion has already committed.
+    if let Err(e) = repo.recompute_folder_provenance_for_drive(folder.drive_pair_id) {
+        tracing::warn!(
+            "Failed to recompute folder provenance for drive_pair {} after untrack cascade: {}",
+            folder.drive_pair_id,
+            e
+        );
+    }
+    let full_path = format!("{}/{}", drive_pair.primary_path, folder.folder_path);
+    let _ = event_logger::log_folder_untracked(repo, folder.id, &full_path);
+
+    Ok(FolderUntrackResult {
+        folder_id: folder.id,
+        drive_pair_id: folder.drive_pair_id,
+        removed_file_ids: file_ids,
+    })
 }
 
 /// Scan a tracked folder and auto-track any untracked files.
@@ -577,6 +653,110 @@ mod tests {
             queue[0].action, "adopt_mirror",
             "Folder scan should enqueue adopt_mirror, not mirror"
         );
+    }
+
+    #[test]
+    fn test_untrack_folder_cascade_removes_folder_origin_descendants_only() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let virtual_root = TempDir::new().unwrap();
+
+        fs::create_dir_all(primary.path().join("docs/sub")).unwrap();
+        fs::write(primary.path().join("docs/folder-only.txt"), b"folder-only").unwrap();
+        fs::write(primary.path().join("docs/direct.txt"), b"direct").unwrap();
+
+        let folder_virtual_path = virtual_root.path().join("virtual/docs");
+        let file_virtual_path = virtual_root.path().join("virtual/direct-child.txt");
+
+        let folder = track_folder(
+            &repo,
+            &pair,
+            "docs",
+            Some(folder_virtual_path.to_str().unwrap()),
+        )
+        .unwrap();
+        auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        let direct_file = track_file(
+            &repo,
+            &pair,
+            "docs/direct.txt",
+            Some(file_virtual_path.to_str().unwrap()),
+        )
+        .unwrap();
+        let folder_only_file = repo
+            .get_tracked_file_by_path(pair.id, "docs/folder-only.txt")
+            .unwrap();
+
+        let folder_only_queue = repo
+            .create_sync_queue_item(folder_only_file.id, "mirror")
+            .unwrap();
+        let direct_queue = repo
+            .create_sync_queue_item(direct_file.id, "mirror")
+            .unwrap();
+
+        let result = untrack_folder_cascade(&repo, folder.id).unwrap();
+
+        assert_eq!(result.folder_id, folder.id);
+        assert_eq!(result.drive_pair_id, pair.id);
+        assert_eq!(result.removed_file_count(), 1);
+        assert_eq!(result.removed_file_ids, vec![folder_only_file.id]);
+
+        assert!(repo.get_tracked_folder(folder.id).is_err());
+        assert!(repo.get_tracked_file(folder_only_file.id).is_err());
+        assert!(repo.get_sync_queue_item(folder_only_queue.id).is_err());
+        assert!(repo.get_sync_queue_item(direct_queue.id).is_ok());
+        assert!(!folder_virtual_path.exists());
+        assert!(file_virtual_path.is_symlink());
+
+        let preserved = repo.get_tracked_file(direct_file.id).unwrap();
+        assert!(preserved.tracked_direct);
+        assert!(!preserved.tracked_via_folder);
+
+        let (events, total_events) = repo.list_event_logs(None, None, None, None, 1, 20).unwrap();
+        assert!(total_events >= 2);
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "file_untracked"
+                && event.message.contains("docs/folder-only.txt")));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "folder_untracked" && event.message.contains("docs")));
+    }
+
+    #[test]
+    fn test_untrack_folder_cascade_db_clean_even_with_missing_symlink() {
+        // Verifies that DB state is fully cleaned up even when the virtual_path
+        // recorded in the DB does not exist on disk (orphaned symlink scenario).
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::create_dir(primary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/report.txt"), b"report").unwrap();
+
+        let folder = track_folder(&repo, &pair, "docs", None).unwrap();
+        auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        let folder_file = repo
+            .get_tracked_file_by_path(pair.id, "docs/report.txt")
+            .unwrap();
+
+        // Manually assign a virtual_path that has no symlink on disk.
+        repo.update_tracked_file_virtual_path(folder_file.id, Some("/nonexistent/virtual/path"))
+            .unwrap();
+        let queue_item = repo
+            .create_sync_queue_item(folder_file.id, "mirror")
+            .unwrap();
+
+        let result = untrack_folder_cascade(&repo, folder.id).unwrap();
+
+        assert_eq!(result.folder_id, folder.id);
+        assert_eq!(result.removed_file_ids, vec![folder_file.id]);
+
+        // DB must be fully cleaned up despite the missing symlink.
+        assert!(repo.get_tracked_folder(folder.id).is_err());
+        assert!(repo.get_tracked_file(folder_file.id).is_err());
+        assert!(repo.get_sync_queue_item(queue_item.id).is_err());
     }
 
     #[cfg(unix)]

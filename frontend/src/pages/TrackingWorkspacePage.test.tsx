@@ -346,7 +346,15 @@ describe('TrackingWorkspacePage', () => {
         if (listCalls === 1) {
           return HttpResponse.json(
             makeTrackingListResponse([
-              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+              makeTrackingItem({
+                id: 12,
+                kind: 'file',
+                path: 'docs/folder-only.txt',
+                source: 'folder',
+                tracked_direct: false,
+                tracked_via_folder: true,
+              }),
               makeTrackingItem({
                 id: 21,
                 kind: 'folder',
@@ -359,9 +367,13 @@ describe('TrackingWorkspacePage', () => {
             ])
           )
         }
-        return HttpResponse.json(makeTrackingListResponse([]))
+        return HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+          ])
+        )
       }),
-      api.delete('/files/11', () => {
+      api.delete('/files/12', () => {
         deletedFiles += 1
         return new HttpResponse(null, { status: 204 })
       }),
@@ -374,8 +386,8 @@ describe('TrackingWorkspacePage', () => {
 
     renderWithApp(<TrackingWorkspacePage />)
 
-    await screen.findByTestId('file-row-11')
-    await user.click(screen.getByTestId('select-row-file-11'))
+    await screen.findByTestId('file-row-12')
+    await user.click(screen.getByTestId('select-row-file-12'))
     await user.click(screen.getByTestId('select-row-folder-21'))
     await user.click(screen.getByTestId('bulk-delete'))
     await user.click(
@@ -385,9 +397,95 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(deletedFiles).toBe(1)
       expect(deletedFolders).toBe(1)
-      expect(screen.queryByTestId('file-row-11')).not.toBeInTheDocument()
+      expect(screen.getByTestId('file-row-11')).toBeInTheDocument()
+      expect(screen.queryByTestId('file-row-12')).not.toBeInTheDocument()
       expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
     })
+  })
+
+  it('removes folder-origin descendant after single folder delete', async () => {
+    const user = userEvent.setup()
+    let listCalls = 0
+    let deletedFolders = 0
+    let deletedFileCalled = false
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () => {
+        listCalls += 1
+        if (listCalls === 1) {
+          return HttpResponse.json(
+            makeTrackingListResponse([
+              makeTrackingItem({
+                id: 11,
+                kind: 'file',
+                path: 'docs/direct.txt',
+                source: 'direct',
+                tracked_direct: true,
+                tracked_via_folder: false,
+              }),
+              makeTrackingItem({
+                id: 12,
+                kind: 'file',
+                path: 'docs/folder-only.txt',
+                source: 'folder',
+                tracked_direct: false,
+                tracked_via_folder: true,
+              }),
+              makeTrackingItem({
+                id: 21,
+                kind: 'folder',
+                path: 'docs',
+                source: 'folder',
+                is_mirrored: null,
+                tracked_direct: null,
+                tracked_via_folder: null,
+              }),
+            ])
+          )
+        }
+        // Call 2: server has already cascaded; folder-only file is gone.
+        return HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 11,
+              kind: 'file',
+              path: 'docs/direct.txt',
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      }),
+      api.delete('/folders/21', () => {
+        deletedFolders += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+      // The frontend must NOT call DELETE /files/12 — the server cascades that.
+      api.delete('/files/12', () => {
+        deletedFileCalled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('folder-row-21')
+    await user.click(screen.getByTestId('select-row-folder-21'))
+    await user.click(screen.getByTestId('bulk-delete'))
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' })
+    )
+
+    await waitFor(() => {
+      expect(deletedFolders).toBe(1)
+      expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('file-row-12')).not.toBeInTheDocument()
+      expect(screen.getByTestId('file-row-11')).toBeInTheDocument()
+    })
+    expect(deletedFileCalled).toBe(false)
   })
 
   it('moves details to the next file after delete and closes details after deleting the last file', async () => {
