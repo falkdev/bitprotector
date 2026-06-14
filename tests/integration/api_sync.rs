@@ -22,6 +22,33 @@ async fn test_sync_queue_list_empty() {
 }
 
 #[actix_rt::test]
+async fn test_sync_queue_list_clamps_pagination_query_params() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("pagination", "/p", "/s").unwrap();
+
+    for i in 0..3 {
+        let file = repo
+            .create_tracked_file(pair.id, &format!("file-{i}.txt"), "abc", 3, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "verify").unwrap();
+    }
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue?page=0&per_page=999")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["page"], 1);
+    assert_eq!(body["per_page"], 200);
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["queue"].as_array().unwrap().len(), 3);
+}
+
+#[actix_rt::test]
 async fn test_sync_queue_add_and_get() {
     let repo = make_repo();
     let pair = repo.create_drive_pair("sp", "/p", "/s").unwrap();

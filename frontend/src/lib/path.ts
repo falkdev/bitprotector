@@ -44,6 +44,21 @@ export function joinAbsoluteFilesystemPath(root: string, relativePath: string): 
     : `${normalizedRoot}/${normalizedRelative}`
 }
 
+export function suggestVirtualPathFromParent(parentPath: string, sourcePath: string): string {
+  const normalizedParent = normalizeAbsoluteFilesystemPath(parentPath)
+  const normalizedSource = normalizeRelativeFilesystemPath(sourcePath)
+  if (!normalizedSource) {
+    return normalizedParent
+  }
+
+  const sourceName = normalizedSource.split('/').filter(Boolean).pop()
+  if (!sourceName) {
+    return normalizedParent
+  }
+
+  return joinAbsoluteFilesystemPath(normalizedParent, sourceName)
+}
+
 export function resolveTrackedPathInput(
   activeRoot: string | null | undefined,
   inputPath: string

@@ -105,44 +105,50 @@ function ScheduleFormModal({
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    setTaskType(schedule?.task_type ?? 'sync')
-    setEnabled(schedule?.enabled ?? true)
-    setError(null)
-    setSaving(false)
-    setMaxDurationValue(
-      schedule?.max_duration_seconds != null
-        ? String(Math.ceil(schedule.max_duration_seconds / 60))
-        : ''
-    )
+    const timer = window.setTimeout(() => {
+      setTaskType(schedule?.task_type ?? 'sync')
+      setEnabled(schedule?.enabled ?? true)
+      setError(null)
+      setSaving(false)
+      setMaxDurationValue(
+        schedule?.max_duration_seconds != null
+          ? String(Math.ceil(schedule.max_duration_seconds / 60))
+          : ''
+      )
 
-    if (schedule?.cron_expr) {
-      setTimingMethod('cron')
-      setCronExpr(schedule.cron_expr)
-      const preset = CRON_PRESETS.find((p) => p.cron === schedule.cron_expr)
-      if (preset) {
+      if (schedule?.cron_expr) {
+        setTimingMethod('cron')
+        setCronExpr(schedule.cron_expr)
+        const preset = CRON_PRESETS.find((p) => p.cron === schedule.cron_expr)
+        if (preset) {
+          setCronMode('preset')
+          setSelectedPreset(preset.cron)
+        } else {
+          setCronMode('custom')
+          setSelectedPreset('')
+        }
+        setIntervalValue('1')
+        setIntervalUnit('hours')
+      } else if (schedule?.interval_seconds) {
+        setTimingMethod('interval')
+        const { value, unit } = secondsToInterval(schedule.interval_seconds)
+        setIntervalValue(String(value))
+        setIntervalUnit(unit)
+        setCronExpr('')
         setCronMode('preset')
-        setSelectedPreset(preset.cron)
+        setSelectedPreset('')
       } else {
-        setCronMode('custom')
+        setTimingMethod('interval')
+        setIntervalValue('1')
+        setIntervalUnit('hours')
+        setCronExpr('')
+        setCronMode('preset')
         setSelectedPreset('')
       }
-      setIntervalValue('1')
-      setIntervalUnit('hours')
-    } else if (schedule?.interval_seconds) {
-      setTimingMethod('interval')
-      const { value, unit } = secondsToInterval(schedule.interval_seconds)
-      setIntervalValue(String(value))
-      setIntervalUnit(unit)
-      setCronExpr('')
-      setCronMode('preset')
-      setSelectedPreset('')
-    } else {
-      setTimingMethod('interval')
-      setIntervalValue('1')
-      setIntervalUnit('hours')
-      setCronExpr('')
-      setCronMode('preset')
-      setSelectedPreset('')
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
     }
   }, [schedule])
 
@@ -449,7 +455,13 @@ export function SchedulerPage() {
   }
 
   useEffect(() => {
-    void loadSchedules()
+    const timer = window.setTimeout(() => {
+      void loadSchedules()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [])
 
   const closeForm = () => {

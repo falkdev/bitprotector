@@ -2,6 +2,8 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Result;
 
+const DUPLICATE_DRIVE_PATH_ERROR: &str = "Drive path is already registered to another drive pair";
+
 pub type DbPool = Pool<SqliteConnectionManager>;
 
 fn file_connection_manager(db_path: &str) -> SqliteConnectionManager {
@@ -85,6 +87,9 @@ pub struct TrackedFolder {
     pub drive_pair_id: i64,
     pub folder_path: String,
     pub virtual_path: Option<String>,
+    pub scanning: bool,
+    pub scan_scanned_files: i64,
+    pub scan_total_files: i64,
     pub last_scanned_at: Option<String>,
     pub created_at: String,
 }
@@ -144,6 +149,7 @@ pub struct VirtualPathTreeNode {
 pub struct SyncQueueItem {
     pub id: i64,
     pub tracked_file_id: i64,
+    pub relative_path: String,
     pub action: String,
     pub status: String,
     pub error_message: Option<String>,
@@ -274,7 +280,7 @@ impl Repository {
     ) -> anyhow::Result<DrivePair> {
         let id = {
             let conn = self.conn()?;
-            conn.execute(
+            Self::map_drive_pair_create_error(conn.execute(
                 "INSERT INTO drive_pairs (
                     name, primary_path, secondary_path,
                     primary_state, secondary_state, active_role,
@@ -287,10 +293,31 @@ impl Repository {
                     primary_media_type,
                     secondary_media_type
                 ],
-            )?;
+            ))?;
             conn.last_insert_rowid()
         };
         self.get_drive_pair(id)
+    }
+
+    pub fn is_duplicate_drive_path_error(err: &anyhow::Error) -> bool {
+        err.chain()
+            .any(|e| e.to_string() == DUPLICATE_DRIVE_PATH_ERROR)
+    }
+
+    fn map_drive_pair_create_error(result: rusqlite::Result<usize>) -> anyhow::Result<usize> {
+        match result {
+            Ok(rows) => Ok(rows),
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    extended_code: rusqlite::ffi::SQLITE_CONSTRAINT_TRIGGER,
+                    ..
+                },
+                Some(ref msg),
+            )) if msg.contains("drive path already registered") => {
+                anyhow::bail!(DUPLICATE_DRIVE_PATH_ERROR)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn get_drive_pair(&self, id: i64) -> anyhow::Result<DrivePair> {
@@ -1092,7 +1119,9 @@ impl Repository {
     pub fn get_tracked_folder(&self, id: i64) -> anyhow::Result<TrackedFolder> {
         let conn = self.conn()?;
         let folder = conn.query_row(
-            "SELECT id, drive_pair_id, folder_path, virtual_path, last_scanned_at, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    scanning, scan_scanned_files, scan_total_files,
+                    last_scanned_at, created_at
              FROM tracked_folders WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -1101,8 +1130,11 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    last_scanned_at: row.get(4)?,
-                    created_at: row.get(5)?,
+                    scanning: row.get::<_, i64>(4)? != 0,
+                    scan_scanned_files: row.get(5)?,
+                    scan_total_files: row.get(6)?,
+                    last_scanned_at: row.get(7)?,
+                    created_at: row.get(8)?,
                 })
             },
         )?;
@@ -1112,7 +1144,9 @@ impl Repository {
     pub fn list_tracked_folders(&self) -> anyhow::Result<Vec<TrackedFolder>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, drive_pair_id, folder_path, virtual_path, last_scanned_at, created_at
+            "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    scanning, scan_scanned_files, scan_total_files,
+                    last_scanned_at, created_at
              FROM tracked_folders ORDER BY id",
         )?;
         let folders = stmt
@@ -1122,18 +1156,72 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    last_scanned_at: row.get(4)?,
-                    created_at: row.get(5)?,
+                    scanning: row.get::<_, i64>(4)? != 0,
+                    scan_scanned_files: row.get(5)?,
+                    scan_total_files: row.get(6)?,
+                    last_scanned_at: row.get(7)?,
+                    created_at: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(folders)
     }
 
+    pub fn start_folder_scan(&self, id: i64, total_files: i64) -> anyhow::Result<TrackedFolder> {
+        let updated = {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE tracked_folders
+                 SET scanning = 1,
+                     scan_scanned_files = 0,
+                     scan_total_files = ?1
+                 WHERE id = ?2 AND scanning = 0",
+                rusqlite::params![total_files.max(0), id],
+            )?
+        };
+
+        if updated == 0 {
+            anyhow::bail!("Folder scan already active");
+        }
+
+        self.get_tracked_folder(id)
+    }
+
+    pub fn update_scan_progress(
+        &self,
+        id: i64,
+        scanned_files: i64,
+        total_files: i64,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_folders
+             SET scan_scanned_files = ?1,
+                 scan_total_files = ?2
+             WHERE id = ?3",
+            rusqlite::params![scanned_files.max(0), total_files.max(0), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_folder_scan(&self, id: i64) -> anyhow::Result<TrackedFolder> {
+        {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE tracked_folders SET scanning = 0 WHERE id = ?1",
+                rusqlite::params![id],
+            )?;
+        }
+        self.get_tracked_folder(id)
+    }
+
     pub fn mark_tracked_folder_scanned(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "UPDATE tracked_folders SET last_scanned_at=datetime('now') WHERE id=?1",
+            "UPDATE tracked_folders
+             SET last_scanned_at = datetime('now'),
+                 scan_scanned_files = scan_total_files
+             WHERE id = ?1",
             rusqlite::params![id],
         )?;
         Ok(())
@@ -1145,6 +1233,11 @@ impl Repository {
         folder_path: &str,
     ) -> anyhow::Result<Vec<TrackedFile>> {
         let conn = self.conn()?;
+        let stripped = folder_path.trim_end_matches('/');
+        let escaped = stripped
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let mut stmt = conn.prepare(
             "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
                     is_mirrored, tracked_direct, tracked_via_folder,
@@ -1152,13 +1245,13 @@ impl Repository {
              FROM tracked_files
              WHERE drive_pair_id = ?1
                AND (
-                    relative_path = rtrim(?2, '/')
-                    OR relative_path LIKE rtrim(?2, '/') || '/%'
+                    relative_path = ?2
+                    OR relative_path LIKE ?3 || '/%' ESCAPE '\\'
                )
              ORDER BY id",
         )?;
         let files = stmt
-            .query_map(rusqlite::params![drive_pair_id, folder_path], |row| {
+            .query_map(rusqlite::params![drive_pair_id, stripped, escaped], |row| {
                 Ok(TrackedFile {
                     id: row.get(0)?,
                     drive_pair_id: row.get(1)?,
@@ -1174,6 +1267,65 @@ impl Repository {
                     updated_at: row.get(11)?,
                 })
             })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(files)
+    }
+
+    pub fn list_folder_origin_descendant_files(
+        &self,
+        drive_pair_id: i64,
+        folder_path: &str,
+        excluding_folder_id: i64,
+    ) -> anyhow::Result<Vec<TrackedFile>> {
+        let conn = self.conn()?;
+        let stripped = folder_path.trim_end_matches('/');
+        let escaped = stripped
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let mut stmt = conn.prepare(
+            "SELECT id, drive_pair_id, relative_path, checksum, file_size, virtual_path,
+                    is_mirrored, tracked_direct, tracked_via_folder,
+                    last_integrity_check_at, created_at, updated_at
+             FROM tracked_files
+             WHERE drive_pair_id = ?1
+               AND tracked_direct = 0
+               AND tracked_via_folder = 1
+               AND (
+                    relative_path = ?2
+                    OR relative_path LIKE ?3 || '/%' ESCAPE '\\'
+               )
+               AND NOT EXISTS (
+                    SELECT 1 FROM tracked_folders other
+                    WHERE other.drive_pair_id = ?1
+                      AND other.id != ?4
+                      AND (
+                           tracked_files.relative_path = rtrim(other.folder_path, '/')
+                      OR tracked_files.relative_path LIKE replace(replace(replace(rtrim(other.folder_path, '/'), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '/%' ESCAPE '\\'
+                      )
+               )
+             ORDER BY id",
+        )?;
+        let files = stmt
+            .query_map(
+                rusqlite::params![drive_pair_id, stripped, escaped, excluding_folder_id],
+                |row| {
+                    Ok(TrackedFile {
+                        id: row.get(0)?,
+                        drive_pair_id: row.get(1)?,
+                        relative_path: row.get(2)?,
+                        checksum: row.get(3)?,
+                        file_size: row.get(4)?,
+                        virtual_path: row.get(5)?,
+                        is_mirrored: row.get::<_, i64>(6)? != 0,
+                        tracked_direct: row.get::<_, i64>(7)? != 0,
+                        tracked_via_folder: row.get::<_, i64>(8)? != 0,
+                        last_integrity_check_at: row.get(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                    })
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(files)
     }
@@ -1562,6 +1714,30 @@ impl Repository {
         Ok(())
     }
 
+    /// Atomically delete sync_queue rows and tracked_files rows for the given file IDs,
+    /// then delete the tracked_folder row, all within a single transaction.
+    /// Either all deletions succeed or none do.
+    pub fn delete_folder_cascade_tx(&self, folder_id: i64, file_ids: &[i64]) -> anyhow::Result<()> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        for &file_id in file_ids {
+            tx.execute(
+                "DELETE FROM sync_queue WHERE tracked_file_id = ?1",
+                rusqlite::params![file_id],
+            )?;
+            tx.execute(
+                "DELETE FROM tracked_files WHERE id = ?1",
+                rusqlite::params![file_id],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM tracked_folders WHERE id = ?1",
+            rusqlite::params![folder_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     // ─── Sync Queue ───────────────────────────────────────────────────────────────
 
     pub fn create_sync_queue_item(
@@ -1616,18 +1792,22 @@ impl Repository {
     pub fn get_sync_queue_item(&self, id: i64) -> anyhow::Result<SyncQueueItem> {
         let conn = self.conn()?;
         let item = conn.query_row(
-            "SELECT id, tracked_file_id, action, status, error_message, created_at, completed_at
-             FROM sync_queue WHERE id=?1",
+            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
+                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+             FROM sync_queue sq
+             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+             WHERE sq.id=?1",
             rusqlite::params![id],
             |row| {
                 Ok(SyncQueueItem {
                     id: row.get(0)?,
                     tracked_file_id: row.get(1)?,
-                    action: row.get(2)?,
-                    status: row.get(3)?,
-                    error_message: row.get(4)?,
-                    created_at: row.get(5)?,
-                    completed_at: row.get(6)?,
+                    relative_path: row.get(2)?,
+                    action: row.get(3)?,
+                    status: row.get(4)?,
+                    error_message: row.get(5)?,
+                    created_at: row.get(6)?,
+                    completed_at: row.get(7)?,
                 })
             },
         )?;
@@ -1641,17 +1821,23 @@ impl Repository {
         per_page: i64,
     ) -> anyhow::Result<(Vec<SyncQueueItem>, i64)> {
         let conn = self.conn()?;
+        let page = page.max(1);
+        let per_page = per_page.clamp(1, 200);
         let offset = (page - 1) * per_page;
         let (where_clause, params_status) = if let Some(s) = status {
-            (format!("WHERE status='{}'", s.replace('\'', "''")), true)
+            (format!("WHERE sq.status='{}'", s.replace('\'', "''")), true)
         } else {
             (String::new(), false)
         };
         let query = format!(
-            "SELECT id, tracked_file_id, action, status, error_message, created_at, completed_at
-             FROM sync_queue {where_clause} ORDER BY id LIMIT {per_page} OFFSET {offset}"
+            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
+                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+             FROM sync_queue sq
+             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+             {where_clause}
+             ORDER BY sq.id LIMIT {per_page} OFFSET {offset}"
         );
-        let count_query = format!("SELECT COUNT(*) FROM sync_queue {where_clause}");
+        let count_query = format!("SELECT COUNT(*) FROM sync_queue sq {where_clause}");
 
         let items = conn
             .prepare(&query)?
@@ -1659,11 +1845,12 @@ impl Repository {
                 Ok(SyncQueueItem {
                     id: row.get(0)?,
                     tracked_file_id: row.get(1)?,
-                    action: row.get(2)?,
-                    status: row.get(3)?,
-                    error_message: row.get(4)?,
-                    created_at: row.get(5)?,
-                    completed_at: row.get(6)?,
+                    relative_path: row.get(2)?,
+                    action: row.get(3)?,
+                    status: row.get(4)?,
+                    error_message: row.get(5)?,
+                    created_at: row.get(6)?,
+                    completed_at: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2024,6 +2211,16 @@ impl Repository {
         let conn = self.conn()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sync_queue WHERE status IN ('pending', 'in_progress')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn count_in_progress_sync_queue(&self) -> anyhow::Result<i64> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE status='in_progress'",
             [],
             |r| r.get(0),
         )?;
@@ -2440,6 +2637,29 @@ mod tests {
     }
 
     #[test]
+    fn test_create_drive_pair_rejects_reused_path_with_stable_message() {
+        let repo = make_repo();
+
+        repo.create_drive_pair("pair-a", "/a", "/b").unwrap();
+
+        let err = repo
+            .create_drive_pair("pair-b", "/c", "/a")
+            .expect_err("create should reject reused path");
+        assert_eq!(err.to_string(), DUPLICATE_DRIVE_PATH_ERROR);
+        assert!(Repository::is_duplicate_drive_path_error(&err));
+    }
+
+    #[test]
+    fn test_create_drive_pair_allows_distinct_paths() {
+        let repo = make_repo();
+
+        repo.create_drive_pair("pair-a", "/a", "/b").unwrap();
+        let pair = repo.create_drive_pair("pair-b", "/c", "/d").unwrap();
+
+        assert_eq!(pair.name, "pair-b");
+    }
+
+    #[test]
     fn test_delete_drive_pair_with_files_fails() {
         let repo = make_repo();
         let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
@@ -2514,6 +2734,9 @@ mod tests {
             .unwrap();
         assert_eq!(folder.folder_path, "documents/");
         assert_eq!(folder.virtual_path.as_deref(), Some("/docs"));
+        assert!(!folder.scanning);
+        assert_eq!(folder.scan_scanned_files, 0);
+        assert_eq!(folder.scan_total_files, 0);
         assert!(folder.last_scanned_at.is_none());
 
         repo.mark_tracked_folder_scanned(folder.id).unwrap();
@@ -2525,6 +2748,143 @@ mod tests {
 
         repo.delete_tracked_folder(folder.id).unwrap();
         assert!(repo.get_tracked_folder(folder.id).is_err());
+    }
+
+    #[test]
+    fn test_list_folder_origin_descendant_files_filters_direct_descendants() {
+        let repo = make_repo();
+        let pair = repo
+            .create_drive_pair("pair", "/primary", "/secondary")
+            .unwrap();
+
+        let folder_origin = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/folder-only.txt",
+                "hash-folder",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        let _direct = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/direct.txt",
+                "hash-direct",
+                10,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        let _outside = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "images/elsewhere.txt",
+                "hash-outside",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        let docs_folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        let files = repo
+            .list_folder_origin_descendant_files(pair.id, "docs", docs_folder.id)
+            .unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, folder_origin.id);
+        assert_eq!(files[0].relative_path, "docs/folder-only.txt");
+        assert!(!files[0].tracked_direct);
+        assert!(files[0].tracked_via_folder);
+    }
+
+    #[test]
+    fn test_list_folder_origin_descendant_files_excludes_nested_folder_files() {
+        let repo = make_repo();
+        let pair = repo
+            .create_drive_pair("pair2", "/primary", "/secondary")
+            .unwrap();
+
+        // Parent folder "docs" being deleted
+        let docs_folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+        // Nested subfolder "docs/sub" that is still tracked
+        let sub_folder = repo
+            .create_tracked_folder(pair.id, "docs/sub", None)
+            .unwrap();
+
+        // File under docs but NOT under docs/sub — should be included
+        let parent_file = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/parent-only.txt",
+                "hash-parent",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+        // File under docs/sub — must NOT appear when excluding docs_folder
+        let _sub_file = repo
+            .create_tracked_file_with_source(
+                pair.id,
+                "docs/sub/file.txt",
+                "hash-sub",
+                10,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+
+        let files = repo
+            .list_folder_origin_descendant_files(pair.id, "docs", docs_folder.id)
+            .unwrap();
+
+        assert_eq!(
+            files.len(),
+            1,
+            "docs/sub/file.txt must be excluded because docs/sub is still tracked"
+        );
+        assert_eq!(files[0].id, parent_file.id);
+        assert_eq!(files[0].relative_path, "docs/parent-only.txt");
+        let _ = sub_folder; // suppress unused warning
+    }
+
+    #[test]
+    fn test_tracked_folder_scan_state_lifecycle() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo
+            .create_tracked_folder(pair.id, "documents/", None)
+            .unwrap();
+
+        let started = repo.start_folder_scan(folder.id, 4).unwrap();
+        assert!(started.scanning);
+        assert_eq!(started.scan_scanned_files, 0);
+        assert_eq!(started.scan_total_files, 4);
+        assert!(repo.start_folder_scan(folder.id, 4).is_err());
+
+        repo.update_scan_progress(folder.id, 3, 4).unwrap();
+        let in_progress = repo.get_tracked_folder(folder.id).unwrap();
+        assert!(in_progress.scanning);
+        assert_eq!(in_progress.scan_scanned_files, 3);
+        assert_eq!(in_progress.scan_total_files, 4);
+
+        repo.mark_tracked_folder_scanned(folder.id).unwrap();
+        let scanned = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(scanned.scan_scanned_files, 4);
+        assert!(scanned.last_scanned_at.is_some());
+
+        let finished = repo.finish_folder_scan(folder.id).unwrap();
+        assert!(!finished.scanning);
+        assert_eq!(finished.scan_scanned_files, 4);
+        assert_eq!(finished.scan_total_files, 4);
     }
 
     // ─── Sync Queue ───────────────────────────────────────────────────────────────
@@ -2540,6 +2900,7 @@ mod tests {
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
         assert_eq!(item.action, "mirror");
         assert_eq!(item.status, "pending");
+        assert_eq!(item.relative_path, "f.txt");
 
         repo.update_sync_queue_status(item.id, "completed", None)
             .unwrap();
@@ -2613,9 +2974,31 @@ mod tests {
 
         let (remaining, total) = repo.list_sync_queue(None, 1, 50).unwrap();
         assert_eq!(total, 2);
+        assert_eq!(repo.count_in_progress_sync_queue().unwrap(), 1);
         assert!(remaining.iter().any(|item| item.id == in_progress.id));
         assert!(remaining.iter().any(|item| item.id == pending.id));
         assert!(remaining.iter().all(|item| item.status != "completed"));
+    }
+
+    #[test]
+    fn test_list_sync_queue_clamps_pagination_values() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+
+        for i in 0..3 {
+            let file = repo
+                .create_tracked_file(pair.id, &format!("f{i}.txt"), "h", 1, None)
+                .unwrap();
+            repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        }
+
+        let (items, total) = repo.list_sync_queue(None, 0, 0).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(items.len(), 1);
+
+        let (items_large_page, total_large_page) = repo.list_sync_queue(None, 1, 999).unwrap();
+        assert_eq!(total_large_page, 3);
+        assert_eq!(items_large_page.len(), 3);
     }
 
     #[test]

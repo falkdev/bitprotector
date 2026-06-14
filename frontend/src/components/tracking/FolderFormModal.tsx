@@ -4,7 +4,12 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
-import { resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
+import {
+  getActiveDrivePath,
+  resolveAbsolutePathForPicker,
+  resolveTrackedPathInput,
+  suggestVirtualPathFromParent,
+} from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
 import type { CreateFolderRequest } from '@/types/folder'
 
@@ -45,8 +50,13 @@ export function FolderFormModal({
   const rawPath = watch('folder_path') ?? ''
   const rawVirtualPath = watch('virtual_path') ?? ''
   const selectedDrive = drives.find((drive) => drive.id === Number(drivePairId))
-  const primaryRoot = selectedDrive?.primary_path ?? null
-  const pathResolution = resolveTrackedPathInput(primaryRoot, rawPath)
+  const activeRoot = selectedDrive
+    ? getActiveDrivePath(
+        selectedDrive.primary_path,
+        selectedDrive.secondary_path,
+        selectedDrive.active_role
+      )
+    : null
 
   return (
     <>
@@ -55,7 +65,7 @@ export function FolderFormModal({
           <h2 className="mb-4 font-semibold">Add Tracked Folder</h2>
           <form
             onSubmit={handleSubmit(async (data) => {
-              const resolution = resolveTrackedPathInput(primaryRoot, data.folder_path)
+              const resolution = resolveTrackedPathInput(activeRoot, data.folder_path)
               if (resolution.error || !resolution.relativePath) {
                 setError('folder_path', {
                   type: 'manual',
@@ -113,19 +123,6 @@ export function FolderFormModal({
                   Browse
                 </button>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {selectedDrive
-                  ? `Primary root: ${primaryRoot}`
-                  : 'Select a drive pair before browsing or submitting.'}
-              </p>
-              {selectedDrive &&
-              rawPath.trim() &&
-              !pathResolution.error &&
-              pathResolution.relativePath ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
-                </p>
-              ) : null}
               {errors.folder_path ? (
                 <p className="mt-1 text-xs text-destructive">{errors.folder_path.message}</p>
               ) : null}
@@ -179,13 +176,13 @@ export function FolderFormModal({
       <PathPickerDialog
         open={showPicker}
         title="Select Folder Path"
-        description="Browse the BitProtector host filesystem and choose a directory under the selected drive pair’s primary root."
+        description="Browse the BitProtector host filesystem and choose a directory under the selected drive pair’s active root."
         mode="directory"
         value={rawPath}
-        startPath={resolveAbsolutePathForPicker(primaryRoot, rawPath)}
-        rootPath={primaryRoot ?? undefined}
+        startPath={resolveAbsolutePathForPicker(activeRoot, rawPath)}
+        rootPath={activeRoot ?? undefined}
         confirmLabel="Use Folder Path"
-        validatePath={(path) => resolveTrackedPathInput(primaryRoot, path).error}
+        validatePath={(path) => resolveTrackedPathInput(activeRoot, path).error}
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
           setValue('folder_path', path, { shouldDirty: true, shouldValidate: true })
@@ -196,14 +193,15 @@ export function FolderFormModal({
       <PathPickerDialog
         open={showVirtualPicker}
         title="Select Folder Virtual Path"
-        description="Choose the absolute virtual path for this tracked folder."
+        description="Choose a parent directory; BitProtector appends the tracked folder name."
         mode="directory"
         value={rawVirtualPath}
         startPath={rawVirtualPath || '/'}
         confirmLabel="Use Virtual Path"
         onClose={() => setShowVirtualPicker(false)}
         onPick={(path) => {
-          setValue('virtual_path', path, { shouldDirty: true, shouldValidate: true })
+          const suggestedPath = suggestVirtualPathFromParent(path, rawPath)
+          setValue('virtual_path', suggestedPath, { shouldDirty: true, shouldValidate: true })
           clearErrors('virtual_path')
           setShowVirtualPicker(false)
         }}

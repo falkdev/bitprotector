@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cn, truncate, resolveActivePath } from './utils'
+import { cn, getErrorMessage, resolveActivePath, truncate } from './utils'
 
 describe('cn', () => {
   it('merges class names', () => {
@@ -41,5 +41,45 @@ describe('resolveActivePath', () => {
 
   it('strips leading slash from relativePath', () => {
     expect(resolveActivePath('/mnt/primary', '/docs/file.pdf')).toBe('/mnt/primary/docs/file.pdf')
+  })
+})
+
+describe('getErrorMessage', () => {
+  it('prefers plain-text API response bodies', () => {
+    const error = {
+      message: 'Request failed with status code 400',
+      response: {
+        data: 'Selected path must be inside the active drive root',
+      },
+    }
+
+    expect(getErrorMessage(error, 'Failed to add folder')).toBe(
+      'Selected path must be inside the active drive root'
+    )
+  })
+
+  it('prefers nested API error.message payloads', () => {
+    const error = {
+      message: 'Request failed with status code 400',
+      response: {
+        data: {
+          error: {
+            message: 'Folder already tracked',
+          },
+        },
+      },
+    }
+
+    expect(getErrorMessage(error, 'Failed to add folder')).toBe('Folder already tracked')
+  })
+
+  it('falls back to Error.message when response has no usable message', () => {
+    expect(getErrorMessage(new Error('Network Error'), 'Failed to add folder')).toBe(
+      'Network Error'
+    )
+  })
+
+  it('falls back to default message for unknown error values', () => {
+    expect(getErrorMessage(null, 'Failed to add folder')).toBe('Failed to add folder')
   })
 })

@@ -4,7 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ModalLayer } from '@/components/shared/ModalLayer'
 import { PathPickerDialog } from '@/components/shared/PathPickerDialog'
-import { resolveAbsolutePathForPicker, resolveTrackedPathInput } from '@/lib/path'
+import {
+  getActiveDrivePath,
+  resolveAbsolutePathForPicker,
+  resolveTrackedPathInput,
+} from '@/lib/path'
 import type { DrivePair } from '@/types/drive'
 import type { TrackFileRequest } from '@/types/file'
 
@@ -46,8 +50,13 @@ export function TrackFileModal({
   const rawPath = watch('relative_path') ?? ''
   const rawVirtualPath = watch('virtual_path') ?? ''
   const selectedDrive = drives.find((drive) => drive.id === Number(drivePairId))
-  const primaryRoot = selectedDrive?.primary_path ?? null
-  const pathResolution = resolveTrackedPathInput(primaryRoot, rawPath)
+  const activeRoot = selectedDrive
+    ? getActiveDrivePath(
+        selectedDrive.primary_path,
+        selectedDrive.secondary_path,
+        selectedDrive.active_role
+      )
+    : null
 
   if (!open) return null
 
@@ -58,7 +67,7 @@ export function TrackFileModal({
           <h2 className="mb-4 text-lg font-semibold">Track new file</h2>
           <form
             onSubmit={handleSubmit(async (data) => {
-              const resolution = resolveTrackedPathInput(primaryRoot, data.relative_path)
+              const resolution = resolveTrackedPathInput(activeRoot, data.relative_path)
               if (resolution.error || !resolution.relativePath) {
                 setError('relative_path', {
                   type: 'manual',
@@ -123,19 +132,6 @@ export function TrackFileModal({
                   Browse
                 </button>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {selectedDrive
-                  ? `Primary root: ${primaryRoot}`
-                  : 'Select a drive pair before browsing or submitting.'}
-              </p>
-              {selectedDrive &&
-              rawPath.trim() &&
-              !pathResolution.error &&
-              pathResolution.relativePath ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Will be stored as <span className="font-mono">{pathResolution.relativePath}</span>
-                </p>
-              ) : null}
               {errors.relative_path ? (
                 <p className="mt-1 text-xs text-destructive">{errors.relative_path.message}</p>
               ) : null}
@@ -192,13 +188,13 @@ export function TrackFileModal({
       <PathPickerDialog
         open={showPicker}
         title="Select File Path"
-        description="Browse the BitProtector host filesystem and choose a file under the selected drive pair’s primary root."
+        description="Browse the BitProtector host filesystem and choose a file under the selected drive pair’s active root."
         mode="file"
         value={rawPath}
-        startPath={resolveAbsolutePathForPicker(primaryRoot, rawPath)}
-        rootPath={primaryRoot ?? undefined}
+        startPath={resolveAbsolutePathForPicker(activeRoot, rawPath)}
+        rootPath={activeRoot ?? undefined}
         confirmLabel="Use File Path"
-        validatePath={(path) => resolveTrackedPathInput(primaryRoot, path).error}
+        validatePath={(path) => resolveTrackedPathInput(activeRoot, path).error}
         onClose={() => setShowPicker(false)}
         onPick={(path) => {
           setValue('relative_path', path, { shouldDirty: true, shouldValidate: true })

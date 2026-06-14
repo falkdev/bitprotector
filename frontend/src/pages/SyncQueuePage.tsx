@@ -61,9 +61,15 @@ function ResolveDialog({
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    setResolution('keep_master')
-    setNewFilePath('')
-    setSubmitting(false)
+    const timer = window.setTimeout(() => {
+      setResolution('keep_master')
+      setNewFilePath('')
+      setSubmitting(false)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [item])
 
   if (!item) return null
@@ -156,12 +162,17 @@ function ResolveDialog({
 
 export function SyncQueuePage() {
   const items = useSyncStore((state) => state.items)
+  const total = useSyncStore((state) => state.total)
+  const page = useSyncStore((state) => state.page)
+  const perPage = useSyncStore((state) => state.perPage)
   const queuePaused = useSyncStore((state) => state.queuePaused)
   const activeItems = useSyncStore((state) => state.activeItems)
+  const inProgressItems = useSyncStore((state) => state.inProgressItems)
   const loading = useSyncStore((state) => state.loading)
   const filter = useSyncStore((state) => state.filter)
   const fetch = useSyncStore((state) => state.fetch)
   const setFilter = useSyncStore((state) => state.setFilter)
+  const setPage = useSyncStore((state) => state.setPage)
   const refreshItem = useSyncStore((state) => state.refreshItem)
   const [resolveTarget, setResolveTarget] = useState<SyncQueueItem | null>(null)
   const [processingQueue, setProcessingQueue] = useState(false)
@@ -202,12 +213,15 @@ export function SyncQueuePage() {
     }
   }, [])
 
-  const visibleItems = filter === 'all' ? items : items.filter((item) => item.status === filter)
   const completedCount = items.filter((item) => item.status === 'completed').length
-  const disableProcessQueue = hasDrivePairs === false
+  const noDrivePairs = hasDrivePairs === false
+  const disableProcessQueue = noDrivePairs || processingQueue || inProgressItems > 0
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
+  const hasPreviousPage = page > 1
+  const hasNextPage = page * perPage < total
 
   const processQueue = async () => {
-    if (disableProcessQueue) {
+    if (noDrivePairs || inProgressItems > 0) {
       return
     }
 
@@ -291,11 +305,11 @@ export function SyncQueuePage() {
             </button>
             <button
               onClick={() => void processQueue()}
-              disabled={processingQueue || disableProcessQueue}
+              disabled={disableProcessQueue}
               className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Play className="h-4 w-4" />
-              {processingQueue ? 'Processing…' : 'Process Queue'}
+              {processingQueue || inProgressItems > 0 ? 'Processing...' : 'Process Queue'}
             </button>
           </div>
         }
@@ -312,7 +326,7 @@ export function SyncQueuePage() {
           </span>
         </div>
       )}
-      {disableProcessQueue ? (
+      {noDrivePairs ? (
         <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
           Add a drive pair first to process the sync queue.
         </p>
@@ -325,7 +339,7 @@ export function SyncQueuePage() {
         <select
           id="queue-filter"
           value={filter}
-          onChange={(event) => setFilter(event.target.value as QueueFilter)}
+          onChange={(event) => void setFilter(event.target.value as QueueFilter)}
           className="rounded-md border border-input bg-background px-3 py-2 text-sm"
         >
           {FILTERS.map((option) => (
@@ -334,7 +348,7 @@ export function SyncQueuePage() {
             </option>
           ))}
         </select>
-        <span className="text-sm text-muted-foreground">{visibleItems.length} item(s)</span>
+        <span className="text-sm text-muted-foreground">{total} item(s) total</span>
         <button
           onClick={() => void clearCompleted()}
           disabled={clearingCompleted || completedCount === 0}
@@ -391,9 +405,18 @@ export function SyncQueuePage() {
               cell: (item) => formatDate(item.created_at),
             },
             {
-              key: 'error_message',
-              header: 'Details',
-              cell: (item) => item.error_message ?? '—',
+              key: 'relative_path',
+              header: 'File',
+              cell: (item) => (
+                <div>
+                  <div className="font-mono text-xs text-foreground">
+                    {item.relative_path || '—'}
+                  </div>
+                  {item.error_message ? (
+                    <div className="mt-1 text-xs text-red-600">{item.error_message}</div>
+                  ) : null}
+                </div>
+              ),
             },
             {
               key: 'actions',
@@ -411,7 +434,7 @@ export function SyncQueuePage() {
                 ),
             },
           ]}
-          data={visibleItems}
+          data={items}
           rowKey={(item) => item.id}
           rowTestId={(item) => `sync-queue-row-${item.id}`}
           emptyState={
@@ -422,6 +445,28 @@ export function SyncQueuePage() {
           }
         />
       )}
+
+      <div className="flex items-center justify-end gap-3 text-sm">
+        <button
+          type="button"
+          onClick={() => void setPage(page - 1)}
+          disabled={!hasPreviousPage || loading}
+          className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Previous
+        </button>
+        <span className="text-muted-foreground">
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => void setPage(page + 1)}
+          disabled={!hasNextPage || loading}
+          className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Next
+        </button>
+      </div>
 
       <ResolveDialog
         item={resolveTarget}

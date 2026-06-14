@@ -7,6 +7,7 @@ import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
 import {
   makeDrivePair,
+  makeFolderScanStatus,
   makeTrackedFile,
   makeTrackingItem,
   makeTrackingListResponse,
@@ -345,7 +346,15 @@ describe('TrackingWorkspacePage', () => {
         if (listCalls === 1) {
           return HttpResponse.json(
             makeTrackingListResponse([
-              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/a.txt' }),
+              makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+              makeTrackingItem({
+                id: 12,
+                kind: 'file',
+                path: 'docs/folder-only.txt',
+                source: 'folder',
+                tracked_direct: false,
+                tracked_via_folder: true,
+              }),
               makeTrackingItem({
                 id: 21,
                 kind: 'folder',
@@ -358,9 +367,13 @@ describe('TrackingWorkspacePage', () => {
             ])
           )
         }
-        return HttpResponse.json(makeTrackingListResponse([]))
+        return HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({ id: 11, kind: 'file', path: 'docs/direct.txt' }),
+          ])
+        )
       }),
-      api.delete('/files/11', () => {
+      api.delete('/files/12', () => {
         deletedFiles += 1
         return new HttpResponse(null, { status: 204 })
       }),
@@ -373,8 +386,8 @@ describe('TrackingWorkspacePage', () => {
 
     renderWithApp(<TrackingWorkspacePage />)
 
-    await screen.findByTestId('file-row-11')
-    await user.click(screen.getByTestId('select-row-file-11'))
+    await screen.findByTestId('file-row-12')
+    await user.click(screen.getByTestId('select-row-file-12'))
     await user.click(screen.getByTestId('select-row-folder-21'))
     await user.click(screen.getByTestId('bulk-delete'))
     await user.click(
@@ -384,9 +397,95 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(deletedFiles).toBe(1)
       expect(deletedFolders).toBe(1)
-      expect(screen.queryByTestId('file-row-11')).not.toBeInTheDocument()
+      expect(screen.getByTestId('file-row-11')).toBeInTheDocument()
+      expect(screen.queryByTestId('file-row-12')).not.toBeInTheDocument()
       expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
     })
+  })
+
+  it('removes folder-origin descendant after single folder delete', async () => {
+    const user = userEvent.setup()
+    let listCalls = 0
+    let deletedFolders = 0
+    let deletedFileCalled = false
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () => {
+        listCalls += 1
+        if (listCalls === 1) {
+          return HttpResponse.json(
+            makeTrackingListResponse([
+              makeTrackingItem({
+                id: 11,
+                kind: 'file',
+                path: 'docs/direct.txt',
+                source: 'direct',
+                tracked_direct: true,
+                tracked_via_folder: false,
+              }),
+              makeTrackingItem({
+                id: 12,
+                kind: 'file',
+                path: 'docs/folder-only.txt',
+                source: 'folder',
+                tracked_direct: false,
+                tracked_via_folder: true,
+              }),
+              makeTrackingItem({
+                id: 21,
+                kind: 'folder',
+                path: 'docs',
+                source: 'folder',
+                is_mirrored: null,
+                tracked_direct: null,
+                tracked_via_folder: null,
+              }),
+            ])
+          )
+        }
+        // Call 2: server has already cascaded; folder-only file is gone.
+        return HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 11,
+              kind: 'file',
+              path: 'docs/direct.txt',
+              source: 'direct',
+              tracked_direct: true,
+              tracked_via_folder: false,
+            }),
+          ])
+        )
+      }),
+      api.delete('/folders/21', () => {
+        deletedFolders += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+      // The frontend must NOT call DELETE /files/12 — the server cascades that.
+      api.delete('/files/12', () => {
+        deletedFileCalled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    await screen.findByTestId('folder-row-21')
+    await user.click(screen.getByTestId('select-row-folder-21'))
+    await user.click(screen.getByTestId('bulk-delete'))
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' })
+    )
+
+    await waitFor(() => {
+      expect(deletedFolders).toBe(1)
+      expect(screen.queryByTestId('folder-row-21')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('file-row-12')).not.toBeInTheDocument()
+      expect(screen.getByTestId('file-row-11')).toBeInTheDocument()
+    })
+    expect(deletedFileCalled).toBe(false)
   })
 
   it('moves details to the next file after delete and closes details after deleting the last file', async () => {
@@ -606,11 +705,9 @@ describe('TrackingWorkspacePage', () => {
           ])
         )
       }),
-      api.post('/folders/31/scan', () =>
-        HttpResponse.json({
-          new_files: 2,
-          changed_files: 0,
-        })
+      api.post('/folders/31/scan', () => HttpResponse.json(makeFolderScanStatus())),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: false, scanned: 2, total: 2 }))
       ),
       api.post('/folders/31/mirror', () =>
         HttpResponse.json({
@@ -683,11 +780,9 @@ describe('TrackingWorkspacePage', () => {
           ])
         )
       }),
-      api.post('/folders/51/scan', () =>
-        HttpResponse.json({
-          new_files: 1,
-          changed_files: 0,
-        })
+      api.post('/folders/51/scan', () => HttpResponse.json(makeFolderScanStatus({ total: 1 }))),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: false, scanned: 1, total: 1 }))
       ),
       api.get('/virtual-paths/tree', () => {
         treeCalls += 1
@@ -709,6 +804,54 @@ describe('TrackingWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     await waitFor(() => {
       expect(treeCalls).toBeGreaterThan(treeCallsBeforeScan)
+    })
+  })
+
+  it('shows scanning progress and disables the folder action while a scan is active', async () => {
+    const user = userEvent.setup()
+    let scanActiveCalls = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 61,
+              kind: 'folder',
+              path: 'library',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      api.post('/folders/61/scan', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 0, total: 4 }))
+      ),
+      api.get('/folders/:id/scan/active', () => {
+        scanActiveCalls += 1
+        if (scanActiveCalls === 1) {
+          return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 2, total: 4 }))
+        }
+        return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 3, total: 4 }))
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const row = await screen.findByTestId('folder-row-61')
+    await user.click(within(row).getByRole('button', { name: 'Scan' }))
+
+    expect(await within(row).findByRole('button', { name: 'Scanning...' })).toBeDisabled()
+    await waitFor(() => {
+      expect(within(row).getByText(/^[23] \/ 4$/)).toBeInTheDocument()
     })
   })
 

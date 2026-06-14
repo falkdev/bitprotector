@@ -20,7 +20,7 @@ vi.mock('@/components/shared/PathPickerDialog', () => ({
     return (
       <div data-testid="path-picker-dialog">
         <span>{title}</span>
-        <button onClick={() => onPick('/mnt/primary/selected')}>Pick</button>
+        <button onClick={() => onPick('/mnt/secondary/selected')}>Pick</button>
         <button onClick={onClose}>ClosePicker</button>
       </div>
     )
@@ -51,7 +51,7 @@ describe('FolderFormModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
+      '/mnt/secondary/documents'
     )
     await user.click(screen.getByRole('button', { name: 'Add Folder' }))
 
@@ -88,7 +88,7 @@ describe('FolderFormModal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows path resolution error when path is outside primary root', async () => {
+  it('shows path resolution error when path is outside active root', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
 
@@ -123,35 +123,6 @@ describe('FolderFormModal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows the primary root hint after selecting a drive', async () => {
-    const user = userEvent.setup()
-
-    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={vi.fn()} />)
-
-    expect(
-      screen.getByText('Select a drive pair before browsing or submitting.')
-    ).toBeInTheDocument()
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-
-    expect(screen.getByText('Primary root: /mnt/primary')).toBeInTheDocument()
-  })
-
-  it('shows the resolved relative path hint when a valid path is entered', async () => {
-    const user = userEvent.setup()
-
-    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={vi.fn()} />)
-
-    await user.selectOptions(screen.getByRole('combobox'), '1')
-    await user.type(
-      screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
-    )
-
-    expect(await screen.findByText(/Will be stored as/)).toBeInTheDocument()
-    expect(screen.getByText('documents')).toBeInTheDocument()
-  })
-
   it('submits with an optional virtual path when provided', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
@@ -161,7 +132,7 @@ describe('FolderFormModal', () => {
     await user.selectOptions(screen.getByRole('combobox'), '1')
     await user.type(
       screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
-      '/mnt/primary/documents'
+      '/mnt/secondary/documents'
     )
     await user.type(screen.getByPlaceholderText('/docs'), '/virtual/docs')
     await user.click(screen.getByRole('button', { name: 'Add Folder' }))
@@ -170,6 +141,29 @@ describe('FolderFormModal', () => {
       drive_pair_id: 1,
       folder_path: 'documents',
       virtual_path: '/virtual/docs',
+    })
+  })
+
+  it('appends the tracked folder name when virtual path is picked from browser', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+
+    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={onSave} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
+      '/mnt/secondary/documents'
+    )
+    const browseButtons = screen.getAllByRole('button', { name: 'Browse' })
+    await user.click(browseButtons[1])
+    await user.click(screen.getByRole('button', { name: 'Pick' }))
+    await user.click(screen.getByRole('button', { name: 'Add Folder' }))
+
+    expect(onSave).toHaveBeenCalledWith({
+      drive_pair_id: 1,
+      folder_path: 'documents',
+      virtual_path: '/mnt/secondary/selected/documents',
     })
   })
 

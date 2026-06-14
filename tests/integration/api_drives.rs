@@ -57,6 +57,38 @@ async fn test_drives_create_validation_failure_returns_400() {
 }
 
 #[actix_rt::test]
+async fn test_drives_create_duplicate_path_returns_409() {
+    let repo = make_repo();
+    repo.create_drive_pair(
+        "existing",
+        "/tmp/existing-primary",
+        "/tmp/existing-secondary",
+    )
+    .unwrap();
+    let app = make_app!(repo).await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/v1/drives")
+        .insert_header(("Authorization", bearer()))
+        .set_json(serde_json::json!({
+            "name": "duplicate",
+            "primary_path": "/tmp/new-primary",
+            "secondary_path": "/tmp/existing-primary",
+            "skip_validation": true
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["error"]["code"], "CONFLICT");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("already registered"));
+}
+
+#[actix_rt::test]
 async fn test_drives_get_existing() {
     let repo = make_repo();
     let pair = repo.create_drive_pair("get-pair", "/np", "/ns").unwrap();

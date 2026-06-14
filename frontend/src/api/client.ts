@@ -31,8 +31,13 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
-      useAuthStore.getState().logout()
-      authNavigation.redirectToLogin()
+      const requestUrl = error.config?.url?.split('?')[0] ?? ''
+      const isLoginRequest = requestUrl === '/auth/login' || requestUrl.endsWith('/auth/login')
+
+      if (!isLoginRequest) {
+        useAuthStore.getState().logout()
+        authNavigation.redirectToLogin()
+      }
     }
     return Promise.reject(error)
   }

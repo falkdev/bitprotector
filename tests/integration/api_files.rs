@@ -4,6 +4,7 @@ use actix_web::test;
 use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
+use std::time::Duration;
 use tempfile::TempDir;
 
 // ── Files ──────────────────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ async fn test_files_track_accepts_absolute_path_within_active_root() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
         .insert_header(("Authorization", bearer()))
@@ -135,7 +136,7 @@ async fn test_files_track_rejects_path_outside_active_root() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
         .insert_header(("Authorization", bearer()))
@@ -545,7 +546,7 @@ async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty
     let folder = repo
         .create_tracked_folder(pair.id, "empty-scan", Some("/virtual/empty-scan"))
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -572,7 +573,19 @@ async fn test_tracking_items_folder_status_transitions_from_not_scanned_to_empty
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder.id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -601,6 +614,7 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let secondary = TempDir::new().unwrap();
     fs::create_dir_all(primary.path().join("docs")).unwrap();
     fs::write(primary.path().join("docs/alpha.txt"), b"alpha-content").unwrap();
+    fs::write(primary.path().join("docs/beta.txt"), b"beta-content").unwrap();
 
     let repo = make_repo();
     let pair = repo
@@ -610,7 +624,7 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
 
     let req = test::TestRequest::post()
         .uri("/api/v1/folders")
@@ -630,7 +644,19 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder_id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -642,11 +668,20 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["path"], "docs/alpha.txt");
-    assert_eq!(body["items"][0]["source"], "folder");
-    assert_eq!(body["items"][0]["tracked_direct"], false);
-    assert_eq!(body["items"][0]["tracked_via_folder"], true);
+    assert_eq!(body["total"], 2);
+    let items = body["items"].as_array().unwrap();
+    assert!(items.iter().any(|item| {
+        item["path"] == "docs/alpha.txt"
+            && item["source"] == "folder"
+            && item["tracked_direct"] == false
+            && item["tracked_via_folder"] == true
+    }));
+    assert!(items.iter().any(|item| {
+        item["path"] == "docs/beta.txt"
+            && item["source"] == "folder"
+            && item["tracked_direct"] == false
+            && item["tracked_via_folder"] == true
+    }));
 
     let req = test::TestRequest::post()
         .uri("/api/v1/files")
@@ -669,9 +704,21 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["items"][0]["source"], "direct");
-    assert_eq!(body["items"][0]["tracked_direct"], true);
-    assert_eq!(body["items"][0]["tracked_via_folder"], false);
+    let items = body["items"].as_array().unwrap();
+    let alpha = items
+        .iter()
+        .find(|item| item["path"] == "docs/alpha.txt")
+        .unwrap();
+    let beta = items
+        .iter()
+        .find(|item| item["path"] == "docs/beta.txt")
+        .unwrap();
+    assert_eq!(alpha["source"], "direct");
+    assert_eq!(alpha["tracked_direct"], true);
+    assert_eq!(alpha["tracked_via_folder"], false);
+    assert_eq!(beta["source"], "folder");
+    assert_eq!(beta["tracked_direct"], false);
+    assert_eq!(beta["tracked_via_folder"], true);
 
     let req = test::TestRequest::delete()
         .uri(&format!("/api/v1/folders/{folder_id}"))
@@ -690,9 +737,12 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["items"][0]["source"], "direct");
-    assert_eq!(body["items"][0]["tracked_direct"], true);
-    assert_eq!(body["items"][0]["tracked_via_folder"], false);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["path"], "docs/alpha.txt");
+    assert_eq!(items[0]["source"], "direct");
+    assert_eq!(items[0]["tracked_direct"], true);
+    assert_eq!(items[0]["tracked_via_folder"], false);
 }
 
 #[actix_rt::test]
