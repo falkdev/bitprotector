@@ -502,6 +502,7 @@ describe('SyncQueuePage', () => {
 
     const processButton = await screen.findByRole('button', { name: 'Processing...' })
     expect(processButton).toBeDisabled()
+    expect(screen.queryByTestId('sync-queue-no-drives-hint')).not.toBeInTheDocument()
   })
 
   it('enables Process Queue when no backend work is in progress and active items exist', async () => {

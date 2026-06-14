@@ -1733,6 +1733,8 @@ impl Repository {
         per_page: i64,
     ) -> anyhow::Result<(Vec<SyncQueueItem>, i64)> {
         let conn = self.conn()?;
+        let page = page.max(1);
+        let per_page = per_page.clamp(1, 200);
         let offset = (page - 1) * per_page;
         let (where_clause, params_status) = if let Some(s) = status {
             (format!("WHERE sq.status='{}'", s.replace('\'', "''")), true)
@@ -2782,6 +2784,27 @@ mod tests {
         assert!(remaining.iter().any(|item| item.id == in_progress.id));
         assert!(remaining.iter().any(|item| item.id == pending.id));
         assert!(remaining.iter().all(|item| item.status != "completed"));
+    }
+
+    #[test]
+    fn test_list_sync_queue_clamps_pagination_values() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+
+        for i in 0..3 {
+            let file = repo
+                .create_tracked_file(pair.id, &format!("f{i}.txt"), "h", 1, None)
+                .unwrap();
+            repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        }
+
+        let (items, total) = repo.list_sync_queue(None, 0, 0).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(items.len(), 1);
+
+        let (items_large_page, total_large_page) = repo.list_sync_queue(None, 1, 999).unwrap();
+        assert_eq!(total_large_page, 3);
+        assert_eq!(items_large_page.len(), 3);
     }
 
     #[test]

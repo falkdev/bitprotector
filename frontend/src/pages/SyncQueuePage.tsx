@@ -214,13 +214,14 @@ export function SyncQueuePage() {
   }, [])
 
   const completedCount = items.filter((item) => item.status === 'completed').length
-  const disableProcessQueue = hasDrivePairs === false || processingQueue || inProgressItems > 0
+  const noDrivePairs = hasDrivePairs === false
+  const disableProcessQueue = noDrivePairs || processingQueue || inProgressItems > 0
   const totalPages = Math.max(1, Math.ceil(total / perPage))
   const hasPreviousPage = page > 1
   const hasNextPage = page * perPage < total
 
   const processQueue = async () => {
-    if (hasDrivePairs === false || inProgressItems > 0) {
+    if (noDrivePairs || inProgressItems > 0) {
       return
     }
 
@@ -325,7 +326,7 @@ export function SyncQueuePage() {
           </span>
         </div>
       )}
-      {disableProcessQueue ? (
+      {noDrivePairs ? (
         <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
           Add a drive pair first to process the sync queue.
         </p>

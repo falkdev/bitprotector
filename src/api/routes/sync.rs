@@ -46,8 +46,8 @@ struct QueuePausedResult {
 
 /// GET /sync/queue
 async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -> HttpResponse {
-    let page = query.page.unwrap_or(1);
-    let per_page = query.per_page.unwrap_or(50);
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(50).clamp(1, 200);
     let queue_paused = repo.get_sync_queue_paused().unwrap_or(false);
     let active_items = match repo.count_active_sync_queue() {
         Ok(count) => count,
