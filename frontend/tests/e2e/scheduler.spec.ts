@@ -24,7 +24,9 @@ test('creates an interval-based sync schedule, edits it, and deletes it', async 
 
   // Verify the row appears with human-friendly text
   const table = page.getByTestId('scheduler-table')
-  const row = table.locator('tr').filter({ hasText: 'File Sync' }).first()
+  const row = table.locator('tr').filter({ hasText: /File Sync/ }).filter({
+    hasText: /Every 2 hours/,
+  })
   await expect(row).toBeVisible()
   await expect(row).toContainText('Every 2 hours')
 
@@ -41,13 +43,17 @@ test('creates an interval-based sync schedule, edits it, and deletes it', async 
   await page.getByRole('button', { name: 'Save Changes' }).click()
   await expectToast(page, 'Schedule updated')
 
-  await expect(row).toContainText('Every 30 minutes')
+  const updatedRow = table.locator('tr').filter({ hasText: /File Sync/ }).filter({
+    hasText: /Every 30 minutes/,
+  })
+  await expect(updatedRow).toBeVisible()
+  await expect(updatedRow).toContainText('Every 30 minutes')
 
   // ── Delete ────────────────────────────────────────────────────────────
-  await row.getByRole('button', { name: 'Delete' }).click()
+  await updatedRow.getByRole('button', { name: 'Delete' }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
   await expectToast(page, 'Schedule deleted')
-  await expect(row).toHaveCount(0)
+  await expect(updatedRow).toHaveCount(0)
 })
 
 test('creates a cron-based integrity check schedule using a preset', async ({ page }) => {
@@ -101,7 +107,9 @@ test('creates a schedule with a custom cron expression', async ({ page }) => {
   await expectToast(page, 'Schedule created')
 
   const table = page.getByTestId('scheduler-table')
-  const row = table.locator('tr').filter({ hasText: 'File Sync' }).first()
+  const row = table.locator('tr').filter({ hasText: /File Sync/ }).filter({
+    hasText: /Cron: 15 3 \* \* 1-5/,
+  })
   await expect(row).toBeVisible()
   await expect(row).toContainText('Cron: 15 3 * * 1-5')
 
@@ -123,7 +131,9 @@ test('toggles a schedule between enabled and disabled', async ({ page }) => {
   await expectToast(page, 'Schedule created')
 
   const table = page.getByTestId('scheduler-table')
-  const row = table.locator('tr').filter({ hasText: 'File Sync' }).first()
+  const row = table.locator('tr').filter({ hasText: /File Sync/ }).filter({
+    hasText: /Every 6 hours/,
+  })
   await expect(row).toBeVisible()
 
   // Disable

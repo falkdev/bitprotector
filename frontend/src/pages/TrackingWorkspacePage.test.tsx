@@ -7,6 +7,7 @@ import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
 import {
   makeDrivePair,
+  makeFolderScanStatus,
   makeTrackedFile,
   makeTrackingItem,
   makeTrackingListResponse,
@@ -606,11 +607,9 @@ describe('TrackingWorkspacePage', () => {
           ])
         )
       }),
-      api.post('/folders/31/scan', () =>
-        HttpResponse.json({
-          new_files: 2,
-          changed_files: 0,
-        })
+      api.post('/folders/31/scan', () => HttpResponse.json(makeFolderScanStatus())),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: false, scanned: 2, total: 2 }))
       ),
       api.post('/folders/31/mirror', () =>
         HttpResponse.json({
@@ -683,11 +682,9 @@ describe('TrackingWorkspacePage', () => {
           ])
         )
       }),
-      api.post('/folders/51/scan', () =>
-        HttpResponse.json({
-          new_files: 1,
-          changed_files: 0,
-        })
+      api.post('/folders/51/scan', () => HttpResponse.json(makeFolderScanStatus({ total: 1 }))),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: false, scanned: 1, total: 1 }))
       ),
       api.get('/virtual-paths/tree', () => {
         treeCalls += 1
@@ -709,6 +706,54 @@ describe('TrackingWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     await waitFor(() => {
       expect(treeCalls).toBeGreaterThan(treeCallsBeforeScan)
+    })
+  })
+
+  it('shows scanning progress and disables the folder action while a scan is active', async () => {
+    const user = userEvent.setup()
+    let scanActiveCalls = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 61,
+              kind: 'folder',
+              path: 'library',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      api.post('/folders/61/scan', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 0, total: 4 }))
+      ),
+      api.get('/folders/:id/scan/active', () => {
+        scanActiveCalls += 1
+        if (scanActiveCalls === 1) {
+          return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 2, total: 4 }))
+        }
+        return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 3, total: 4 }))
+      }),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const row = await screen.findByTestId('folder-row-61')
+    await user.click(within(row).getByRole('button', { name: 'Scan' }))
+
+    expect(await within(row).findByRole('button', { name: 'Scanning...' })).toBeDisabled()
+    await waitFor(() => {
+      expect(within(row).getByText(/^[23] \/ 4$/)).toBeInTheDocument()
     })
   })
 

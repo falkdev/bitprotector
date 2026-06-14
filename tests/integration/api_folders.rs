@@ -4,6 +4,7 @@ use actix_web::test;
 use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
 use std::fs;
+use std::time::Duration;
 use tempfile::TempDir;
 
 // ── Folders ────────────────────────────────────────────────────────────────
@@ -246,14 +247,37 @@ async fn test_folders_scan() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert!(body["new_files"].as_u64().unwrap() >= 1);
-    let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+    assert_eq!(body["scanning"], true);
+    assert_eq!(body["scanned"], 0);
+    assert_eq!(body["total"], 1);
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/v1/folders/{}/scan/active", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let updated_folder = actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+            if !updated_folder.scanning {
+                break updated_folder;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
+
     assert!(
         updated_folder.last_scanned_at.is_some(),
         "Successful scan should stamp folder scan history"
     );
+    assert_eq!(updated_folder.scan_scanned_files, 1);
+    assert_eq!(updated_folder.scan_total_files, 1);
     let (files, total_files) = repo
         .list_tracked_files(Some(pair.id), None, None, 1, 20)
         .unwrap();
@@ -338,7 +362,19 @@ async fn test_folders_scan_pre_existing_mirror_queues_adopt_mirror() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let current = repo.get_tracked_folder(folder.id).unwrap();
+            if !current.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
 
     let (queue, total) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
     assert_eq!(total, 1);
