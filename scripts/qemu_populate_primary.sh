@@ -1,13 +1,13 @@
 #!/bin/bash
 # scripts/qemu_populate_primary.sh
-# Populate /mnt/primary/test-files inside the local QEMU guest with generated files.
+# Populate /mnt/primary/<folder-name> inside the local QEMU guest with generated files.
 #
 # Usage:
-#   ./scripts/qemu_populate_primary.sh <file-count> <file-size>
+#   ./scripts/qemu_populate_primary.sh <folder-name> <file-count> <file-size>
 #
 # Examples:
-#   ./scripts/qemu_populate_primary.sh 100 1M
-#   QEMU_SSH_PORT=2222 ./scripts/qemu_populate_primary.sh 500 64K
+#   ./scripts/qemu_populate_primary.sh test-files 100 1M
+#   QEMU_SSH_PORT=2222 ./scripts/qemu_populate_primary.sh loadset-a 500 64K
 #
 # Environment overrides:
 #   QEMU_SSH_HOST (default: localhost)
@@ -25,13 +25,24 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     usage
 fi
 
-if [[ "$#" -ne 2 ]]; then
-    echo "ERROR: expected exactly 2 parameters."
+if [[ "$#" -ne 3 ]]; then
+    echo "ERROR: expected exactly 3 parameters."
     usage
 fi
 
-FILE_COUNT="$1"
-FILE_SIZE="$2"
+FOLDER_NAME="$1"
+FILE_COUNT="$2"
+FILE_SIZE="$3"
+
+if [[ -z "${FOLDER_NAME}" ]]; then
+    echo "ERROR: <folder-name> cannot be empty."
+    exit 1
+fi
+
+if [[ "${FOLDER_NAME}" == *"/"* || "${FOLDER_NAME}" == "." || "${FOLDER_NAME}" == ".." ]]; then
+    echo "ERROR: <folder-name> must be a single directory name (no slashes)."
+    exit 1
+fi
 
 if ! [[ "${FILE_COUNT}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: <file-count> must be a positive integer."
@@ -46,7 +57,7 @@ fi
 QEMU_SSH_HOST="${QEMU_SSH_HOST:-localhost}"
 QEMU_SSH_PORT="${QEMU_SSH_PORT:-2222}"
 QEMU_SSH_USER="${QEMU_SSH_USER:-testuser}"
-TARGET_DIR="/mnt/primary/test-files"
+TARGET_DIR="/mnt/primary/${FOLDER_NAME}"
 
 if ! command -v ssh >/dev/null 2>&1; then
     echo "ERROR: ssh is required but was not found on PATH."
