@@ -1187,19 +1187,13 @@ impl Repository {
         self.get_tracked_folder(id)
     }
 
-    pub fn update_scan_progress(
-        &self,
-        id: i64,
-        scanned_files: i64,
-        total_files: i64,
-    ) -> anyhow::Result<()> {
+    pub fn update_scan_progress(&self, id: i64, scanned_files: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE tracked_folders
-             SET scan_scanned_files = ?1,
-                 scan_total_files = ?2
-             WHERE id = ?3",
-            rusqlite::params![scanned_files.max(0), total_files.max(0), id],
+             SET scan_scanned_files = ?1
+             WHERE id = ?2",
+            rusqlite::params![scanned_files.max(0), id],
         )?;
         Ok(())
     }
@@ -2870,7 +2864,7 @@ mod tests {
         assert_eq!(started.scan_total_files, 4);
         assert!(repo.start_folder_scan(folder.id, 4).is_err());
 
-        repo.update_scan_progress(folder.id, 3, 4).unwrap();
+        repo.update_scan_progress(folder.id, 3).unwrap();
         let in_progress = repo.get_tracked_folder(folder.id).unwrap();
         assert!(in_progress.scanning);
         assert_eq!(in_progress.scan_scanned_files, 3);
@@ -2885,6 +2879,37 @@ mod tests {
         assert!(!finished.scanning);
         assert_eq!(finished.scan_scanned_files, 4);
         assert_eq!(finished.scan_total_files, 4);
+    }
+
+    #[test]
+    fn test_update_scan_progress_does_not_change_scan_total_files() {
+        // Regression test: update_scan_progress must only update scan_scanned_files.
+        // Previously it also overwrote scan_total_files, which could cause scanned > total
+        // when files were created between the count and the directory walk.
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        repo.start_folder_scan(folder.id, 10).unwrap();
+
+        // Simulate: progress callback passes a smaller count (as if new files appeared
+        // mid-walk pushing scanned past the original total).
+        repo.update_scan_progress(folder.id, 7).unwrap();
+        let mid = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(mid.scan_scanned_files, 7);
+        assert_eq!(
+            mid.scan_total_files, 10,
+            "update_scan_progress must never change scan_total_files"
+        );
+
+        // Calling it again with a higher scanned value also must not touch the total.
+        repo.update_scan_progress(folder.id, 12).unwrap();
+        let over = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(over.scan_scanned_files, 12);
+        assert_eq!(
+            over.scan_total_files, 10,
+            "scan_total_files must remain stable even when scanned surpasses it"
+        );
     }
 
     // ─── Sync Queue ───────────────────────────────────────────────────────────────

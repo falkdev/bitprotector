@@ -316,12 +316,11 @@ pub fn scan_tracked_folder<F>(
     mut on_progress: F,
 ) -> anyhow::Result<FolderScanSummary>
 where
-    F: FnMut(i64, i64) -> anyhow::Result<()>,
+    F: FnMut(i64) -> anyhow::Result<()>,
 {
     drive::require_pair_mutation_allowed(drive_pair)?;
 
     let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
-    let total_files = count_folder_files(drive_pair, folder)?;
     let mut scanned_files = 0i64;
     let mut new_files = 0usize;
     let mut changed_files = 0usize;
@@ -390,7 +389,7 @@ where
             }
 
             scanned_files += 1;
-            on_progress(scanned_files, total_files)?;
+            on_progress(scanned_files)?
         }
     }
 
@@ -555,16 +554,19 @@ mod tests {
         fs::write(primary.path().join("docs/new.txt"), b"new").unwrap();
         let folder = track_folder(&repo, &pair, "docs", None).unwrap();
 
+        // Establish the total before the scan (as the route does via start_folder_scan).
+        repo.start_folder_scan(folder.id, 2).unwrap();
+
         let mut progress_updates = Vec::new();
-        let summary = scan_tracked_folder(&repo, &pair, &folder, |scanned, total| {
-            progress_updates.push((scanned, total));
-            repo.update_scan_progress(folder.id, scanned, total)
+        let summary = scan_tracked_folder(&repo, &pair, &folder, |scanned| {
+            progress_updates.push(scanned);
+            repo.update_scan_progress(folder.id, scanned)
         })
         .unwrap();
 
         assert_eq!(summary.new_files, 1);
         assert_eq!(summary.changed_files, 1);
-        assert_eq!(progress_updates.last().copied(), Some((2, 2)));
+        assert_eq!(progress_updates.last().copied(), Some(2));
 
         let updated_existing = repo.get_tracked_file(existing.id).unwrap();
         assert_eq!(

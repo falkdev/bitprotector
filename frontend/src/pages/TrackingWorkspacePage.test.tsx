@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TrackingWorkspacePage } from './TrackingWorkspacePage'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
@@ -9,6 +9,7 @@ import {
   makeDrivePair,
   makeFolderScanStatus,
   makeTrackedFile,
+  makeTrackedFolder,
   makeTrackingItem,
   makeTrackingListResponse,
 } from '@/test/factories'
@@ -52,6 +53,12 @@ function mockBaseTrackingPage(items = [makeTrackingItem()], drivePairs = [makeDr
 }
 
 describe('TrackingWorkspacePage', () => {
+  // Provide a default stub for GET /folders so the mount-time bootstrap call
+  // is satisfied as a no-op in every test that does not explicitly override it.
+  beforeEach(() => {
+    server.use(api.get('/folders', () => HttpResponse.json([])))
+  })
+
   it('renders a unified mixed list with source badges', async () => {
     mockBaseTrackingPage([
       makeTrackingItem({
@@ -1168,5 +1175,90 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('file-details')).not.toBeInTheDocument()
     })
+  })
+
+  it('resumes scan progress indicator after navigating back to the page (bootstrap from /folders)', async () => {
+    // Simulate: folder 71 was already scanning when the page mounts
+    // (i.e. the user navigated away and back).
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 71,
+              kind: 'folder',
+              path: 'library',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      // Bootstrap: /folders returns the folder with scanning: true
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({
+            id: 71,
+            scanning: true,
+            scan_scanned_files: 3,
+            scan_total_files: 10,
+          }),
+        ])
+      ),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 3, total: 10 }))
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    // The scanning spinner and progress counter should appear without the user
+    // having clicked Scan — they are restored from the bootstrap.
+    const row = await screen.findByTestId('folder-row-71')
+    // The action button shows "Scanning..." and is disabled while scanning.
+    expect(await within(row).findByRole('button', { name: 'Scanning...' })).toBeDisabled()
+  })
+
+  it('does not show scanning indicator on mount when /folders reports scanning: false', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 72,
+              kind: 'folder',
+              path: 'archive',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      // Bootstrap: folder is not scanning
+      api.get('/folders', () =>
+        HttpResponse.json([makeTrackedFolder({ id: 72, scanning: false })])
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const row = await screen.findByTestId('folder-row-72')
+    // Scan button should be present, not a spinner
+    expect(within(row).getByRole('button', { name: 'Scan' })).toBeInTheDocument()
+    expect(within(row).queryByText(/Scanning/)).not.toBeInTheDocument()
   })
 })

@@ -534,6 +534,39 @@ export function TrackingWorkspacePage() {
   )
   const activeFolderScanIdsKey = useMemo(() => activeFolderScanIds.join(','), [activeFolderScanIds])
 
+  // On mount, seed folderScanStatuses from the server so that in-progress scans
+  // started before this page was last visited are not lost on navigation.
+  useEffect(() => {
+    let active = true
+    const bootstrap = async () => {
+      try {
+        const folders = await foldersApi.list()
+        if (!active) return
+        const scanning = folders.filter((f) => f.scanning)
+        if (scanning.length === 0) return
+        setFolderScanStatuses((current) => {
+          const next = { ...current }
+          for (const folder of scanning) {
+            if (!(folder.id in next)) {
+              next[folder.id] = {
+                scanning: true,
+                scanned: folder.scan_scanned_files,
+                total: folder.scan_total_files,
+              }
+            }
+          }
+          return next
+        })
+      } catch {
+        // best-effort: polling will report failures separately
+      }
+    }
+    void bootstrap()
+    return () => {
+      active = false
+    }
+  }, [])
+
   useEffect(() => {
     if (!activeFolderScanIdsKey) return
 

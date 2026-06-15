@@ -535,3 +535,73 @@ async fn test_folders_delete_preserves_files_under_nested_tracked_subfolder() {
     assert!(repo.get_tracked_file(sub_file.id).is_ok());
     assert!(repo.get_sync_queue_item(sub_queue.id).is_ok());
 }
+
+#[actix_rt::test]
+async fn test_scan_progress_scanned_never_exceeds_total() {
+    // Regression test: scan_total_files is set once by start_folder_scan and must
+    // not be overwritten by progress updates. Without the fix, if a file appeared
+    // between the initial count and the directory walk, scanned could exceed total.
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let sub = primary.path().join("scandir");
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("a.txt"), b"file a").unwrap();
+    fs::write(sub.join("b.txt"), b"file b").unwrap();
+    fs::write(sub.join("c.txt"), b"file c").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "sp-progress",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo
+        .create_tracked_folder(pair.id, "scandir", None)
+        .unwrap();
+
+    let app = make_app!(repo.clone()).await;
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/scan", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let total_at_start = body["total"].as_i64().unwrap();
+    assert!(
+        total_at_start > 0,
+        "total must be positive after scan start"
+    );
+
+    // Poll until the scan finishes, checking that scanned <= total on every tick.
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let folder_state = repo.get_tracked_folder(folder.id).unwrap();
+            assert!(
+                folder_state.scan_scanned_files <= folder_state.scan_total_files,
+                "scanned ({}) exceeded total ({}) during scan",
+                folder_state.scan_scanned_files,
+                folder_state.scan_total_files,
+            );
+            if !folder_state.scanning {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder scan to complete");
+
+    let final_state = repo.get_tracked_folder(folder.id).unwrap();
+    assert_eq!(
+        final_state.scan_total_files, total_at_start,
+        "scan_total_files must not change after start"
+    );
+    assert_eq!(
+        final_state.scan_scanned_files, total_at_start,
+        "all files must be scanned"
+    );
+}
