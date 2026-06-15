@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTrackingFiltersStore, DEFAULT_TRACKING_FILTERS } from '@/stores/tracking-filters-store'
 import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
@@ -451,11 +452,10 @@ export function TrackingWorkspacePage() {
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [drives, setDrives] = useState<DrivePair[]>([])
+  const { filters: persistedFilters, setFilters, resetFilters } = useTrackingFiltersStore()
   const [params, setParams] = useState<TrackingListParams>({
+    ...persistedFilters,
     page: 1,
-    per_page: 50,
-    item_kind: 'all',
-    source: 'all',
   })
   const [showTrackModal, setShowTrackModal] = useState(false)
   const [showFolderModal, setShowFolderModal] = useState(false)
@@ -600,6 +600,11 @@ export function TrackingWorkspacePage() {
       page: updates.page ?? 1,
     }))
   }
+
+  useEffect(() => {
+    const { q, drive_id, virtual_prefix, has_virtual_path, item_kind, source, per_page } = params
+    setFilters({ q, drive_id, virtual_prefix, has_virtual_path, item_kind, source, per_page })
+  }, [params, setFilters])
 
   const items = response?.items ?? EMPTY_TRACKING_ITEMS
   const folderItems = useMemo(
@@ -1086,27 +1091,20 @@ export function TrackingWorkspacePage() {
                 <option value="no">Without Virtual Path</option>
               </select>
             </div>
-            {hasActiveFilters ? (
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateParams({
-                      q: undefined,
-                      drive_id: undefined,
-                      item_kind: 'all',
-                      source: 'all',
-                      has_virtual_path: undefined,
-                      virtual_prefix: undefined,
-                      page: 1,
-                    })
-                  }
-                  className="text-xs text-muted-foreground underline hover:text-foreground"
-                >
-                  Clear filters
-                </button>
-              </div>
-            ) : null}
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  resetFilters()
+                  setParams({ ...DEFAULT_TRACKING_FILTERS, page: 1 })
+                }}
+                disabled={!hasActiveFilters}
+                className="text-xs text-muted-foreground underline hover:text-foreground disabled:cursor-default disabled:no-underline disabled:opacity-40"
+                data-testid="reset-filters-button"
+              >
+                Reset filters
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-auto p-4">
