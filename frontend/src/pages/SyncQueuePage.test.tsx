@@ -333,7 +333,7 @@ describe('SyncQueuePage', () => {
     expect(await screen.findByText('7 item(s) total')).toBeInTheDocument()
   })
 
-  it('shows scanning banner and includes scan total in count when a folder is scanning', async () => {
+  it('shows scanning banner when a folder is scanning and disables the filter select', async () => {
     server.use(
       api.get('/sync/queue', () =>
         queueResponse([makeSyncQueueItem({ id: 53, status: 'pending' })], { total: 5 })
@@ -352,9 +352,68 @@ describe('SyncQueuePage', () => {
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
-    expect(
-      screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
-    ).toBeInTheDocument()
+    expect(screen.getByText('Updating…')).toBeInTheDocument()
+    expect(screen.queryByText(/item\(s\) total/)).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /filter/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  })
+
+  it('re-enables the filter select once scanning finishes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+
+    let foldersPollCount = 0
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 59, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () => {
+        foldersPollCount += 1
+        if (foldersPollCount === 1) {
+          return HttpResponse.json([
+            makeTrackedFolder({ scanning: true, scan_total_files: 10, scan_scanned_files: 3 }),
+          ])
+        }
+        return HttpResponse.json([
+          makeTrackedFolder({ scanning: false, scan_total_files: 10, scan_scanned_files: 10 }),
+        ])
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByRole('combobox', { name: /filter/i })).toBeDisabled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /filter/i })).not.toBeDisabled()
+    })
+  })
+
+  it('shows api total without scan remaining regardless of filter', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.get('/sync/queue', ({ request }) => {
+        const url = new URL(request.url)
+        const status = url.searchParams.get('status')
+        return queueResponse([makeSyncQueueItem({ id: 58, status: 'pending' })], {
+          total: status === 'pending' ? 3 : 5,
+        })
+      }),
+      api.get('/folders', () => HttpResponse.json([]))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByText('5 item(s) total')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /filter/i })).not.toBeDisabled()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /filter/i }), 'pending')
+
+    expect(await screen.findByText('3 item(s) total')).toBeInTheDocument()
   })
 
   it('hides scanning banner when no folders are scanning', async () => {
@@ -406,9 +465,7 @@ describe('SyncQueuePage', () => {
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
-    expect(
-      screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
-    ).toBeInTheDocument()
+    expect(screen.getByText('Updating…')).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000)
@@ -440,9 +497,7 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(
-      await screen.findByText('25 item(s) total (+20 remaining from 2 active scan(s))')
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Updating…')).toBeInTheDocument()
     expect(await screen.findByTestId('scanning-in-progress-banner')).toHaveTextContent(
       'across 2 folder(s)'
     )
@@ -484,9 +539,7 @@ describe('SyncQueuePage', () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
 
-    expect(
-      await screen.findByText('12 item(s) total (+7 remaining from 1 active scan(s))')
-    ).toBeInTheDocument()
+    expect(await screen.findByTestId('scanning-in-progress-banner')).toHaveTextContent('3 / 10')
 
     await act(async () => {
       resolveFirstPoll?.(
@@ -502,9 +555,7 @@ describe('SyncQueuePage', () => {
     })
 
     await waitFor(() => {
-      expect(
-        screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
-      ).toBeInTheDocument()
+      expect(screen.getByTestId('scanning-in-progress-banner')).toHaveTextContent('3 / 10')
     })
   })
 

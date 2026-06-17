@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Pause, Play } from 'lucide-react'
+import { LoaderCircle, Pause, Play } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
 import { foldersApi } from '@/api/folders'
 import { syncApi } from '@/api/sync'
@@ -192,16 +192,6 @@ export function SyncQueuePage() {
     (sum, folder) => sum + Math.min(folder.scan_scanned_files, folder.scan_total_files),
     0
   )
-  const activeScanRemaining = activeScanFolders.reduce(
-    (sum, folder) =>
-      sum +
-      Math.max(
-        0,
-        folder.scan_total_files - Math.min(folder.scan_scanned_files, folder.scan_total_files)
-      ),
-    0
-  )
-
   useEffect(() => {
     let active = true
 
@@ -389,23 +379,35 @@ export function SyncQueuePage() {
         <label htmlFor="queue-filter" className="text-sm font-medium">
           Filter
         </label>
-        <select
-          id="queue-filter"
-          value={filter}
-          onChange={(event) => void setFilter(event.target.value as QueueFilter)}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+        <div
+          title={
+            activeScanFolders.length > 0
+              ? 'Filtering is disabled while folders are being scanned — the queue is still being populated'
+              : undefined
+          }
         >
-          {FILTERS.map((option) => (
-            <option key={option} value={option}>
-              {option === 'all' ? 'All statuses' : option.replace('_', ' ')}
-            </option>
-          ))}
-        </select>
-        <span className="text-sm text-muted-foreground">
-          {activeScanTotal > 0
-            ? `${total + activeScanRemaining} item(s) total (+${activeScanRemaining} remaining from ${activeScanFolders.length} active scan(s))`
-            : `${total} item(s) total`}
-        </span>
+          <select
+            id="queue-filter"
+            value={filter}
+            onChange={(event) => void setFilter(event.target.value as QueueFilter)}
+            disabled={activeScanFolders.length > 0}
+            className="rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {FILTERS.map((option) => (
+              <option key={option} value={option}>
+                {option === 'all' ? 'All statuses' : option.replace('_', ' ')}
+              </option>
+            ))}
+          </select>
+        </div>
+        {activeScanFolders.length > 0 ? (
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Updating…
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">{`${total} item(s) total`}</span>
+        )}
         <button
           onClick={() => void clearCompleted()}
           disabled={clearingCompleted || completedCount === 0}
@@ -504,6 +506,12 @@ export function SyncQueuePage() {
       )}
 
       <div className="flex items-center justify-end gap-3 text-sm">
+        {activeScanFolders.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Page count updating…
+          </span>
+        )}
         <button
           type="button"
           onClick={() => void setPage(page - 1)}
@@ -518,7 +526,7 @@ export function SyncQueuePage() {
         <button
           type="button"
           onClick={() => void setPage(page + 1)}
-          disabled={!hasNextPage || loading}
+          disabled={!hasNextPage || loading || activeScanFolders.length > 0}
           className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           Next
