@@ -38,7 +38,7 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await page.getByPlaceholder('Search by path').fill(fixture.folderRelativePath)
 
   await row.getByRole('button', { name: 'Mirror' }).click()
-  await expectToast(page, /Mirror complete:/)
+  await expectToast(page, 'Folder mirror started')
   await expect(await qemu.pathExists(fixture.secondaryFilePath)).toBe(true)
   await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(
     `report for ${fixture.runId}`
