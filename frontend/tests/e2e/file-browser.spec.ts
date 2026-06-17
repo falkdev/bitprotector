@@ -20,6 +20,8 @@ test('tracks, mirrors, sets virtual path, and deletes a file through the GUI', a
   await page.getByLabel('File path').fill(fixture.absoluteFilePath)
   await page.getByRole('button', { name: 'Track file' }).last().click()
   await expectToast(page, 'File tracked')
+  await page.getByRole('combobox').first().selectOption({ label: fixture.driveName })
+  await page.getByPlaceholder('Search by path').fill(fixture.fileRelativePath)
 
   const row = page.locator('[data-testid^="file-row-"]').filter({ hasText: fileName }).first()
   await expect(row).toBeVisible()
@@ -30,6 +32,7 @@ test('tracks, mirrors, sets virtual path, and deletes a file through the GUI', a
   await page.getByLabel('Virtual Path').fill(fixture.virtualPath)
   await page.getByRole('button', { name: 'Save' }).click()
   await expectToast(page, 'Virtual path updated')
+  await page.getByPlaceholder('Search by path').fill(fixture.virtualPath)
 
   const updatedRow = page
     .locator('[data-testid^="file-row-"]')

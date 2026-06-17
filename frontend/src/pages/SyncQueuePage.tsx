@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Pause, Play } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
+import { foldersApi } from '@/api/folders'
 import { syncApi } from '@/api/sync'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -17,6 +18,7 @@ import type {
   SyncResolution,
   SyncStatus,
 } from '@/types/sync'
+import type { TrackedFolder } from '@/types/folder'
 
 type QueueFilter = SyncStatus | 'all'
 
@@ -179,14 +181,53 @@ export function SyncQueuePage() {
   const [clearingCompleted, setClearingCompleted] = useState(false)
   const [togglingPause, setTogglingPause] = useState(false)
   const [hasDrivePairs, setHasDrivePairs] = useState<boolean | null>(null)
+  const [activeScanFolders, setActiveScanFolders] = useState<TrackedFolder[]>([])
+  const scanPollSequence = useRef(0)
+
+  const activeScanTotal = activeScanFolders.reduce(
+    (sum, folder) => sum + folder.scan_total_files,
+    0
+  )
+  const activeScanScanned = activeScanFolders.reduce(
+    (sum, folder) => sum + Math.min(folder.scan_scanned_files, folder.scan_total_files),
+    0
+  )
+  const activeScanRemaining = activeScanFolders.reduce(
+    (sum, folder) =>
+      sum +
+      Math.max(
+        0,
+        folder.scan_total_files - Math.min(folder.scan_scanned_files, folder.scan_total_files)
+      ),
+    0
+  )
 
   useEffect(() => {
-    void fetch()
-    const timer = window.setInterval(() => {
+    let active = true
+
+    const pollQueueAndScanState = async () => {
+      const currentSequence = scanPollSequence.current + 1
+      scanPollSequence.current = currentSequence
       void fetch()
+      try {
+        const folders = await foldersApi.list()
+        if (active && currentSequence === scanPollSequence.current) {
+          setActiveScanFolders(folders.filter((folder) => folder.scanning))
+        }
+      } catch {
+        if (active && currentSequence === scanPollSequence.current) {
+          setActiveScanFolders([])
+        }
+      }
+    }
+
+    void pollQueueAndScanState()
+    const timer = window.setInterval(() => {
+      void pollQueueAndScanState()
     }, 5000)
 
     return () => {
+      active = false
       window.clearInterval(timer)
     }
   }, [fetch])
@@ -326,6 +367,18 @@ export function SyncQueuePage() {
           </span>
         </div>
       )}
+      {activeScanFolders.length > 0 && (
+        <div
+          data-testid="scanning-in-progress-banner"
+          className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800"
+        >
+          <span>
+            <strong>Scanning in progress</strong> - {activeScanScanned} / {activeScanTotal} files
+            discovered across {activeScanFolders.length} folder(s). New items are being added to the
+            queue.
+          </span>
+        </div>
+      )}
       {noDrivePairs ? (
         <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
           Add a drive pair first to process the sync queue.
@@ -348,7 +401,11 @@ export function SyncQueuePage() {
             </option>
           ))}
         </select>
-        <span className="text-sm text-muted-foreground">{total} item(s) total</span>
+        <span className="text-sm text-muted-foreground">
+          {activeScanTotal > 0
+            ? `${total + activeScanRemaining} item(s) total (+${activeScanRemaining} remaining from ${activeScanFolders.length} active scan(s))`
+            : `${total} item(s) total`}
+        </span>
         <button
           onClick={() => void clearCompleted()}
           disabled={clearingCompleted || completedCount === 0}

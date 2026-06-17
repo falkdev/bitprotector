@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SyncQueuePage } from './SyncQueuePage'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
-import { makeDrivePair, makeSyncQueueItem } from '@/test/factories'
+import { makeDrivePair, makeSyncQueueItem, makeTrackedFolder } from '@/test/factories'
 import { renderWithApp } from '@/test/render'
 
 interface QueueResponseOptions {
@@ -36,7 +36,10 @@ const queueResponse = (
 
 describe('SyncQueuePage', () => {
   beforeEach(() => {
-    server.use(api.get('/drives', () => HttpResponse.json([makeDrivePair()])))
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/folders', () => HttpResponse.json([]))
+    )
   })
 
   it('resolves a pending manual action through the dialog', async () => {
@@ -328,6 +331,181 @@ describe('SyncQueuePage', () => {
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByText('7 item(s) total')).toBeInTheDocument()
+  })
+
+  it('shows scanning banner and includes scan total in count when a folder is scanning', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 53, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({
+            scanning: true,
+            scan_total_files: 10,
+            scan_scanned_files: 3,
+          }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
+    expect(
+      screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
+    ).toBeInTheDocument()
+  })
+
+  it('hides scanning banner when no folders are scanning', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 54, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () => HttpResponse.json([]))
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByText('5 item(s) total')).toBeInTheDocument()
+    expect(screen.queryByTestId('scanning-in-progress-banner')).not.toBeInTheDocument()
+  })
+
+  it('scanning banner disappears and total normalises after scan completes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+
+    let foldersPollCount = 0
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 55, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () => {
+        foldersPollCount += 1
+
+        if (foldersPollCount === 1) {
+          return HttpResponse.json([
+            makeTrackedFolder({
+              scanning: true,
+              scan_total_files: 10,
+              scan_scanned_files: 3,
+            }),
+          ])
+        }
+
+        return HttpResponse.json([
+          makeTrackedFolder({
+            scanning: false,
+            scan_total_files: 10,
+            scan_scanned_files: 10,
+          }),
+        ])
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
+    expect(
+      screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('scanning-in-progress-banner')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('5 item(s) total')).toBeInTheDocument()
+  })
+
+  it('combines totals from multiple simultaneously scanning folders', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 56, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({ id: 1, scanning: true, scan_total_files: 10, scan_scanned_files: 3 }),
+          makeTrackedFolder({
+            id: 2,
+            scanning: true,
+            scan_total_files: 25,
+            scan_scanned_files: 12,
+          }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(
+      await screen.findByText('25 item(s) total (+20 remaining from 2 active scan(s))')
+    ).toBeInTheDocument()
+    expect(await screen.findByTestId('scanning-in-progress-banner')).toHaveTextContent(
+      'across 2 folder(s)'
+    )
+  })
+
+  it('ignores stale scan polling responses that arrive out of order', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+
+    let foldersPollCount = 0
+    let resolveFirstPoll: ((value: ReturnType<typeof HttpResponse.json>) => void) | null = null
+
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 57, status: 'pending' })], { total: 5 })
+      ),
+      api.get('/folders', () => {
+        foldersPollCount += 1
+
+        if (foldersPollCount === 1) {
+          return new Promise<ReturnType<typeof HttpResponse.json>>((resolve) => {
+            resolveFirstPoll = resolve
+          })
+        }
+
+        return HttpResponse.json([
+          makeTrackedFolder({
+            id: 1,
+            scanning: true,
+            scan_total_files: 10,
+            scan_scanned_files: 3,
+          }),
+        ])
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+
+    expect(
+      await screen.findByText('12 item(s) total (+7 remaining from 1 active scan(s))')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      resolveFirstPoll?.(
+        HttpResponse.json([
+          makeTrackedFolder({
+            id: 2,
+            scanning: true,
+            scan_total_files: 99,
+            scan_scanned_files: 20,
+          }),
+        ])
+      )
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('12 item(s) total (+7 remaining from 1 active scan(s))')
+      ).toBeInTheDocument()
+    })
   })
 
   it('requests the next page when Next is clicked', async () => {
