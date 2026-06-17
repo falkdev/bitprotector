@@ -724,21 +724,43 @@ On success, the folder's `last_scanned_at` is updated.
 
 ### POST `/folders/{id}/mirror`
 
-Immediately mirror all unmirrored tracked files under a tracked folder.
+Start mirroring all unmirrored tracked files under a tracked folder in a background worker.
+
+**Response `202`:**
+
+```json
+{
+    "mirroring": true,
+    "mirrored": 0,
+    "total": 2,
+    "mirrored_files": 2
+}
+```
+
+`mirrored_files` is a compatibility alias for the scheduled total. Use `mirrored` and `total` to track in-progress mirror runs.
+
+During execution, queue rows move through `pending -> in_progress -> completed` (or `failed` on error).
+
+**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `409 Conflict` (mirror already active), `500 Internal Server Error`
+
+---
+
+### GET `/folders/{id}/mirror/active`
+
+Return current mirror progress for one tracked folder.
 
 **Response `200`:**
 
 ```json
 {
+    "mirroring": true,
+    "mirrored": 1,
+    "total": 2,
     "mirrored_files": 2
 }
 ```
 
-`mirrored_files` counts files mirrored during this request.
-
-After a successful mirror, pending/in-progress `mirror` queue rows for mirrored files are marked `completed`.
-
-**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `500 Internal Server Error`
+When no mirror run is active, `mirroring` is `false` and both counters are `0`.
 
 ---
 
@@ -999,11 +1021,18 @@ Get paged results for a specific run.
     "total": 42,
     "page": 1,
     "per_page": 50,
-    "queue_paused": false
+    "queue_paused": false,
+    "active_items": 12,
+    "in_progress_items": 1,
+    "pending_items": 11,
+    "completed_items": 30,
+    "failed_items": 1
 }
 ```
 
 `queue_paused` is `true` when automatic queue processing has been suspended via `POST /sync/pause`. The queue contents are unchanged; no new items will be processed until `POST /sync/resume` is called.
+
+`total` is the count for the current filter page query. The per-status fields report global queue totals independent of the active filter.
 
 ---
 

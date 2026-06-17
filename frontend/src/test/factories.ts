@@ -7,7 +7,7 @@ import type {
 } from '@/types/database'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
-import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
+import type { FolderMirrorStatus, FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type {
   IntegrityRun,
   IntegrityRunResult,
@@ -48,8 +48,23 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
     scanning: false,
     scan_scanned_files: 0,
     scan_total_files: 0,
+    mirroring: false,
+    mirror_mirrored_files: 0,
+    mirror_total_files: 0,
     last_scanned_at: null,
+    last_mirrored_at: null,
     created_at: DEFAULT_DATE,
+    ...overrides,
+  }
+}
+
+export function makeFolderMirrorActive(
+  overrides: Partial<FolderMirrorStatus> = {}
+): FolderMirrorStatus {
+  return {
+    mirroring: false,
+    mirrored: 0,
+    total: 0,
     ...overrides,
   }
 }

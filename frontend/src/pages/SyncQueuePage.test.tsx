@@ -15,6 +15,9 @@ interface QueueResponseOptions {
   paused?: boolean
   activeItems?: number
   inProgressItems?: number
+  pendingItems?: number
+  completedItems?: number
+  failedItems?: number
 }
 
 const queueResponse = (
@@ -32,6 +35,9 @@ const queueResponse = (
       items.filter((i) => i.status === 'pending' || i.status === 'in_progress').length,
     in_progress_items:
       options.inProgressItems ?? items.filter((i) => i.status === 'in_progress').length,
+    pending_items: options.pendingItems ?? items.filter((i) => i.status === 'pending').length,
+    completed_items: options.completedItems ?? items.filter((i) => i.status === 'completed').length,
+    failed_items: options.failedItems ?? items.filter((i) => i.status === 'failed').length,
   })
 
 describe('SyncQueuePage', () => {
@@ -73,7 +79,7 @@ describe('SyncQueuePage', () => {
     expect(resolutionBody).toEqual({ resolution: 'keep_master' })
   })
 
-  it('polls the queue every five seconds', async () => {
+  it('polls the queue every five seconds when idle', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
 
     let listCalls = 0
@@ -81,7 +87,7 @@ describe('SyncQueuePage', () => {
     server.use(
       api.get('/sync/queue', () => {
         listCalls += 1
-        return queueResponse([makeSyncQueueItem({ id: 9 })])
+        return queueResponse([makeSyncQueueItem({ id: 9 })], { inProgressItems: 0 })
       })
     )
 
@@ -114,6 +120,7 @@ describe('SyncQueuePage', () => {
     expect(await screen.findByRole('button', { name: 'Process Queue' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Pause Queue' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /All/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Sync Task' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run Integrity Task' })).not.toBeInTheDocument()
   })
@@ -138,7 +145,7 @@ describe('SyncQueuePage', () => {
   it('disables clear completed button when there are no completed items', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        queueResponse([makeSyncQueueItem({ id: 12, status: 'pending' })])
+        queueResponse([makeSyncQueueItem({ id: 12, status: 'pending' })], { completedItems: 0 })
       )
     )
 
@@ -151,7 +158,7 @@ describe('SyncQueuePage', () => {
   it('enables clear completed button when completed items exist', async () => {
     server.use(
       api.get('/sync/queue', () =>
-        queueResponse([makeSyncQueueItem({ id: 13, status: 'completed' })])
+        queueResponse([makeSyncQueueItem({ id: 13, status: 'pending' })], { completedItems: 2 })
       )
     )
 
@@ -312,7 +319,7 @@ describe('SyncQueuePage', () => {
     await screen.findByTestId('sync-queue-row-50')
     await screen.findByTestId('sync-queue-row-51')
 
-    await user.selectOptions(screen.getByRole('combobox'), 'pending')
+    await user.click(screen.getByRole('tab', { name: /Pending/ }))
 
     await waitFor(() => {
       expect(requestedStatuses).toContain('pending')
@@ -321,7 +328,7 @@ describe('SyncQueuePage', () => {
     })
   })
 
-  it('shows the server-reported total count', async () => {
+  it('shows the server-reported total count in the summary label', async () => {
     server.use(
       api.get('/sync/queue', () =>
         queueResponse([makeSyncQueueItem({ id: 52, status: 'pending' })], { total: 7 })
@@ -330,10 +337,10 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByText('7 item(s) total')).toBeInTheDocument()
+    expect(await screen.findByText('Showing 1 of 7 (filter: All)')).toBeInTheDocument()
   })
 
-  it('shows scanning banner when a folder is scanning and disables the filter select', async () => {
+  it('shows inline scan indicator and disables the filter tabs while scanning', async () => {
     server.use(
       api.get('/sync/queue', () =>
         queueResponse([makeSyncQueueItem({ id: 53, status: 'pending' })], { total: 5 })
@@ -351,14 +358,14 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
-    expect(screen.getByText('Updating…')).toBeInTheDocument()
-    expect(screen.queryByText(/item\(s\) total/)).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: /filter/i })).toBeDisabled()
+    expect(await screen.findByText(/Updating… 3 \/ 10 files across 1 folder/)).toBeInTheDocument()
+    for (const tab of screen.getAllByRole('tab')) {
+      expect(tab).toBeDisabled()
+    }
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
   })
 
-  it('re-enables the filter select once scanning finishes', async () => {
+  it('re-enables the filter tabs once scanning finishes', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
 
     let foldersPollCount = 0
@@ -382,14 +389,14 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByRole('combobox', { name: /filter/i })).toBeDisabled()
+    expect(await screen.findByRole('tab', { name: /Pending/ })).toBeDisabled()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: /filter/i })).not.toBeDisabled()
+      expect(screen.getByRole('tab', { name: /Pending/ })).not.toBeDisabled()
     })
   })
 
@@ -401,6 +408,8 @@ describe('SyncQueuePage', () => {
         const status = url.searchParams.get('status')
         return queueResponse([makeSyncQueueItem({ id: 58, status: 'pending' })], {
           total: status === 'pending' ? 3 : 5,
+          pendingItems: 3,
+          completedItems: 2,
         })
       }),
       api.get('/folders', () => HttpResponse.json([]))
@@ -408,12 +417,13 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByText('5 item(s) total')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: /filter/i })).not.toBeDisabled()
+    expect(await screen.findByRole('tab', { name: /All 5/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Pending 3/ })).toBeInTheDocument()
 
-    await user.selectOptions(screen.getByRole('combobox', { name: /filter/i }), 'pending')
+    await user.click(screen.getByRole('tab', { name: /Pending/ }))
 
-    expect(await screen.findByText('3 item(s) total')).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: /All 5/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Pending 3/ })).toBeInTheDocument()
   })
 
   it('hides scanning banner when no folders are scanning', async () => {
@@ -426,11 +436,10 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByText('5 item(s) total')).toBeInTheDocument()
-    expect(screen.queryByTestId('scanning-in-progress-banner')).not.toBeInTheDocument()
+    expect(await screen.findByText('Showing 1 of 5 (filter: All)')).toBeInTheDocument()
   })
 
-  it('scanning banner disappears and total normalises after scan completes', async () => {
+  it('inline scan indicator disappears and total normalises after scan completes', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
 
     let foldersPollCount = 0
@@ -464,17 +473,16 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByTestId('scanning-in-progress-banner')).toBeInTheDocument()
-    expect(screen.getByText('Updating…')).toBeInTheDocument()
+    expect(await screen.findByText(/Updating…/)).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
 
     await waitFor(() => {
-      expect(screen.queryByTestId('scanning-in-progress-banner')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Updating…/)).not.toBeInTheDocument()
     })
-    expect(screen.getByText('5 item(s) total')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 of 5 (filter: All)')).toBeInTheDocument()
   })
 
   it('combines totals from multiple simultaneously scanning folders', async () => {
@@ -497,10 +505,7 @@ describe('SyncQueuePage', () => {
 
     renderWithApp(<SyncQueuePage />)
 
-    expect(await screen.findByText('Updating…')).toBeInTheDocument()
-    expect(await screen.findByTestId('scanning-in-progress-banner')).toHaveTextContent(
-      'across 2 folder(s)'
-    )
+    expect(await screen.findByText(/Updating… 15 \/ 35 files across 2 folder/)).toBeInTheDocument()
   })
 
   it('ignores stale scan polling responses that arrive out of order', async () => {
@@ -539,7 +544,7 @@ describe('SyncQueuePage', () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
 
-    expect(await screen.findByTestId('scanning-in-progress-banner')).toHaveTextContent('3 / 10')
+    expect(await screen.findByText(/Updating… 3 \/ 10/)).toBeInTheDocument()
 
     await act(async () => {
       resolveFirstPoll?.(
@@ -555,8 +560,239 @@ describe('SyncQueuePage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('scanning-in-progress-banner')).toHaveTextContent('3 / 10')
+      expect(screen.getByText(/Updating… 3 \/ 10/)).toBeInTheDocument()
     })
+  })
+
+  it('hides status counts on tabs while scanning', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 63, status: 'pending' })], {
+          pendingItems: 5,
+          inProgressItems: 0,
+        })
+      ),
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({ scanning: true, scan_total_files: 10, scan_scanned_files: 3 }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByText(/Updating…/)
+    expect(screen.queryByRole('tab', { name: /All \d/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /Pending \d/ })).not.toBeInTheDocument()
+  })
+
+  it('suppresses Processing queue… indicator while scanning', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 64, status: 'in_progress' })], {
+          inProgressItems: 1,
+        })
+      ),
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({ scanning: true, scan_total_files: 10, scan_scanned_files: 3 }),
+        ])
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByText(/Updating…/)
+    expect(screen.queryByTestId('processing-indicator')).not.toBeInTheDocument()
+  })
+
+  it('renders status tabs with server-reported counts', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 70, status: 'pending' })], {
+          pendingItems: 6,
+          inProgressItems: 1,
+          completedItems: 4,
+          failedItems: 2,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    expect(await screen.findByRole('tab', { name: /All 13/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Pending 6/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /In Progress 1/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Completed 4/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Failed 2/ })).toBeInTheDocument()
+  })
+
+  it('tab counts stay consistent when switching the active tab', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.get('/sync/queue', ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status')
+        if (status === 'completed') {
+          return queueResponse([makeSyncQueueItem({ id: 71, status: 'completed' })], {
+            total: 4,
+            pendingItems: 6,
+            inProgressItems: 1,
+            completedItems: 4,
+            failedItems: 0,
+          })
+        }
+        if (status === 'pending') {
+          return queueResponse([makeSyncQueueItem({ id: 72, status: 'pending' })], {
+            total: 6,
+            pendingItems: 6,
+            inProgressItems: 1,
+            completedItems: 4,
+            failedItems: 0,
+          })
+        }
+        return queueResponse([makeSyncQueueItem({ id: 73, status: 'pending' })], {
+          total: 11,
+          pendingItems: 6,
+          inProgressItems: 1,
+          completedItems: 4,
+          failedItems: 0,
+        })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByRole('tab', { name: /All 11/ })
+
+    await user.click(screen.getByRole('tab', { name: /Completed/ }))
+    await screen.findByRole('tab', { name: /Completed 4/ })
+
+    await user.click(screen.getByRole('tab', { name: /Pending/ }))
+    await screen.findByRole('tab', { name: /Pending 6/ })
+
+    expect(screen.getByRole('tab', { name: /All 11/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /In Progress 1/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Completed 4/ })).toBeInTheDocument()
+  })
+
+  it('enables Clear Completed when completed_items > 0 even with Pending tab active', async () => {
+    const user = userEvent.setup()
+    server.use(
+      api.get('/sync/queue', ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status')
+        if (status === 'pending') {
+          return queueResponse([makeSyncQueueItem({ id: 74, status: 'pending' })], {
+            completedItems: 3,
+            pendingItems: 1,
+          })
+        }
+        return queueResponse([makeSyncQueueItem({ id: 74, status: 'pending' })], {
+          completedItems: 3,
+          pendingItems: 1,
+        })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByRole('tab', { name: /Pending/ })
+    await user.click(screen.getByRole('tab', { name: /Pending/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Clear Completed' })).toBeEnabled()
+    })
+  })
+
+  it('shows Processing queue… indicator when in_progress_items > 0', async () => {
+    const user = userEvent.setup()
+    let call = 0
+    server.use(
+      api.get('/sync/queue', () => {
+        call += 1
+        if (call <= 2) {
+          return queueResponse([makeSyncQueueItem({ id: 75, status: 'in_progress' })], {
+            inProgressItems: 1,
+          })
+        }
+        return queueResponse([makeSyncQueueItem({ id: 75, status: 'completed' })], {
+          inProgressItems: 0,
+          completedItems: 1,
+        })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    expect(await screen.findByTestId('processing-indicator')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: /Pending/ }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('processing-indicator')).not.toBeInTheDocument()
+    })
+  })
+
+  it('does not show Processing queue… indicator when only pending items exist', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 78, status: 'pending' })], {
+          pendingItems: 8,
+          inProgressItems: 0,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-78')
+    expect(screen.queryByTestId('processing-indicator')).not.toBeInTheDocument()
+  })
+
+  it('polls every 2 s while in_progress_items > 0 and reverts to 5 s when idle', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    let listCalls = 0
+
+    server.use(
+      api.get('/sync/queue', () => {
+        listCalls += 1
+        if (listCalls <= 2) {
+          return queueResponse([makeSyncQueueItem({ id: 76, status: 'in_progress' })], {
+            inProgressItems: 1,
+          })
+        }
+        return queueResponse([makeSyncQueueItem({ id: 76, status: 'completed' })], {
+          inProgressItems: 0,
+          completedItems: 1,
+        })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-76')
+
+    const baseline = listCalls
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(listCalls).toBeGreaterThan(baseline)
+
+    const afterFastWindow = listCalls
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    expect(listCalls).toBeGreaterThan(afterFastWindow)
+  })
+
+  it('Processing queue… indicator is suppressed when the queue is paused', async () => {
+    server.use(
+      api.get('/sync/queue', () =>
+        queueResponse([makeSyncQueueItem({ id: 77, status: 'pending' })], {
+          paused: true,
+          pendingItems: 5,
+          inProgressItems: 0,
+        })
+      )
+    )
+
+    renderWithApp(<SyncQueuePage />)
+    await screen.findByTestId('sync-queue-row-77')
+    expect(screen.queryByTestId('processing-indicator')).not.toBeInTheDocument()
   })
 
   it('requests the next page when Next is clicked', async () => {

@@ -24,6 +24,14 @@ type QueueFilter = SyncStatus | 'all'
 
 const FILTERS: QueueFilter[] = ['all', 'pending', 'in_progress', 'completed', 'failed']
 
+const FILTER_LABELS: Record<QueueFilter, string> = {
+  all: 'All',
+  pending: 'Pending',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  failed: 'Failed',
+}
+
 const STATUS_STYLES: Record<SyncStatus, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
   in_progress: 'bg-blue-100 text-blue-800',
@@ -169,7 +177,10 @@ export function SyncQueuePage() {
   const perPage = useSyncStore((state) => state.perPage)
   const queuePaused = useSyncStore((state) => state.queuePaused)
   const activeItems = useSyncStore((state) => state.activeItems)
+  const pendingItems = useSyncStore((state) => state.pendingItems)
   const inProgressItems = useSyncStore((state) => state.inProgressItems)
+  const completedItems = useSyncStore((state) => state.completedItems)
+  const failedItems = useSyncStore((state) => state.failedItems)
   const loading = useSyncStore((state) => state.loading)
   const filter = useSyncStore((state) => state.filter)
   const fetch = useSyncStore((state) => state.fetch)
@@ -192,6 +203,19 @@ export function SyncQueuePage() {
     (sum, folder) => sum + Math.min(folder.scan_scanned_files, folder.scan_total_files),
     0
   )
+  const allItems = pendingItems + inProgressItems + completedItems + failedItems
+  const statusCounts: Record<QueueFilter, number> = {
+    all: allItems,
+    pending: pendingItems,
+    in_progress: inProgressItems,
+    completed: completedItems,
+    failed: failedItems,
+  }
+  const showProcessingIndicator =
+    activeScanFolders.length === 0 &&
+    (processingQueue || (inProgressItems > 0 && !queuePaused && hasDrivePairs === true))
+  const pollIntervalMs = showProcessingIndicator ? 2000 : 5000
+
   useEffect(() => {
     let active = true
 
@@ -214,13 +238,13 @@ export function SyncQueuePage() {
     void pollQueueAndScanState()
     const timer = window.setInterval(() => {
       void pollQueueAndScanState()
-    }, 5000)
+    }, pollIntervalMs)
 
     return () => {
       active = false
       window.clearInterval(timer)
     }
-  }, [fetch])
+  }, [fetch, pollIntervalMs])
 
   useEffect(() => {
     let active = true
@@ -244,7 +268,6 @@ export function SyncQueuePage() {
     }
   }, [])
 
-  const completedCount = items.filter((item) => item.status === 'completed').length
   const noDrivePairs = hasDrivePairs === false
   const disableProcessQueue = noDrivePairs || processingQueue || inProgressItems > 0
   const totalPages = Math.max(1, Math.ceil(total / perPage))
@@ -357,64 +380,72 @@ export function SyncQueuePage() {
           </span>
         </div>
       )}
-      {activeScanFolders.length > 0 && (
-        <div
-          data-testid="scanning-in-progress-banner"
-          className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800"
-        >
-          <span>
-            <strong>Scanning in progress</strong> - {activeScanScanned} / {activeScanTotal} files
-            discovered across {activeScanFolders.length} folder(s). New items are being added to the
-            queue.
-          </span>
-        </div>
-      )}
+
       {noDrivePairs ? (
         <p className="text-xs text-muted-foreground" data-testid="sync-queue-no-drives-hint">
           Add a drive pair first to process the sync queue.
         </p>
       ) : null}
 
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
-        <label htmlFor="queue-filter" className="text-sm font-medium">
-          Filter
-        </label>
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
         <div
           title={
             activeScanFolders.length > 0
               ? 'Filtering is disabled while folders are being scanned — the queue is still being populated'
               : undefined
           }
+          role="tablist"
+          aria-label="Queue filter"
+          className="flex flex-wrap gap-2"
         >
-          <select
-            id="queue-filter"
-            value={filter}
-            onChange={(event) => void setFilter(event.target.value as QueueFilter)}
-            disabled={activeScanFolders.length > 0}
-            className="rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {FILTERS.map((option) => (
-              <option key={option} value={option}>
-                {option === 'all' ? 'All statuses' : option.replace('_', ' ')}
-              </option>
-            ))}
-          </select>
+          {FILTERS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={filter === option}
+              disabled={activeScanFolders.length > 0}
+              onClick={() => void setFilter(option)}
+              className={`rounded-md border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
+                filter === option
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border hover:bg-accent'
+              }`}
+            >
+              {activeScanFolders.length > 0
+                ? FILTER_LABELS[option]
+                : `${FILTER_LABELS[option]} ${statusCounts[option]}`}
+            </button>
+          ))}
         </div>
-        {activeScanFolders.length > 0 ? (
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-            Updating…
-          </span>
-        ) : (
-          <span className="text-sm text-muted-foreground">{`${total} item(s) total`}</span>
-        )}
-        <button
-          onClick={() => void clearCompleted()}
-          disabled={clearingCompleted || completedCount === 0}
-          className="ml-auto rounded-md border border-border px-3 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {clearingCompleted ? 'Clearing…' : 'Clear Completed'}
-        </button>
+
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          {activeScanFolders.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              Updating… {activeScanScanned} / {activeScanTotal} files across{' '}
+              {activeScanFolders.length} folder(s)
+            </span>
+          ) : null}
+          {showProcessingIndicator && !queuePaused ? (
+            <span className="inline-flex items-center gap-1.5" data-testid="processing-indicator">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              Processing queue…
+            </span>
+          ) : null}
+          {activeScanFolders.length === 0 ? (
+            <span>
+              Showing {items.length} of {total} (filter: {FILTER_LABELS[filter]})
+            </span>
+          ) : null}
+          <button
+            onClick={() => void clearCompleted()}
+            disabled={clearingCompleted || completedItems === 0}
+            className="ml-auto rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {clearingCompleted ? 'Clearing…' : 'Clear Completed'}
+          </button>
+        </div>
       </div>
 
       {loading && items.length === 0 ? (

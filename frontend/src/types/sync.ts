@@ -50,4 +50,7 @@ export interface SyncQueueListResponse {
   queue_paused: boolean
   active_items: number
   in_progress_items: number
+  pending_items: number
+  completed_items: number
+  failed_items: number
 }

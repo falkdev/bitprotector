@@ -6,7 +6,11 @@ export interface TrackedFolder {
   scanning: boolean
   scan_scanned_files: number
   scan_total_files: number
+  mirroring: boolean
+  mirror_mirrored_files: number
+  mirror_total_files: number
   last_scanned_at: string | null
+  last_mirrored_at: string | null
   created_at: string
 }
 
@@ -28,4 +32,13 @@ export interface FolderScanStatus {
 
 export interface MirrorFolderResult {
   mirrored_files: number
+  mirroring: boolean
+  mirrored: number
+  total: number
+}
+
+export interface FolderMirrorStatus {
+  mirroring: boolean
+  mirrored: number
+  total: number
 }

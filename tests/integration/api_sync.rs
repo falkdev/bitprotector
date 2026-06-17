@@ -19,6 +19,63 @@ async fn test_sync_queue_list_empty() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert!(body["queue"].as_array().unwrap().is_empty());
+    assert_eq!(body["pending_items"], 0);
+    assert_eq!(body["in_progress_items"], 0);
+    assert_eq!(body["completed_items"], 0);
+    assert_eq!(body["failed_items"], 0);
+}
+
+#[actix_rt::test]
+async fn test_sync_queue_list_includes_per_status_counts() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("counts", "/p", "/s").unwrap();
+    let pending_file = repo
+        .create_tracked_file(pair.id, "pending.txt", "h1", 1, None)
+        .unwrap();
+    let in_progress_file = repo
+        .create_tracked_file(pair.id, "in-progress.txt", "h2", 1, None)
+        .unwrap();
+    let completed_file = repo
+        .create_tracked_file(pair.id, "completed.txt", "h3", 1, None)
+        .unwrap();
+    let failed_file = repo
+        .create_tracked_file(pair.id, "failed.txt", "h4", 1, None)
+        .unwrap();
+
+    let _pending = repo
+        .create_sync_queue_item(pending_file.id, "mirror")
+        .unwrap();
+    let in_progress = repo
+        .create_sync_queue_item(in_progress_file.id, "mirror")
+        .unwrap();
+    repo.update_sync_queue_status(in_progress.id, "in_progress", None)
+        .unwrap();
+
+    let completed = repo
+        .create_sync_queue_item(completed_file.id, "mirror")
+        .unwrap();
+    repo.update_sync_queue_status(completed.id, "completed", None)
+        .unwrap();
+
+    let failed = repo
+        .create_sync_queue_item(failed_file.id, "mirror")
+        .unwrap();
+    repo.update_sync_queue_status(failed.id, "failed", Some("forced"))
+        .unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["pending_items"], 1);
+    assert_eq!(body["in_progress_items"], 1);
+    assert_eq!(body["completed_items"], 1);
+    assert_eq!(body["failed_items"], 1);
 }
 
 #[actix_rt::test]

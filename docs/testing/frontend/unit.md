@@ -155,6 +155,16 @@ This test is intentionally minimal. The login interaction logic lives in the `us
 
 **Resume queue:** Clicking "Resume Queue" calls the resume endpoint and the "Sync queue processing resumed" toast appears, with the banner removed.
 
+**Status tabs with server-reported counts:** The five filter tabs (All, Pending, In Progress, Completed, Failed) display the per-status counts returned by the API. The counts remain stable when switching between tabs because they come from the API response's dedicated count fields, not from the visible page of items.
+
+**Tab counts hidden during scan:** While one or more folders are being scanned, the filter tabs show their labels only (no numeric counts). Counts reappear once scanning finishes.
+
+**Inline scan indicator — single "Updating…" spinner:** When a folder scan is active, a single inline "Updating… {scanned} / {total} files across {n} folder(s)" spinner appears near the filter row. There is no separate yellow banner. The indicator combines totals from all concurrently scanning folders, and the "Showing X of Y" summary is hidden while scanning. Stale out-of-order poll responses are discarded so the counter never regresses.
+
+**Processing queue… indicator:** When `in_progress_items > 0` and the queue is not paused, a "Processing queue…" spinner is shown. It is suppressed when the queue is paused and also when a folder scan is active (scanning takes precedence). Only pending items do not trigger the indicator.
+
+**2 s / 5 s adaptive polling:** The page polls every 2 seconds while `in_progress_items > 0` and reverts to 5-second intervals when idle.
+
 ---
 
 ### TrackingWorkspacePage.test.tsx

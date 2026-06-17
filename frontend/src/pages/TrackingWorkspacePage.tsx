@@ -25,7 +25,7 @@ import { suggestVirtualPathFromParent } from '@/lib/path'
 import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
-import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
+import type { FolderMirrorStatus, FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type { TrackingItem, TrackingListParams } from '@/types/tracking'
 import type { VirtualPathTreeNode } from '@/types/virtual-path'
 
@@ -444,6 +444,9 @@ export function TrackingWorkspacePage() {
   const [scanningFolderIds, setScanningFolderIds] = useState<Set<number>>(new Set())
   const [mirroringFolderIds, setMirroringFolderIds] = useState<Set<number>>(new Set())
   const [folderScanStatuses, setFolderScanStatuses] = useState<Record<number, FolderScanStatus>>({})
+  const [folderMirrorStatuses, setFolderMirrorStatuses] = useState<
+    Record<number, FolderMirrorStatus>
+  >({})
   const [response, setResponse] = useState<{
     items: TrackingItem[]
     total: number
@@ -533,6 +536,18 @@ export function TrackingWorkspacePage() {
     [folderScanStatuses]
   )
   const activeFolderScanIdsKey = useMemo(() => activeFolderScanIds.join(','), [activeFolderScanIds])
+  const activeFolderMirrorIds = useMemo(
+    () =>
+      Object.entries(folderMirrorStatuses)
+        .filter(([, status]) => status.mirroring)
+        .map(([id]) => Number(id))
+        .sort((a, b) => a - b),
+    [folderMirrorStatuses]
+  )
+  const activeFolderMirrorIdsKey = useMemo(
+    () => activeFolderMirrorIds.join(','),
+    [activeFolderMirrorIds]
+  )
 
   // On mount, seed folderScanStatuses from the server so that in-progress scans
   // started before this page was last visited are not lost on navigation.
@@ -543,20 +558,43 @@ export function TrackingWorkspacePage() {
         const folders = await foldersApi.list()
         if (!active) return
         const scanning = folders.filter((f) => f.scanning)
-        if (scanning.length === 0) return
-        setFolderScanStatuses((current) => {
-          const next = { ...current }
-          for (const folder of scanning) {
-            if (!(folder.id in next)) {
-              next[folder.id] = {
-                scanning: true,
-                scanned: folder.scan_scanned_files,
-                total: folder.scan_total_files,
+        const mirroring = folders.filter((f) => f.mirroring)
+
+        if (scanning.length > 0) {
+          setFolderScanStatuses((current) => {
+            const next = { ...current }
+            for (const folder of scanning) {
+              if (!(folder.id in next)) {
+                next[folder.id] = {
+                  scanning: true,
+                  scanned: folder.scan_scanned_files,
+                  total: folder.scan_total_files,
+                }
               }
             }
-          }
-          return next
-        })
+            return next
+          })
+        }
+
+        if (mirroring.length > 0) {
+          setFolderMirrorStatuses((current) => {
+            const next = { ...current }
+            for (const folder of mirroring) {
+              if (!(folder.id in next)) {
+                next[folder.id] = {
+                  mirroring: true,
+                  mirrored: folder.mirror_mirrored_files,
+                  total: folder.mirror_total_files,
+                }
+              }
+            }
+            return next
+          })
+        }
+
+        if (scanning.length === 0 && mirroring.length === 0) {
+          return
+        }
       } catch {
         // best-effort: polling will report failures separately
       }
@@ -566,6 +604,60 @@ export function TrackingWorkspacePage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!activeFolderMirrorIdsKey) return
+
+    const mirrorFolderIds = activeFolderMirrorIdsKey.split(',').map(Number)
+
+    let active = true
+
+    const poll = async () => {
+      try {
+        const mirrorStatuses = await Promise.all(
+          mirrorFolderIds.map(async (folderId) => ({
+            folderId,
+            status: await foldersApi.mirrorActive(folderId),
+          }))
+        )
+        if (!active) return
+
+        const completedFolderIds = mirrorStatuses
+          .filter(({ status }) => !status.mirroring)
+          .map(({ folderId }) => folderId)
+
+        setFolderMirrorStatuses((current) => {
+          const next = { ...current }
+          for (const { folderId, status } of mirrorStatuses) {
+            if (status.mirroring) {
+              next[folderId] = status
+            } else {
+              delete next[folderId]
+            }
+          }
+          return next
+        })
+
+        if (completedFolderIds.length > 0) {
+          await load(params)
+          if (!active) return
+          setTreeRefreshKey((current) => current + 1)
+        }
+      } catch {
+        // Polling is best-effort; the table loader reports fetch failures.
+      }
+    }
+
+    void poll()
+    const timer = window.setInterval(() => {
+      void poll()
+    }, 1000)
+
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [activeFolderMirrorIdsKey, load, params])
 
   useEffect(() => {
     if (!activeFolderScanIdsKey) return
@@ -654,7 +746,11 @@ export function TrackingWorkspacePage() {
               scanning: false,
               scan_scanned_files: 0,
               scan_total_files: 0,
+              mirroring: false,
+              mirror_mirrored_files: 0,
+              mirror_total_files: 0,
               last_scanned_at: null,
+              last_mirrored_at: null,
               created_at: item.created_at,
             }) satisfies TrackedFolder
         ),
@@ -780,9 +876,15 @@ export function TrackingWorkspacePage() {
     setMirroringFolderIds((current) => new Set(current).add(folder.id))
     try {
       const result = await foldersApi.mirror(folder.id)
-      toast.success(`Mirror complete: ${result.mirrored_files} file(s) mirrored`)
-      await load(params)
-      setTreeRefreshKey((current) => current + 1)
+      setFolderMirrorStatuses((current) => ({
+        ...current,
+        [folder.id]: {
+          mirroring: result.mirroring,
+          mirrored: result.mirrored,
+          total: result.total,
+        },
+      }))
+      toast.success('Folder mirror started')
     } catch (error) {
       // Extract meaningful error message from backend response
       const errorMessage = getErrorMessage(error, 'Folder mirror failed')
@@ -1290,7 +1392,9 @@ export function TrackingWorkspacePage() {
                               const scanStatus = folderScanStatuses[item.id]
                               const isFolderScanning =
                                 scanningFolderIds.has(item.id) || scanStatus?.scanning === true
-                              const isFolderMirroring = mirroringFolderIds.has(item.id)
+                              const mirrorStatus = folderMirrorStatuses[item.id]
+                              const isFolderMirroring =
+                                mirroringFolderIds.has(item.id) || mirrorStatus?.mirroring === true
                               const isFolderBusy = isFolderScanning || isFolderMirroring
 
                               return (

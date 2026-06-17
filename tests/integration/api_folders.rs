@@ -401,13 +401,100 @@ async fn test_folders_mirror_endpoint_processes_unmirrored_files_under_folder() 
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["mirrored_files"], 2);
+    assert_eq!(body["mirroring"], true);
+    assert_eq!(body["mirrored"], 0);
+    assert_eq!(body["total"], 2);
+
+    actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let req = test::TestRequest::get()
+                .uri(&format!("/api/v1/folders/{}/mirror/active", folder.id))
+                .insert_header(("Authorization", bearer()))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            let status: serde_json::Value = test::read_body_json(resp).await;
+            if !status["mirroring"].as_bool().unwrap_or(false) {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder mirror to complete");
+
     assert!(secondary.path().join("docs/a.txt").exists());
     assert!(secondary.path().join("docs/b.txt").exists());
-    assert_eq!(repo.get_sync_queue_item(q1.id).unwrap().status, "completed");
-    assert_eq!(repo.get_sync_queue_item(q2.id).unwrap().status, "completed");
+    let q1_updated = repo.get_sync_queue_item(q1.id).unwrap();
+    let q2_updated = repo.get_sync_queue_item(q2.id).unwrap();
+    assert_eq!(q1_updated.status, "completed");
+    assert_eq!(q2_updated.status, "completed");
+    assert!(q1_updated.completed_at.is_some());
+    assert!(q2_updated.completed_at.is_some());
+    assert!(repo
+        .get_tracked_folder(folder.id)
+        .unwrap()
+        .last_mirrored_at
+        .is_some());
+}
+
+#[actix_rt::test]
+async fn test_folders_mirror_endpoint_returns_409_when_already_mirroring() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir(primary.path().join("docs")).unwrap();
+    fs::create_dir(secondary.path().join("docs")).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "mirror-conflict",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    repo.start_folder_mirror(folder.id, 1).unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/mirror", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+}
+
+#[actix_rt::test]
+async fn test_folders_mirror_active_returns_zero_state_when_idle() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir(primary.path().join("docs")).unwrap();
+    fs::create_dir(secondary.path().join("docs")).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "mirror-active-idle",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/v1/folders/{}/mirror/active", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["mirroring"], false);
+    assert_eq!(body["mirrored"], 0);
+    assert_eq!(body["total"], 0);
 }
 
 #[actix_rt::test]

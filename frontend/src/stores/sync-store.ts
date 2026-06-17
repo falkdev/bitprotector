@@ -7,6 +7,9 @@ interface SyncStore {
   queuePaused: boolean
   activeItems: number
   inProgressItems: number
+  pendingItems: number
+  completedItems: number
+  failedItems: number
   loading: boolean
   error: string | null
   filter: SyncStatus | 'all'
@@ -24,7 +27,10 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   items: [],
   queuePaused: false,
   activeItems: 0,
+  pendingItems: 0,
   inProgressItems: 0,
+  completedItems: 0,
+  failedItems: 0,
   loading: false,
   error: null,
   filter: 'all',
@@ -48,7 +54,10 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
         perPage: response.per_page,
         queuePaused: response.queue_paused,
         activeItems: response.active_items,
+        pendingItems: response.pending_items,
         inProgressItems: response.in_progress_items,
+        completedItems: response.completed_items,
+        failedItems: response.failed_items,
         loading: false,
       })
     } catch (err) {

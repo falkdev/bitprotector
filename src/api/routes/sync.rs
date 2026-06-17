@@ -57,6 +57,13 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
         Ok(count) => count,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+    let counts_by_status = match repo.count_sync_queue_by_status() {
+        Ok(counts) => counts,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+    let pending_items = *counts_by_status.get("pending").unwrap_or(&0);
+    let completed_items = *counts_by_status.get("completed").unwrap_or(&0);
+    let failed_items = *counts_by_status.get("failed").unwrap_or(&0);
     match repo.list_sync_queue(query.status.as_deref(), page, per_page) {
         Ok((items, total)) => HttpResponse::Ok().json(serde_json::json!({
             "queue": items,
@@ -66,6 +73,9 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
             "queue_paused": queue_paused,
             "active_items": active_items,
             "in_progress_items": in_progress_items,
+            "pending_items": pending_items,
+            "completed_items": completed_items,
+            "failed_items": failed_items,
         })),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }

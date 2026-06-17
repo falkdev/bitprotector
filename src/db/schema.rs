@@ -76,7 +76,11 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             scanning        INTEGER NOT NULL DEFAULT 0,
             scan_scanned_files INTEGER NOT NULL DEFAULT 0,
             scan_total_files INTEGER NOT NULL DEFAULT 0,
+            mirroring       INTEGER NOT NULL DEFAULT 0,
+            mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
+            mirror_total_files INTEGER NOT NULL DEFAULT 0,
             last_scanned_at TEXT,
+            last_mirrored_at TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
         );",
@@ -215,6 +219,22 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE tracked_folders ADD COLUMN scan_total_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirroring INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirror_mirrored_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirror_total_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN last_mirrored_at TEXT",
         [],
     );
     let _ = conn.execute_batch(
