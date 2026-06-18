@@ -8,7 +8,7 @@
 #
 # Layers:
 #   lint   — cargo fmt + clippy, npm lint + prettier (Layer 0)
-#   fast   — lint + unit tests + integration tests excluding scaling_100k (Layers 0-3)
+#   fast   — lint + unit tests + integration tests excluding scaling_100k (Layers 0-2)
 #   smoke  — fast + build .deb + QEMU smoke on ubuntu-24.04 and ubuntu-26.04 (Layers 0-5)
 #   full   — smoke + application-workflows + failover + uninstall + resilience + upgrade + degraded-boot + drive-media-type (Layers 0-12)
 #   e2e    — boot dedicated QEMU guest + run Playwright E2E suite (Layer 13, requires Playwright browsers)
@@ -303,7 +303,6 @@ case "${LAYER}" in
         run_lint
         run_unit
         run_rust_integration_fast
-        run_rust_integration_heavy
         ;;
     smoke)
         run_lint
