@@ -15,10 +15,13 @@ lint → unit → rust-integration-fast → rust-integration-heavy
                                            qemu-smoke
                                                 ↓
           (qemu-application-workflows | qemu-failover | qemu-uninstall |
-           qemu-resilience | qemu-upgrade | qemu-degraded-boot | qemu-drive-media-type)
+           qemu-resilience | qemu-upgrade | qemu-degraded-boot |
+           qemu-drive-media-type | e2e)
 ```
 
-Nightly (`nightly.yml`) also runs: `qemu-scale`, `qemu-scale-lowmem`, `qemu-scheduled-load`.
+All seven `qemu-*` scenario jobs and the `e2e` (Playwright) job depend on `qemu-smoke`. The `coverage` job depends on `unit` and is non-gating (`continue-on-error: true`).
+
+Nightly (`nightly.yml`) also runs: `qemu-scale`, `qemu-scale-lowmem`, `qemu-scheduled-load`, `qemu-drive-media-type`.
 
 Key files:
 - `.github/workflows/ci.yml` — main pipeline
@@ -153,11 +156,7 @@ To run the full heavy QEMU suite without merging to main:
 
 ## Fix Handoff
 
-When you have identified the root cause and the fix is clear, output a **Fix Handoff** block at the end of your response — a self-contained, copy-paste-ready prompt for the `Code Fixer` agent (or any fix-capable agent).
-
-**Confidence criteria:** Output the handoff block only when you have: (a) identified the failing log line or symptom, (b) matched it to a root cause category, and (c) confirmed the relevant source files. If any of these are missing, continue the diagnosis first.
-
-Format it exactly like this:
+When the root cause and fix are clear, output a self-contained, copy-paste-ready **Fix Handoff** block for the `Code Fixer` agent at the end of your response. Output it only once you have: (a) identified the failing log line or symptom, (b) matched it to a root cause category, and (c) confirmed the relevant source files — otherwise keep diagnosing. Format:
 
 ~~~
 <!-- FIX HANDOFF — copy everything between the triple-backtick fences into the Code Fixer agent -->

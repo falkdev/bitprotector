@@ -106,11 +106,7 @@ After each fix, report:
 
 ## Solution Handoff
 
-**This agent's job ends when the failing command passes locally.** Do not attempt to run broader test suites, commit, push, or open PRs.
-
-After all fixes are verified, output **exactly** the block below (with placeholders filled in) — wrapped in triple-backtick fences — into the chat, then **stop**. The user decides what happens next.
-
-Format it exactly like this:
+**This agent's job ends when the failing command passes locally.** Do not run broader suites, commit, push, or open PRs. After all fixes verify, output **exactly** the block below (placeholders filled, wrapped in triple-backtick fences) into the chat, then **stop**.
 
 ~~~
 <!-- FIX HANDOFF — copy everything between the triple-backtick fences into the Test Workflow agent -->
@@ -137,10 +133,4 @@ Why safe: <why the change is minimal and unlikely to break unrelated behaviour, 
 ```
 ~~~
 
-Do NOT add next steps, suggestions, or ask "should I push?". Output the block and stop.
-
-Rules for filling in the handoff:
-- List every file that was modified (not just the primary one).
-- Copy the actual passing command output — do not paraphrase it.
-- Write the "What changed and why" block thoroughly — the Test Workflow agent uses it to decide which tests to run. Be specific about change type, scope, and why the change is safe. Do not leave fields as placeholders.
-- If the session fixed multiple independent issues, output one handoff block with all changed files listed and a combined summary sentence.
+Output the block and stop — no next steps, suggestions, or "should I push?". Fill in every field (no placeholders): list every modified file, paste the actual passing output verbatim, and write the "What changed and why" block specifically — the Test Workflow agent uses it to pick tests. For multiple independent fixes, emit one block listing all files with a combined summary.
