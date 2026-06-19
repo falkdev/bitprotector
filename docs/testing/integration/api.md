@@ -152,9 +152,11 @@ This file covers the asynchronous integrity run lifecycle, which is more complex
 
 **`GET /api/v1/sync/queue`** — Returns pending items with their file ID, action, and status. Includes the `queue_paused` boolean.
 
-**`POST /api/v1/sync/process`** — Processes all pending items. The response reports how many items were completed. After processing, the queue is empty.
+**`POST /api/v1/sync/process`** — Enqueues all pending items for background processing and returns **`202 Accepted`** immediately with `{ "status": "started" }`. The call is idempotent: if a worker is already running, both calls return `202` (verified by `test_sync_process_is_idempotent`).
 
-**Pause and resume:** `POST /api/v1/sync/pause` sets `queue_paused: true`. A subsequent process call returns immediately with zero items processed. `POST /api/v1/sync/resume` re-enables processing.
+**`GET /api/v1/sync/queue/stream`** — Server-Sent Events stream. Emits a `SyncSummary` snapshot on connect and on every queue mutation. Tests verify the `200` status + `text/event-stream` content type, that the first chunk parses as valid JSON with the expected fields (`pending_items`, `processing_active`, `scanning`, `revision`), and that mutating endpoints (e.g. `POST /sync/pause`) cause the bus to broadcast an updated summary.
+
+**Pause and resume:** `POST /api/v1/sync/pause` sets `queue_paused: true`. `POST /api/v1/sync/resume` re-enables processing. Both publish an updated snapshot to SSE subscribers.
 
 **Manual action resolution:** Items in `user_action_required` status are not automatically processed. `POST /api/v1/sync/queue/{id}/resolve` with `{ "resolution": "keep_master" }` or `"keep_mirror"` marks the item resolved and returns the updated item.
 

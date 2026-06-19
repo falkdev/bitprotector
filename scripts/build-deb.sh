@@ -94,6 +94,10 @@ if [[ -e "${OUTPUT_DIR}" && ! -d "${OUTPUT_DIR}" ]]; then
 fi
 mkdir -p "${OUTPUT_DIR}"
 
+# Remove older package artifacts so downstream glob consumers install the
+# package built by this invocation instead of an arbitrary earlier match.
+find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'bitprotector_*.deb' -delete
+
 docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \
@@ -106,4 +110,4 @@ docker run --rm \
     bash -c "cd /workspace/frontend && npm ci && npm run build && cd /workspace && cargo deb --deb-version \"\${DEB_VERSION}\" --output target/debian/ubuntu-${UBUNTU_VERSION}/"
 
 echo "build-deb: OK"
-echo "  .deb: $(ls -1 "${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}/bitprotector_"*.deb | head -1)"
+echo "  .deb: $(ls -1 "${PROJECT_ROOT}/target/debian/ubuntu-${UBUNTU_VERSION}"/bitprotector_*.deb | head -1)"

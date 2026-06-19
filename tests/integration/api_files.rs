@@ -871,14 +871,26 @@ async fn test_files_track_pre_existing_matching_mirror() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let process_resp = test::call_service(&app, process_req).await;
-    assert_eq!(process_resp.status(), 200);
+    assert_eq!(process_resp.status(), 202);
+
+    // Processing is async — wait up to 2 s for the background worker to finish.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let queue_after = loop {
+        let item = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+        if item.status == "completed" || item.status == "failed" {
+            break item;
+        }
+        if std::time::Instant::now() >= deadline {
+            break item;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
 
     let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
     assert!(
         tracked_after.is_mirrored,
         "adopt_mirror should mark matching standby as mirrored"
     );
-    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
     assert_eq!(queue_after.status, "completed");
     assert_eq!(
         fs::read(secondary.path().join("match.txt")).unwrap(),
@@ -923,14 +935,26 @@ async fn test_files_track_pre_existing_stale_mirror() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let process_resp = test::call_service(&app, process_req).await;
-    assert_eq!(process_resp.status(), 200);
+    assert_eq!(process_resp.status(), 202);
+
+    // Processing is async — wait up to 2 s for the background worker to finish.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let queue_after = loop {
+        let item = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+        if item.status == "completed" || item.status == "failed" {
+            break item;
+        }
+        if std::time::Instant::now() >= deadline {
+            break item;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
 
     let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
     assert!(
         tracked_after.is_mirrored,
         "adopt_mirror should mark stale standby as mirrored after copy"
     );
-    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
     assert_eq!(queue_after.status, "completed");
     assert_eq!(
         fs::read(secondary.path().join("stale.txt")).unwrap(),

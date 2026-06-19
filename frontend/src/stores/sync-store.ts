@@ -1,44 +1,51 @@
 import { create } from 'zustand'
 import { syncApi } from '@/api/sync'
-import type { SyncQueueItem, SyncStatus } from '@/types/sync'
+import type { SyncQueueItem, SyncStatus, SyncSummary } from '@/types/sync'
 
 interface SyncStore {
+  /** Live summary pushed via the SSE stream. */
+  summary: SyncSummary | null
   items: SyncQueueItem[]
-  queuePaused: boolean
-  activeItems: number
-  inProgressItems: number
-  pendingItems: number
-  completedItems: number
-  failedItems: number
   loading: boolean
   error: string | null
   filter: SyncStatus | 'all'
   page: number
   perPage: number
-  total: number
+  /**
+   * Total count of items for the *current filter* from the last REST fetch.
+   * Used for pagination. Not the same as `summary.total` (which is always
+   * the unfiltered total).
+   */
+  filteredTotal: number
 
-  fetch(): Promise<void>
+  /** Update the summary received from the SSE stream. */
+  setSummary(summary: SyncSummary): void
+  /** Fetch the filtered item list; drops stale responses. */
+  fetchItems(): Promise<void>
   setFilter(filter: SyncStatus | 'all'): Promise<void>
   setPage(page: number): Promise<void>
   refreshItem(item: SyncQueueItem): void
 }
 
+/** Monotonically increasing request counter used to drop stale responses. */
+let fetchSeq = 0
+
 export const useSyncStore = create<SyncStore>((set, get) => ({
+  summary: null,
   items: [],
-  queuePaused: false,
-  activeItems: 0,
-  pendingItems: 0,
-  inProgressItems: 0,
-  completedItems: 0,
-  failedItems: 0,
   loading: false,
   error: null,
   filter: 'all',
   page: 1,
   perPage: 50,
-  total: 0,
+  filteredTotal: 0,
 
-  async fetch() {
+  setSummary(summary) {
+    set({ summary })
+  },
+
+  async fetchItems() {
+    const seq = ++fetchSeq
     set({ loading: true, error: null })
     try {
       const { filter, page, perPage } = get()
@@ -47,32 +54,29 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
         page,
         perPage,
       })
+      // Drop stale response if a newer fetch completed first.
+      if (seq !== fetchSeq) return
       set({
         items: response.queue,
-        total: response.total,
+        filteredTotal: response.total,
         page: response.page,
         perPage: response.per_page,
-        queuePaused: response.queue_paused,
-        activeItems: response.active_items,
-        pendingItems: response.pending_items,
-        inProgressItems: response.in_progress_items,
-        completedItems: response.completed_items,
-        failedItems: response.failed_items,
         loading: false,
       })
     } catch (err) {
+      if (seq !== fetchSeq) return
       set({ loading: false, error: String(err) })
     }
   },
 
   async setFilter(filter) {
     set({ filter, page: 1 })
-    await get().fetch()
+    await get().fetchItems()
   },
 
   async setPage(page) {
     set({ page })
-    await get().fetch()
+    await get().fetchItems()
   },
 
   refreshItem(item) {

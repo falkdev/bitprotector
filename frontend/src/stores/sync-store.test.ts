@@ -21,16 +21,14 @@ function makeSyncItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
 
 function resetStore() {
   useSyncStore.setState({
+    summary: null,
     items: [],
-    queuePaused: false,
-    activeItems: 0,
-    inProgressItems: 0,
     loading: false,
     error: null,
     filter: 'all',
     page: 1,
     perPage: 50,
-    total: 0,
+    filteredTotal: 0,
   })
 }
 
@@ -39,7 +37,7 @@ describe('sync-store', () => {
     resetStore()
   })
 
-  it('fetch sets items and queuePaused on success', async () => {
+  it('fetchItems sets items and filteredTotal on success', async () => {
     const item = makeSyncItem()
     server.use(
       api.get('/sync/queue', () =>
@@ -48,34 +46,34 @@ describe('sync-store', () => {
           total: 1,
           page: 1,
           per_page: 50,
-          queue_paused: true,
+          queue_paused: false,
           active_items: 1,
           in_progress_items: 0,
+          pending_items: 1,
+          completed_items: 0,
+          failed_items: 0,
         })
       )
     )
 
-    await useSyncStore.getState().fetch()
+    await useSyncStore.getState().fetchItems()
 
     expect(useSyncStore.getState().items).toEqual([item])
-    expect(useSyncStore.getState().queuePaused).toBe(true)
-    expect(useSyncStore.getState().activeItems).toBe(1)
-    expect(useSyncStore.getState().inProgressItems).toBe(0)
-    expect(useSyncStore.getState().total).toBe(1)
+    expect(useSyncStore.getState().filteredTotal).toBe(1)
     expect(useSyncStore.getState().loading).toBe(false)
     expect(useSyncStore.getState().error).toBeNull()
   })
 
-  it('fetch sets error on failure', async () => {
+  it('fetchItems sets error on failure', async () => {
     server.use(api.get('/sync/queue', () => HttpResponse.json({ error: 'fail' }, { status: 500 })))
 
-    await useSyncStore.getState().fetch()
+    await useSyncStore.getState().fetchItems()
 
     expect(useSyncStore.getState().error).toBeTruthy()
     expect(useSyncStore.getState().loading).toBe(false)
   })
 
-  it('setFilter updates filter', async () => {
+  it('setFilter updates filter and resets to page 1', async () => {
     server.use(
       api.get('/sync/queue', () =>
         HttpResponse.json({
@@ -86,12 +84,16 @@ describe('sync-store', () => {
           queue_paused: false,
           active_items: 0,
           in_progress_items: 0,
+          pending_items: 0,
+          completed_items: 0,
+          failed_items: 0,
         })
       )
     )
 
     await useSyncStore.getState().setFilter('completed')
     expect(useSyncStore.getState().filter).toBe('completed')
+    expect(useSyncStore.getState().page).toBe(1)
   })
 
   it('setPage updates page', async () => {
@@ -105,6 +107,9 @@ describe('sync-store', () => {
           queue_paused: false,
           active_items: 0,
           in_progress_items: 0,
+          pending_items: 0,
+          completed_items: 0,
+          failed_items: 0,
         })
       )
     )

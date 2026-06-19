@@ -173,6 +173,41 @@ printf '%s' '${json_body_b64}' | base64 -d \
     return 1
 }
 
+# Poll the queue summary API until the queue has reached the expected counts.
+# Usage: wait_for_queue_counts TOKEN EXPECTED_COMPLETED MAX_PENDING_OR_IN_PROGRESS TIMEOUT_SECS [STATUS_QUERY]
+wait_for_queue_counts() {
+    local token="$1"
+    local expected_completed="$2"
+    local max_active="$3"
+    local timeout_secs="$4"
+    local status_query="${5:-}"
+    local path="/sync/queue?page=1&per_page=20"
+    local response completed pending in_progress i
+
+    if [[ -n "${status_query}" ]]; then
+        path+="&status=${status_query}"
+    fi
+
+    for i in $(seq 1 "${timeout_secs}"); do
+        response="$(api_json GET "${path}" "${token}")" || return 1
+        completed="$(printf '%s' "${response}" | jq -r '.completed_items // 0')"
+        pending="$(printf '%s' "${response}" | jq -r '.pending_items // 0')"
+        in_progress="$(printf '%s' "${response}" | jq -r '.in_progress_items // 0')"
+
+        if [[ "${completed}" -ge "${expected_completed}" ]] \
+            && [[ $((pending + in_progress)) -le "${max_active}" ]]; then
+            return 0
+        fi
+
+        sleep 1
+    done
+
+    log ERROR "queue did not reach completed>=${expected_completed} with active<=${max_active} after ${timeout_secs}s"
+    echo "Last queue summary:" >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+}
+
 # Poll a guest-side shell condition once per second until it succeeds.
 # Usage: poll_until "description" TIMEOUT_SECONDS "guest shell condition"
 poll_until() {

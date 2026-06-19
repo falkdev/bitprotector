@@ -85,14 +85,16 @@ printf 'new content smoke17' > '${primary}/new.txt'
     fi
 
     # ------------------------------------------- process the sync queue
-    local process_resp processed
+    local process_resp process_status
     process_resp="$(api_json POST "/sync/process" "${token}")"
-    processed="$(printf '%s' "${process_resp}" | jq -r '.processed // 0')"
-    if [[ "${processed}" -lt 3 ]]; then
-        echo "smoke-17 expected ≥3 items processed, got ${processed}" >&2
+    process_status="$(printf '%s' "${process_resp}" | jq -r '.status // empty')"
+    if [[ "${process_status}" != "started" ]]; then
+        echo "smoke-17 expected sync/process status=started, got ${process_status:-<empty>}" >&2
         printf '%s\n' "${process_resp}" >&2
         exit 1
     fi
+
+    wait_for_queue_counts "${token}" 3 0 30
 
     # ----------------------------------------- verify (a): matching standby
     # The standby file must be unchanged (no copy was needed).

@@ -1,9 +1,122 @@
 use crate::core::{drive, integrity, mirror};
 use crate::db::repository::{Repository, SyncQueueItem, TrackedFile};
 use crate::logging::event_logger;
+use serde::Serialize;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
+
+/// Summary of the sync queue state, broadcast over the `SyncEventBus`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSummary {
+    pub total: i64,
+    pub active_items: i64,
+    pub pending_items: i64,
+    pub in_progress_items: i64,
+    pub completed_items: i64,
+    pub failed_items: i64,
+    pub queue_paused: bool,
+    pub processing_active: bool,
+    /// True when at least one tracked folder is currently being scanned.
+    pub scanning: bool,
+    pub scan_total_files: i64,
+    pub scan_scanned_files: i64,
+    pub scan_active_folders: i64,
+    /// Monotonically increasing counter; incremented on every publish.
+    pub revision: u64,
+}
+
+/// A broadcast bus that pushes [`SyncSummary`] snapshots to all SSE subscribers.
+///
+/// `SyncEventBus` is cheap to clone — all clones share the same underlying
+/// broadcast channel, `processing_active` flag, and revision counter.
+#[derive(Clone)]
+pub struct SyncEventBus {
+    tx: tokio::sync::broadcast::Sender<SyncSummary>,
+    pub processing_active: Arc<AtomicBool>,
+    revision: Arc<AtomicU64>,
+}
+
+impl SyncEventBus {
+    /// Create a new bus with a channel capacity of 64 events.
+    pub fn new() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(64);
+        Self {
+            tx,
+            processing_active: Arc::new(AtomicBool::new(false)),
+            revision: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Subscribe to future events.  Late subscribers will miss earlier events.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SyncSummary> {
+        self.tx.subscribe()
+    }
+
+    /// Build a current snapshot from repository state (increments the revision).
+    pub fn snapshot(&self, repo: &Repository) -> SyncSummary {
+        let counts = repo.count_sync_queue_by_status().unwrap_or_default();
+        let active = repo.count_active_sync_queue().unwrap_or(0);
+        let in_progress = repo.count_in_progress_sync_queue().unwrap_or(0);
+        let paused = repo.get_sync_queue_paused().unwrap_or(false);
+        let folders = repo.list_tracked_folders().unwrap_or_default();
+
+        let pending = *counts.get("pending").unwrap_or(&0);
+        let completed = *counts.get("completed").unwrap_or(&0);
+        let failed = *counts.get("failed").unwrap_or(&0);
+
+        let scanning_total_files: i64 = folders
+            .iter()
+            .filter(|f| f.scanning)
+            .map(|f| f.scan_total_files)
+            .sum();
+        let scanning_scanned_files: i64 = folders
+            .iter()
+            .filter(|f| f.scanning)
+            .map(|f| f.scan_scanned_files.min(f.scan_total_files))
+            .sum();
+        let scan_active_folders = folders.iter().filter(|f| f.scanning).count() as i64;
+
+        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+
+        SyncSummary {
+            total: active + completed + failed,
+            active_items: active,
+            pending_items: pending,
+            in_progress_items: in_progress,
+            completed_items: completed,
+            failed_items: failed,
+            queue_paused: paused,
+            processing_active: self.processing_active.load(Ordering::SeqCst),
+            scanning: scan_active_folders > 0,
+            scan_total_files: scanning_total_files,
+            scan_scanned_files: scanning_scanned_files,
+            scan_active_folders,
+            revision,
+        }
+    }
+
+    /// Build a snapshot and broadcast it to all current subscribers.
+    /// If there are no subscribers the send is silently discarded.
+    pub fn publish_snapshot(&self, repo: &Repository) {
+        let summary = self.snapshot(repo);
+        let _ = self.tx.send(summary);
+    }
+}
+
+impl Default for SyncEventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Process a single pending sync queue item.
-pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<()> {
+pub fn process_item(
+    repo: &Repository,
+    item: &SyncQueueItem,
+    bus: Option<&SyncEventBus>,
+) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(item.tracked_file_id)?;
     let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
     if pair.is_quiescing() {
@@ -16,6 +129,9 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
     }
 
     repo.update_sync_queue_status(item.id, "in_progress", None)?;
+    if let Some(b) = bus {
+        b.publish_snapshot(repo);
+    }
 
     let result = match item.action.as_str() {
         "mirror" => mirror::mirror_file(&pair, &file.relative_path).map(|_| ()),
@@ -60,6 +176,9 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
     match result {
         Ok(()) => {
             repo.update_sync_queue_status(item.id, "completed", None)?;
+            if let Some(b) = bus {
+                b.publish_snapshot(repo);
+            }
             if matches!(
                 item.action.as_str(),
                 "mirror" | "adopt_mirror" | "restore_master" | "restore_mirror"
@@ -76,6 +195,9 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
         Err(e) => {
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?;
+            if let Some(b) = bus {
+                b.publish_snapshot(repo);
+            }
             let _ = event_logger::log_sync_failed(
                 repo,
                 file.id,
@@ -95,9 +217,12 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 ///   stops early; remaining items stay `pending` for the next run.
 /// - If the queue is globally paused (see `repo.set_sync_queue_paused`),
 ///   processing stops immediately and pending items are left untouched.
+/// - If `bus` is `Some`, a summary snapshot is published after every item
+///   status transition so SSE subscribers receive live progress.
 pub fn process_all_pending(
     repo: &Repository,
     stop_by: Option<std::time::Instant>,
+    bus: Option<&SyncEventBus>,
 ) -> anyhow::Result<u32> {
     repo.requeue_in_progress_sync_queue()?;
     let page_size: i64 = 1000;
@@ -124,7 +249,7 @@ pub fn process_all_pending(
                     return Ok(processed);
                 }
             }
-            if let Err(e) = process_item(repo, item) {
+            if let Err(e) = process_item(repo, item, bus) {
                 tracing::error!("Error processing sync queue item {}: {}", item.id, e);
             }
             processed += 1;
@@ -139,9 +264,33 @@ pub fn process_all_pending(
     Ok(processed)
 }
 
-/// Resolve a `user_action_required` sync queue item.
+/// Start an asynchronous background worker that calls [`process_all_pending`].
 ///
-/// `resolution` must be one of:
+/// Returns immediately (the background thread does the work).  A second call
+/// while the worker is still running is a no-op — only one worker runs at a
+/// time.  The `bus.processing_active` flag is set to `true` for the duration
+/// of the run and cleared when it completes.
+pub fn process_all_pending_async(repo: &Repository, bus: SyncEventBus) {
+    // Idempotent: refuse to start a second concurrent run.
+    if bus
+        .processing_active
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let repo_clone = repo.clone();
+    let bus_clone = bus.clone();
+    std::thread::spawn(move || {
+        bus_clone.publish_snapshot(&repo_clone);
+        let _ = process_all_pending(&repo_clone, None, Some(&bus_clone));
+        bus_clone.processing_active.store(false, Ordering::SeqCst);
+        bus_clone.publish_snapshot(&repo_clone);
+    });
+}
+
+/// Resolve a `user_action_required` sync queue item.
 /// - `"keep_master"` — overwrite mirror with master copy
 /// - `"keep_mirror"` — overwrite master with mirror copy
 /// - `"provide_new"` — replace both copies with the file at `new_file_path`
@@ -322,7 +471,7 @@ mod tests {
             .unwrap();
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        process_item(&repo, &item).unwrap();
+        process_item(&repo, &item, None).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -356,7 +505,7 @@ mod tests {
         repo.update_sync_queue_status(item.id, "in_progress", None)
             .unwrap();
 
-        let processed = process_all_pending(&repo, None).unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
 
         assert_eq!(processed, 1);
         let updated = repo.get_sync_queue_item(item.id).unwrap();
@@ -385,7 +534,7 @@ mod tests {
 
         for action in &["mirror", "restore_master", "restore_mirror", "verify"] {
             let item = repo.create_sync_queue_item(file.id, action).unwrap();
-            process_item(&repo, &item).unwrap();
+            process_item(&repo, &item, None).unwrap();
             let updated = repo.get_sync_queue_item(item.id).unwrap();
             assert_eq!(
                 updated.status, "completed",
@@ -511,7 +660,7 @@ mod tests {
         let item = create_from_integrity_failure(&repo, &file, &result)
             .unwrap()
             .unwrap();
-        process_item(&repo, &item).unwrap();
+        process_item(&repo, &item, None).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -547,7 +696,7 @@ mod tests {
             repo.create_sync_queue_item(file.id, "mirror").unwrap();
         }
 
-        let processed = process_all_pending(&repo, None).unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
         assert_eq!(processed as usize, n, "All {n} items should be processed");
 
         // Every mirror file must exist on the secondary side.
@@ -586,13 +735,13 @@ mod tests {
 
         // Pause the queue before processing
         repo.set_sync_queue_paused(true).unwrap();
-        let processed = process_all_pending(&repo, None).unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
 
         assert_eq!(processed, 0, "No items should be processed while paused");
 
         // Resume and process
         repo.set_sync_queue_paused(false).unwrap();
-        let processed = process_all_pending(&repo, None).unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
         assert_eq!(processed, 2, "Both items should be processed after resume");
     }
 
@@ -624,7 +773,7 @@ mod tests {
 
         // Deadline already in the past — nothing should be processed
         let past = Instant::now() - Duration::from_secs(1);
-        let processed = process_all_pending(&repo, Some(past)).unwrap();
+        let processed = process_all_pending(&repo, Some(past), None).unwrap();
         assert_eq!(processed, 0, "Expired deadline should prevent processing");
     }
 
@@ -650,7 +799,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item).unwrap();
+        process_item(&repo, &item, None).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -686,7 +835,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item).unwrap();
+        process_item(&repo, &item, None).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -720,7 +869,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item).unwrap();
+        process_item(&repo, &item, None).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -731,5 +880,122 @@ mod tests {
             "Secondary file should now exist"
         );
         assert_eq!(fs::read(secondary.path().join("f.txt")).unwrap(), content);
+    }
+
+    // ── SyncEventBus tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_sync_event_bus_snapshot_includes_counts_and_revision() {
+        let (primary, secondary, repo) = setup();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "ev.txt", "h", 1, None)
+            .unwrap();
+        let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        repo.update_sync_queue_status(item.id, "completed", None)
+            .unwrap();
+
+        let bus = SyncEventBus::new();
+        let s1 = bus.snapshot(&repo);
+        assert_eq!(s1.completed_items, 1);
+        assert_eq!(s1.revision, 1);
+
+        let s2 = bus.snapshot(&repo);
+        assert_eq!(s2.revision, 2, "revision increments on each snapshot");
+    }
+
+    #[test]
+    fn test_sync_event_bus_publish_reaches_subscriber() {
+        let (primary, secondary, repo) = setup();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "sub.txt", "h", 1, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        let bus = SyncEventBus::new();
+        let mut rx = bus.subscribe();
+        bus.publish_snapshot(&repo);
+
+        let summary = rx.try_recv().expect("should have received a summary");
+        assert_eq!(summary.pending_items, 1);
+        assert!(!summary.processing_active);
+    }
+
+    #[test]
+    fn test_process_item_with_bus_broadcasts_status_transitions() {
+        let (primary, secondary, repo) = setup();
+        let content = b"bus test";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("btest.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "btest.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        let bus = SyncEventBus::new();
+        let mut rx = bus.subscribe();
+
+        process_item(&repo, &item, Some(&bus)).unwrap();
+
+        // Two events expected: in_progress and completed
+        let ev1 = rx.try_recv().expect("in_progress event");
+        let ev2 = rx.try_recv().expect("completed event");
+        assert!(ev2.revision > ev1.revision, "revision must increase");
+        assert_eq!(ev2.in_progress_items, 0);
+        assert_eq!(ev2.completed_items, 1);
+    }
+
+    #[test]
+    fn test_process_all_pending_async_is_idempotent() {
+        let (primary, secondary, repo) = setup();
+        // Create items that would take time to process
+        let content = b"async idempotent";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("ai.txt"), content).unwrap();
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "ai.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        let bus = SyncEventBus::new();
+        // Manually set processing_active to simulate a concurrent run.
+        bus.processing_active
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // Second call should be a no-op (doesn't panic, doesn't spawn).
+        process_all_pending_async(&repo, bus.clone());
+        // Still true — idempotent call didn't clear the flag.
+        assert!(
+            bus.processing_active
+                .load(std::sync::atomic::Ordering::SeqCst),
+            "flag must still be set after idempotent call"
+        );
     }
 }

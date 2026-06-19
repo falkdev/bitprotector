@@ -1,8 +1,34 @@
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
+use crate::core::sync_queue::SyncEventBus;
 use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
+
+const SCAN_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
+static LAST_SCAN_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn should_publish_scan_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
+    match last_published_at {
+        None => true,
+        Some(last) => now.saturating_duration_since(last) >= SCAN_PROGRESS_PUBLISH_INTERVAL,
+    }
+}
+
+fn try_publish_scan_progress(bus: &SyncEventBus, repo: &Repository) {
+    let now = Instant::now();
+    let mut last = LAST_SCAN_PROGRESS_PUBLISH_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if should_publish_scan_progress(*last, now) {
+        bus.publish_snapshot(repo);
+        *last = Some(now);
+    }
+}
 
 #[derive(Deserialize)]
 pub struct AddFolderRequest {
@@ -158,7 +184,11 @@ async fn update_folder(
 }
 
 /// POST /folders/{id}/scan
-async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
+async fn scan_folder(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+    path: web::Path<i64>,
+) -> HttpResponse {
     let folder_id = path.into_inner();
     let folder = match repo.get_tracked_folder(folder_id) {
         Ok(f) => f,
@@ -180,13 +210,18 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
+    bus.publish_snapshot(&repo);
+
     let repo_clone = repo.get_ref().clone();
+    let bus_clone = bus.get_ref().clone();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
             let folder = repo_clone.get_tracked_folder(folder_id)?;
             let pair = drive::load_operational_pair(&repo_clone, folder.drive_pair_id)?;
             tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned| {
-                repo_clone.update_scan_progress(folder_id, scanned)
+                repo_clone.update_scan_progress(folder_id, scanned)?;
+                try_publish_scan_progress(&bus_clone, &repo_clone);
+                Ok(())
             })?;
             Ok(())
         })();
@@ -196,6 +231,7 @@ async fn scan_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpR
         }
 
         let _ = repo_clone.finish_folder_scan(folder_id);
+        bus_clone.publish_snapshot(&repo_clone);
     });
 
     HttpResponse::Accepted().json(ScanActiveResponse::from(&status))
@@ -296,4 +332,28 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}/scan/active", web::get().to(scan_folder_active))
             .route("/{id}/scan", web::post().to(scan_folder)),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_publish_scan_progress_after_interval() {
+        let base = Instant::now();
+        let later = base + SCAN_PROGRESS_PUBLISH_INTERVAL;
+        assert!(should_publish_scan_progress(Some(base), later));
+    }
+
+    #[test]
+    fn test_should_not_publish_scan_progress_before_interval() {
+        let base = Instant::now();
+        let earlier = base + Duration::from_millis(500);
+        assert!(!should_publish_scan_progress(Some(base), earlier));
+    }
+
+    #[test]
+    fn test_should_publish_scan_progress_when_never_published() {
+        assert!(should_publish_scan_progress(None, Instant::now()));
+    }
 }

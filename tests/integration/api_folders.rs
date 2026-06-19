@@ -366,6 +366,69 @@ async fn test_folders_scan() {
 }
 
 #[actix_rt::test]
+async fn test_folders_scan_publishes_sync_summary_updates() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    let sub = primary.path().join("scandir");
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("a.txt"), b"scan content").unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "sp-bus",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo
+        .create_tracked_folder(pair.id, "scandir", None)
+        .unwrap();
+    let (app, bus) = make_app_and_bus!(repo.clone());
+    let mut receiver = bus.subscribe();
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/v1/folders/{}/scan", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    let started = actix_rt::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(summary) = receiver.recv().await {
+                if summary.scanning {
+                    break summary;
+                }
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for scan start snapshot");
+
+    assert_eq!(started.scan_active_folders, 1);
+    assert_eq!(started.scan_scanned_files, 0);
+
+    let finished = actix_rt::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(summary) = receiver.recv().await {
+                if !summary.scanning {
+                    break summary;
+                }
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for scan completion snapshot");
+
+    assert_eq!(finished.scan_active_folders, 0);
+    assert_eq!(finished.scanning, false);
+
+    let updated_folder = repo.get_tracked_folder(folder.id).unwrap();
+    assert!(!updated_folder.scanning);
+}
+
+#[actix_rt::test]
 async fn test_folders_mirror_endpoint_processes_unmirrored_files_under_folder() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();

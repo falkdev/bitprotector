@@ -369,6 +369,35 @@ When a schedule has `max_duration_seconds` configured, the scheduler thread comp
 
 The `sync_settings` database table holds a single-row `queue_paused` flag (integer 0/1, default 0). When the queue is paused, `process_all_pending` returns immediately after checking the flag — no items are dequeued and the queue state is unchanged. This check is per-item, so an in-flight item already being processed is not interrupted. The flag is toggled via `POST /sync/pause` and `POST /sync/resume` (API) or `bitprotector sync pause` / `bitprotector sync resume` (CLI).
 
+### Realtime sync queue via SSE
+
+The frontend receives live queue state over a Server-Sent Events stream rather than polling the REST endpoint repeatedly.
+
+**Backend (`SyncEventBus`, `src/core/sync_queue.rs`)**
+
+A `SyncEventBus` is created at server startup (in `run_server`) and registered as `actix_web::web::Data`. It wraps a `tokio::sync::broadcast::Sender<SyncSummary>` plus two atomics:
+
+- `processing_active: Arc<AtomicBool>` — `true` while a background worker is running.
+- `revision: Arc<AtomicU64>` — monotonically increasing counter incremented on every publish.
+
+`SyncSummary` carries queue counts (total, pending, in_progress, completed, failed, active), pause state, processing state, and aggregated folder-scan progress (scanning, scan_total_files, scan_scanned_files, scan_active_folders). Folding scan progress into the queue summary eliminates the separate `/folders` poll.
+
+Every mutating route handler (`add_queue_item`, `resolve_queue_item`, `clear_completed_queue`, `pause_queue`, `resume_queue`) calls `bus.publish_snapshot(&repo)` after its DB mutation. `process_item` inside `process_all_pending` calls `publish_snapshot` twice per item (once when marking `in_progress`, once when marking `completed`/`failed`), giving granular progress updates.
+
+**`GET /sync/queue/stream`** builds an SSE response: an initial `once` stream (the current snapshot) chained with an `unfold` stream (new broadcast receiver, blocking on `recv` until the next event), serialised as `data: <json>\n\n` lines.
+
+**`POST /sync/process`** now returns `202 Accepted` immediately and calls `process_all_pending_async`. An `AtomicBool` idempotency guard ensures only one background worker runs at a time; further calls while a worker is active are safe no-ops.
+
+**Frontend**
+
+`frontend/src/api/sync-stream.ts` opens the SSE stream with a native `fetch` call (Bearer token in header). It reads the response body as a `ReadableStream`, splits lines on `\n`, parses `data:` lines as `SyncSummary` JSON, and calls the provided `onSummary` callback. Automatic reconnect with exponential back-off (1 s → 2 s → … → 30 s) is built in. A `401` response triggers logout.
+
+`frontend/src/stores/sync-store.ts` holds `summary: SyncSummary | null` as the live source of truth for all queue counts, paused state, processing state, and scan state. When `summary.revision` changes, the store issues one `fetchItems` call (with stale-response guard) to refresh the item list for the current filter/page. Counts displayed in tab labels and indicators are always derived from `summary`, so they update as soon as the SSE event arrives.
+
+`frontend/src/pages/SyncQueuePage.tsx` starts the SSE stream on mount (`useEffect` → `openSyncStream`) and stops it on unmount. While `summary.scanning` is true, interactive queue controls are disabled (`Process Queue`, `Pause/Resume Queue`, filter tabs, and `Next`) and re-enable immediately when scanning becomes false. The "Processing…" button label and indicator are driven by `summary.processing_active`. The "Updating… N / M files" indicator is driven by `summary.scanning`.
+
+
+
 ### Integrity run file ordering
 
 `integrity_runs.rs` always retrieves tracked files ordered by `last_integrity_check_at ASC NULLS FIRST`. Files that have never been checked are prioritised, followed by files checked longest ago. This ensures every file receives periodic coverage even when runs are cut short by a `max_duration_seconds` deadline or a cooperative stop request.

@@ -56,10 +56,14 @@ function resetStores() {
     error: null,
   })
   useSyncStore.setState({
+    summary: null,
     items: [],
     loading: false,
     error: null,
     filter: 'all',
+    page: 1,
+    perPage: 50,
+    filteredTotal: 0,
   })
   useThemeStore.setState({ override: null })
   document.documentElement.classList.remove('dark')

@@ -106,9 +106,9 @@ async fn test_integrity_check_with_recovery_reconciles_mirror_queue_and_logs_fix
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    let processed: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(processed["processed"], 0);
+    assert_eq!(resp.status(), 202);
+    let started: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(started["status"], "started");
 
     let (logs, _) = repo
         .list_event_logs(None, Some(file.id), None, None, 1, 50)

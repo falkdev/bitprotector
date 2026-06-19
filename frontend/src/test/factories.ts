@@ -17,7 +17,7 @@ import type {
 import type { EventLogEntry } from '@/types/log'
 import type { ScheduleConfig } from '@/types/scheduler'
 import type { SystemStatus } from '@/types/status'
-import type { SyncQueueItem } from '@/types/sync'
+import type { SyncQueueItem, SyncSummary } from '@/types/sync'
 import type { TrackingItem, TrackingListResponse } from '@/types/tracking'
 
 const DEFAULT_DATE = '2026-01-01T00:00:00Z'
@@ -242,6 +242,25 @@ export function makeSyncQueueItem(overrides: Partial<SyncQueueItem> = {}): SyncQ
     error_message: null,
     created_at: DEFAULT_DATE,
     completed_at: null,
+    ...overrides,
+  }
+}
+
+export function makeSyncSummary(overrides: Partial<SyncSummary> = {}): SyncSummary {
+  return {
+    total: 0,
+    active_items: 0,
+    pending_items: 0,
+    in_progress_items: 0,
+    completed_items: 0,
+    failed_items: 0,
+    queue_paused: false,
+    processing_active: false,
+    scanning: false,
+    scan_total_files: 0,
+    scan_scanned_files: 0,
+    scan_active_folders: 0,
+    revision: 0,
     ...overrides,
   }
 }

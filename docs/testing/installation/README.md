@@ -109,6 +109,7 @@ Provides helpers used inside scenario scripts:
 - **`verify_sqlite`**: Runs SQLite `PRAGMA integrity_check` against a guest database path through Python's sqlite3 module. Used by backup-repair and upgrade scenarios to assert DB file integrity before and after disruptive operations.
 - **`api_login`**: Logs in through the API and returns a bearer token. Retries for up to 60 seconds to accommodate service startup races.
 - **`api_json`**: Generic API call wrapper. Takes a method, path, token, and optional JSON body. Returns the response body on success (2xx) and exits non-zero on HTTP error, with retries for transient connectivity failures.
+- **`wait_for_queue_counts`**: Polls `GET /sync/queue` until the queue summary reaches expected completed and active-item counts. The smoke adoption scenario uses this after `POST /sync/process` because queue processing now starts asynchronously and returns `{"status":"started"}` before background work finishes.
 - **`assert_no_journal_errors`**: Queries `journalctl` for error-level entries from the bitprotector unit since a given timestamp and fails if any unexpected entries are found.
 - **`expect_journal_error`**: Registers a pattern as an expected error, suppressing it from the `assert_no_journal_errors` check. Used by resilience scenarios that deliberately trigger errors.
 - **`journal_error_scraper`**: Final-scenario wrapper that calls `assert_no_journal_errors` using the bundle's `BUNDLE_START_TIME`. Run as the last scenario in every bundle.

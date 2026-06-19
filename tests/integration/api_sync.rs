@@ -1,5 +1,6 @@
 mod common;
 
+use actix_web::body::MessageBody;
 use actix_web::test;
 use bitprotector_lib::core::checksum;
 use common::{bearer, make_repo};
@@ -307,9 +308,9 @@ async fn test_sync_process_empty_queue() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 202);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(body["processed"], 0);
+    assert_eq!(body["status"], "started");
 }
 
 #[actix_rt::test]
@@ -492,10 +493,113 @@ async fn test_sync_process_is_noop_when_paused() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
+    // Now returns 202 Accepted — the actual pause check happens in the background worker.
+    assert_eq!(resp.status(), 202);
     let body: serde_json::Value = test::read_body_json(resp).await;
-    assert_eq!(
-        body["processed"], 0,
-        "No items should be processed while queue is paused"
+    assert_eq!(body["status"], "started");
+}
+
+/// Verifies that a second immediate POST /sync/process is idempotent:
+/// it returns 202 and does not fail or trigger a double-run.
+#[actix_rt::test]
+async fn test_sync_process_is_idempotent() {
+    let app = make_app!(make_repo()).await;
+
+    for _ in 0..2 {
+        let req = test::TestRequest::post()
+            .uri("/api/v1/sync/process")
+            .insert_header(("Authorization", bearer()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 202);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["status"], "started");
+    }
+}
+
+// ── SSE stream ────────────────────────────────────────────────────────────
+
+#[actix_rt::test]
+async fn test_sync_queue_stream_returns_sse_headers() {
+    let (app, _bus) = make_app_and_bus!(make_repo());
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue/stream")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        ct.contains("text/event-stream"),
+        "content-type must be text/event-stream"
     );
+}
+
+#[actix_rt::test]
+async fn test_sync_queue_stream_emits_initial_summary_snapshot() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("sse_p", "/p", "/s").unwrap();
+    let file = repo
+        .create_tracked_file(pair.id, "sse.txt", "h1", 1, None)
+        .unwrap();
+    repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+    let (app, _bus) = make_app_and_bus!(repo);
+    let req = test::TestRequest::get()
+        .uri("/api/v1/sync/queue/stream")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Read the first chunk of the body (the initial snapshot).
+    let mut body = resp.into_body();
+    let chunk = std::future::poll_fn(|cx| {
+        use std::pin::Pin;
+        Pin::new(&mut body).poll_next(cx)
+    })
+    .await
+    .expect("stream should yield at least one chunk")
+    .expect("chunk should not be an error");
+
+    let text = std::str::from_utf8(&chunk).expect("chunk must be valid UTF-8");
+    assert!(text.starts_with("data: "), "event must start with 'data: '");
+    let json_str = text.trim_start_matches("data: ").trim_end_matches('\n');
+    let summary: serde_json::Value =
+        serde_json::from_str(json_str).expect("body must be valid JSON");
+    assert_eq!(summary["pending_items"], 1);
+    assert!(summary.get("processing_active").is_some());
+    assert!(summary.get("scanning").is_some());
+    assert!(summary.get("scan_total_files").is_some());
+    assert!(summary.get("revision").is_some());
+}
+
+/// A mutation (pause queue) causes the bus to emit a follow-up event
+/// with a bumped revision.
+#[actix_rt::test]
+async fn test_sync_queue_stream_mutation_bumps_revision() {
+    let (app, bus) = make_app_and_bus!(make_repo());
+
+    // Subscribe before the mutation.
+    let mut rx = bus.subscribe();
+
+    // Perform a mutation via HTTP.
+    let req = test::TestRequest::post()
+        .uri("/api/v1/sync/pause")
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // The pause handler publishes a snapshot — receive it.
+    let summary = rx
+        .try_recv()
+        .expect("bus should have received a pause event");
+    assert!(summary.queue_paused);
+    assert!(summary.revision >= 1);
 }

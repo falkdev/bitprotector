@@ -89,7 +89,7 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
             );
         }
         SyncCommand::Process => {
-            let count = sync_queue::process_all_pending(repo, None)?;
+            let count = sync_queue::process_all_pending(repo, None, None)?;
             println!("Processed {count} pending sync queue item(s)");
         }
         SyncCommand::Pause => {
@@ -113,6 +113,7 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
                 repo,
                 None,
                 &crate::core::checksum::ChecksumConfig::default(),
+                None,
             )?;
             println!(
                 "Task '{}' completed: {} items processed",

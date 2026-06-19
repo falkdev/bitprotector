@@ -131,39 +131,35 @@ This test is intentionally minimal. The login interaction logic lives in the `us
 
 **File:** `frontend/src/pages/SyncQueuePage.test.tsx`
 
-**Resolve manual action item:** A queue item in `user_action_required` status has a "Resolve" button. Clicking it opens a resolution dialog. Confirming the resolution calls the resolve endpoint with `{ "resolution": "keep_master" }` and a success toast appears. This tests the dialog-to-API wiring for the most sensitive queue operation.
+Tests use a fake `ReadableStream` helper (`makeSseStream`) to mock the `GET /sync/queue/stream` endpoint while MSW handles all REST calls. Each test calls `mockSseStream(...summaries)` which stubs `globalThis.fetch` for the stream URL only, forwarding all other fetch calls to MSW.
 
-**Polling every five seconds:** The queue list refreshes automatically. The test uses fake timers to advance time by 5,000 ms and verifies that the list endpoint has been called more than once, confirming the polling is active.
+**Tab counts from SSE summary:** The five filter tabs (All, Pending, In Progress, Completed, Failed) show counts from `SyncSummary` (the SSE event), not from the REST list response. The "All" tab always equals `summary.total`. Counts remain stable when switching between tabs.
+
+**Processing indicator from SSE:** "Processing queue…" is shown when `summary.processing_active` is `true` and `queue_paused` is `false`. It is absent when `processing_active` is `false` (even with pending items), and suppressed when the queue is paused.
+
+**Scan indicator from SSE:** When `summary.scanning` is `true`, an "Updating… {scanned} / {total} files across {n} folder(s)" spinner appears. It disappears when `scanning` is `false`. Counts are aggregated from `scan_scanned_files`, `scan_total_files`, and `scan_active_folders`.
+
+**Scan-active control lock:** While `summary.scanning` is `true`, queue controls are disabled to avoid conflicting actions during active folder scanning. This includes filter tabs, `Next`, `Pause Queue`, and `Process Queue`. Controls re-enable immediately once scanning becomes false.
+
+**SSE revision triggers item refetch:** When two SSE events carry different `revision` values, the item list is refetched at least twice. When two events carry the same revision, only one refetch is issued (deduplication by revision).
+
+**Paused banner from SSE:** The banner and button labels are driven by `summary.queue_paused`. No REST polling is needed.
+
+**Process Queue toast:** Clicking "Process Queue" calls `POST /sync/process` (which returns `202`) and shows "Processing started". The button label changes to "Processing..." while `processing_active` is true.
+
+**Resolve manual action item:** A queue item in `user_action_required` status has a "Resolve" button. Confirming the resolution calls the resolve endpoint with `{ "resolution": "keep_master" }` and a success toast appears.
 
 **Empty state:** When the queue is empty, the "No queue items" message is rendered.
 
-**Buttons present with queue items:** "Process Queue", "Clear Completed", and "Pause Queue" are all present. "Run Sync Task" and "Run Integrity Task" are absent.
+**Buttons present with queue items:** "Process Queue", "Clear Completed", and "Pause Queue" are all present.
 
 **Disables process queue when no drive pairs:** "Process Queue" is disabled and a hint is shown; "Clear Completed" remains enabled.
 
-**Clear Completed button state:** Disabled when no completed items exist; enabled when at least one completed item exists.
+**Clear Completed button state:** Disabled when `summary.completed_items === 0`; enabled when greater than 0.
 
-**Clear completed removes items:** Clicking "Clear Completed" calls `DELETE /sync/queue/completed`, shows a "Cleared 1 completed queue item(s)" toast, and the completed row disappears while pending rows remain.
+**Clear completed removes items:** Clicking "Clear Completed" calls `DELETE /sync/queue/completed`, shows a toast, and the completed row disappears while pending rows remain.
 
-**Clear completed error:** When the delete endpoint returns 500, a "Failed to clear completed queue items" toast appears and the row is still visible.
-
-**Paused banner:** When `queue_paused: true` is returned, a pause banner is shown and the button label changes to "Resume Queue". Clicking "Resume Queue" calls the resume endpoint and the banner is removed.
-
-**Hidden paused banner:** When `queue_paused: false`, the pause banner is absent and the "Pause Queue" button is visible.
-
-**Pause queue:** Clicking "Pause Queue" calls the pause endpoint and the paused banner appears.
-
-**Resume queue:** Clicking "Resume Queue" calls the resume endpoint and the "Sync queue processing resumed" toast appears, with the banner removed.
-
-**Status tabs with server-reported counts:** The five filter tabs (All, Pending, In Progress, Completed, Failed) display the per-status counts returned by the API. The counts remain stable when switching between tabs because they come from the API response's dedicated count fields, not from the visible page of items.
-
-**Tab counts hidden during scan:** While one or more folders are being scanned, the filter tabs show their labels only (no numeric counts). Counts reappear once scanning finishes.
-
-**Inline scan indicator — single "Updating…" spinner:** When a folder scan is active, a single inline "Updating… {scanned} / {total} files across {n} folder(s)" spinner appears near the filter row. There is no separate yellow banner. The indicator combines totals from all concurrently scanning folders, and the "Showing X of Y" summary is hidden while scanning. Stale out-of-order poll responses are discarded so the counter never regresses.
-
-**Processing queue… indicator:** When `in_progress_items > 0` and the queue is not paused, a "Processing queue…" spinner is shown. It is suppressed when the queue is paused and also when a folder scan is active (scanning takes precedence). Only pending items do not trigger the indicator.
-
-**2 s / 5 s adaptive polling:** The page polls every 2 seconds while `in_progress_items > 0` and reverts to 5-second intervals when idle.
+**Pagination:** Clicking "Next" issues a `GET /sync/queue?page=2` request. The page indicator updates to "Page 2 of 2".
 
 ---
 

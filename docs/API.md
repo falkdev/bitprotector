@@ -1113,15 +1113,56 @@ Delete all sync queue rows with status `completed`.
 
 ---
 
-### POST `/sync/process`
+### GET `/sync/queue/stream`
 
-Process all pending sync queue items immediately (synchronous). If the queue is paused (`queue_paused: true`), this call returns `{ "processed": 0 }` without touching any items.
+Server-Sent Events (SSE) stream. Pushes a live `SyncSummary` snapshot whenever the queue state changes (item added, processed, paused, resumed, etc.) and also when a folder scan makes progress. Clients use this stream instead of polling `/sync/queue` and `/folders` separately.
+
+**Authorization:** `Authorization: Bearer <token>` header (same as all other endpoints).
 
 **Response `200`:**
 
-```json
-{ "processed": 10 }
+`Content-Type: text/event-stream`
+
+Each event is a JSON-serialised `SyncSummary` object on a `data:` line:
+
 ```
+data: {"total":5,"active_items":2,"pending_items":2,"in_progress_items":0,"completed_items":3,"failed_items":0,"queue_paused":false,"processing_active":false,"scanning":false,"scan_total_files":0,"scan_scanned_files":0,"scan_active_folders":0,"revision":7}
+
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `total` | integer | Total queue items (all statuses, unfiltered) |
+| `active_items` | integer | `pending + in_progress` |
+| `pending_items` | integer | Items waiting to be processed |
+| `in_progress_items` | integer | Items currently being processed |
+| `completed_items` | integer | Successfully processed items |
+| `failed_items` | integer | Items that failed processing |
+| `queue_paused` | boolean | `true` when processing is suspended |
+| `processing_active` | boolean | `true` while a background worker spawned by `POST /sync/process` is running |
+| `scanning` | boolean | `true` when at least one tracked folder is actively scanning |
+| `scan_total_files` | integer | Sum of `scan_total_files` across all scanning folders |
+| `scan_scanned_files` | integer | Sum of `scan_scanned_files` across all scanning folders |
+| `scan_active_folders` | integer | Number of folders currently scanning |
+| `revision` | integer | Monotonically increasing counter; incremented on every publish. Clients compare against their last-seen revision to decide whether to re-fetch the item list. |
+
+The stream sends an initial snapshot immediately on connect. It then pushes further updates as events occur. If the connection drops, the client is expected to reconnect (with back-off).
+
+**Errors:** `401 Unauthorized` (missing or invalid token)
+
+---
+
+### POST `/sync/process`
+
+Enqueue all pending sync queue items for background processing. Returns immediately (`202 Accepted`) so the request is non-blocking. Only one background worker runs at a time; calling this while a worker is already active is a no-op (both calls still return `202`).
+
+**Response `202`:**
+
+```json
+{ "status": "started" }
+```
+
+The queue state change (including `processing_active: true`) is broadcast via the SSE stream at `GET /sync/queue/stream`.
 
 ---
 

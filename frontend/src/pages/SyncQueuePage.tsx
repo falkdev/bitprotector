@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { LoaderCircle, Pause, Play } from 'lucide-react'
 import { drivesApi } from '@/api/drives'
-import { foldersApi } from '@/api/folders'
 import { syncApi } from '@/api/sync'
+import { openSyncStream } from '@/api/sync-stream'
 import { DataTable } from '@/components/shared/DataTable'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
@@ -18,7 +18,6 @@ import type {
   SyncResolution,
   SyncStatus,
 } from '@/types/sync'
-import type { TrackedFolder } from '@/types/folder'
 
 type QueueFilter = SyncStatus | 'all'
 
@@ -171,19 +170,15 @@ function ResolveDialog({
 }
 
 export function SyncQueuePage() {
+  const summary = useSyncStore((state) => state.summary)
+  const setSummary = useSyncStore((state) => state.setSummary)
   const items = useSyncStore((state) => state.items)
-  const total = useSyncStore((state) => state.total)
+  const filteredTotal = useSyncStore((state) => state.filteredTotal)
   const page = useSyncStore((state) => state.page)
   const perPage = useSyncStore((state) => state.perPage)
-  const queuePaused = useSyncStore((state) => state.queuePaused)
-  const activeItems = useSyncStore((state) => state.activeItems)
-  const pendingItems = useSyncStore((state) => state.pendingItems)
-  const inProgressItems = useSyncStore((state) => state.inProgressItems)
-  const completedItems = useSyncStore((state) => state.completedItems)
-  const failedItems = useSyncStore((state) => state.failedItems)
   const loading = useSyncStore((state) => state.loading)
   const filter = useSyncStore((state) => state.filter)
-  const fetch = useSyncStore((state) => state.fetch)
+  const fetchItems = useSyncStore((state) => state.fetchItems)
   const setFilter = useSyncStore((state) => state.setFilter)
   const setPage = useSyncStore((state) => state.setPage)
   const refreshItem = useSyncStore((state) => state.refreshItem)
@@ -192,98 +187,85 @@ export function SyncQueuePage() {
   const [clearingCompleted, setClearingCompleted] = useState(false)
   const [togglingPause, setTogglingPause] = useState(false)
   const [hasDrivePairs, setHasDrivePairs] = useState<boolean | null>(null)
-  const [activeScanFolders, setActiveScanFolders] = useState<TrackedFolder[]>([])
-  const scanPollSequence = useRef(0)
 
-  const activeScanTotal = activeScanFolders.reduce(
-    (sum, folder) => sum + folder.scan_total_files,
-    0
-  )
-  const activeScanScanned = activeScanFolders.reduce(
-    (sum, folder) => sum + Math.min(folder.scan_scanned_files, folder.scan_total_files),
-    0
-  )
-  const allItems = pendingItems + inProgressItems + completedItems + failedItems
-  const statusCounts: Record<QueueFilter, number> = {
-    all: allItems,
-    pending: pendingItems,
-    in_progress: inProgressItems,
-    completed: completedItems,
-    failed: failedItems,
-  }
-  const showProcessingIndicator =
-    activeScanFolders.length === 0 &&
-    (processingQueue || (inProgressItems > 0 && !queuePaused && hasDrivePairs === true))
-  const pollIntervalMs = showProcessingIndicator ? 2000 : 5000
+  // Track the last revision for which we issued an item fetch, so that each
+  // SSE summary event triggers at most one REST request.
+  const lastFetchedRevision = useRef(-1)
 
+  // ── Drive-pair check (one-shot) ──────────────────────────────────────────
   useEffect(() => {
     let active = true
-
-    const pollQueueAndScanState = async () => {
-      const currentSequence = scanPollSequence.current + 1
-      scanPollSequence.current = currentSequence
-      void fetch()
-      try {
-        const folders = await foldersApi.list()
-        if (active && currentSequence === scanPollSequence.current) {
-          setActiveScanFolders(folders.filter((folder) => folder.scanning))
-        }
-      } catch {
-        if (active && currentSequence === scanPollSequence.current) {
-          setActiveScanFolders([])
-        }
-      }
-    }
-
-    void pollQueueAndScanState()
-    const timer = window.setInterval(() => {
-      void pollQueueAndScanState()
-    }, pollIntervalMs)
-
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [fetch, pollIntervalMs])
-
-  useEffect(() => {
-    let active = true
-
     const loadDrives = async () => {
       try {
         const drives = await drivesApi.list()
-        if (active) {
-          setHasDrivePairs(drives.length > 0)
-        }
+        if (active) setHasDrivePairs(drives.length > 0)
       } catch {
-        if (active) {
-          setHasDrivePairs(null)
-        }
+        if (active) setHasDrivePairs(null)
       }
     }
-
     void loadDrives()
     return () => {
       active = false
     }
   }, [])
 
+  // ── Initial item fetch ───────────────────────────────────────────────────
+  useEffect(() => {
+    void fetchItems()
+  }, [fetchItems])
+
+  // ── SSE stream ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const stream = openSyncStream((incoming) => {
+      setSummary(incoming)
+      // Refetch item list whenever the server signals a new revision.
+      if (incoming.revision !== lastFetchedRevision.current) {
+        lastFetchedRevision.current = incoming.revision
+        void fetchItems()
+      }
+    })
+
+    return () => stream.abort()
+  }, [setSummary, fetchItems])
+
+  // ── Derived values from SSE summary ─────────────────────────────────────
+  const queuePaused = summary?.queue_paused ?? false
+  const processingActive = summary?.processing_active ?? false
+  const scanning = summary?.scanning ?? false
+  const scanTotalFiles = summary?.scan_total_files ?? 0
+  const scanScannedFiles = summary?.scan_scanned_files ?? 0
+  const scanActiveFolders = summary?.scan_active_folders ?? 0
+  const activeItems = summary?.active_items ?? 0
+
+  const statusCounts: Record<QueueFilter, number> = {
+    all: summary?.total ?? 0,
+    pending: summary?.pending_items ?? 0,
+    in_progress: summary?.in_progress_items ?? 0,
+    completed: summary?.completed_items ?? 0,
+    failed: summary?.failed_items ?? 0,
+  }
+
+  const showProcessingIndicator = processingActive || processingQueue
+  const controlsDisabledByScan = scanning
+
   const noDrivePairs = hasDrivePairs === false
-  const disableProcessQueue = noDrivePairs || processingQueue || inProgressItems > 0
-  const totalPages = Math.max(1, Math.ceil(total / perPage))
+  const disableProcessQueue =
+    noDrivePairs || processingActive || processingQueue || controlsDisabledByScan
+  const disablePauseQueue =
+    controlsDisabledByScan || togglingPause || (!queuePaused && activeItems === 0)
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / perPage))
   const hasPreviousPage = page > 1
-  const hasNextPage = page * perPage < total
+  const hasNextPage = page * perPage < filteredTotal
 
+  // ── Actions ──────────────────────────────────────────────────────────────
   const processQueue = async () => {
-    if (noDrivePairs || inProgressItems > 0) {
-      return
-    }
-
+    if (noDrivePairs || controlsDisabledByScan) return
     setProcessingQueue(true)
     try {
-      const result = await syncApi.processQueue()
-      toast.success(`Processed ${result.processed} queue item(s)`)
-      await fetch()
+      await syncApi.processQueue()
+      toast.success('Processing started')
+    } catch {
+      toast.error('Failed to start processing')
     } finally {
       setProcessingQueue(false)
     }
@@ -295,7 +277,7 @@ export function SyncQueuePage() {
       refreshItem(updated)
       setResolveTarget(null)
       toast.success(`Queue item #${id} resolved`)
-      await fetch()
+      await fetchItems()
     } catch {
       toast.error(`Failed to resolve queue item #${id}`)
     }
@@ -306,7 +288,7 @@ export function SyncQueuePage() {
     try {
       const result = await syncApi.clearCompletedQueue()
       toast.success(`Cleared ${result.deleted} completed queue item(s)`)
-      await fetch()
+      await fetchItems()
     } catch {
       toast.error('Failed to clear completed queue items')
     } finally {
@@ -315,6 +297,7 @@ export function SyncQueuePage() {
   }
 
   const togglePause = async () => {
+    if (controlsDisabledByScan) return
     setTogglingPause(true)
     try {
       if (queuePaused) {
@@ -324,7 +307,6 @@ export function SyncQueuePage() {
         await syncApi.pauseQueue()
         toast.success('Sync queue processing paused')
       }
-      await fetch()
     } catch {
       toast.error('Failed to toggle queue pause state')
     } finally {
@@ -341,7 +323,7 @@ export function SyncQueuePage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => void togglePause()}
-              disabled={togglingPause || (!queuePaused && activeItems === 0)}
+              disabled={disablePauseQueue}
               data-testid="toggle-pause-button"
               className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -363,7 +345,7 @@ export function SyncQueuePage() {
               className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Play className="h-4 w-4" />
-              {processingQueue || inProgressItems > 0 ? 'Processing...' : 'Process Queue'}
+              {showProcessingIndicator ? 'Processing...' : 'Process Queue'}
             </button>
           </div>
         }
@@ -388,43 +370,32 @@ export function SyncQueuePage() {
       ) : null}
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <div
-          title={
-            activeScanFolders.length > 0
-              ? 'Filtering is disabled while folders are being scanned — the queue is still being populated'
-              : undefined
-          }
-          role="tablist"
-          aria-label="Queue filter"
-          className="flex flex-wrap gap-2"
-        >
+        <div role="tablist" aria-label="Queue filter" className="flex flex-wrap gap-2">
           {FILTERS.map((option) => (
             <button
               key={option}
               type="button"
               role="tab"
               aria-selected={filter === option}
-              disabled={activeScanFolders.length > 0}
               onClick={() => void setFilter(option)}
+              disabled={controlsDisabledByScan}
               className={`rounded-md border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
                 filter === option
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-border hover:bg-accent'
               }`}
             >
-              {activeScanFolders.length > 0
-                ? FILTER_LABELS[option]
-                : `${FILTER_LABELS[option]} ${statusCounts[option]}`}
+              {`${FILTER_LABELS[option]} ${statusCounts[option]}`}
             </button>
           ))}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          {activeScanFolders.length > 0 ? (
+          {scanning ? (
             <span className="inline-flex items-center gap-1.5">
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              Updating… {activeScanScanned} / {activeScanTotal} files across{' '}
-              {activeScanFolders.length} folder(s)
+              Updating… {scanScannedFiles} / {scanTotalFiles} files across {scanActiveFolders}{' '}
+              folder(s)
             </span>
           ) : null}
           {showProcessingIndicator && !queuePaused ? (
@@ -433,14 +404,14 @@ export function SyncQueuePage() {
               Processing queue…
             </span>
           ) : null}
-          {activeScanFolders.length === 0 ? (
+          {!scanning ? (
             <span>
-              Showing {items.length} of {total} (filter: {FILTER_LABELS[filter]})
+              Showing {items.length} of {filteredTotal} (filter: {FILTER_LABELS[filter]})
             </span>
           ) : null}
           <button
             onClick={() => void clearCompleted()}
-            disabled={clearingCompleted || completedItems === 0}
+            disabled={clearingCompleted || statusCounts.completed === 0}
             className="ml-auto rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {clearingCompleted ? 'Clearing…' : 'Clear Completed'}
@@ -537,7 +508,7 @@ export function SyncQueuePage() {
       )}
 
       <div className="flex items-center justify-end gap-3 text-sm">
-        {activeScanFolders.length > 0 && (
+        {scanning && (
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
             Page count updating…
@@ -546,7 +517,7 @@ export function SyncQueuePage() {
         <button
           type="button"
           onClick={() => void setPage(page - 1)}
-          disabled={!hasPreviousPage || loading}
+          disabled={!hasPreviousPage}
           className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           Previous
@@ -557,7 +528,7 @@ export function SyncQueuePage() {
         <button
           type="button"
           onClick={() => void setPage(page + 1)}
-          disabled={!hasNextPage || loading || activeScanFolders.length > 0}
+          disabled={!hasNextPage || controlsDisabledByScan}
           className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           Next
