@@ -217,7 +217,7 @@ function FolderMirroringStatus({ mirrored, total }: { mirrored: number; total: n
     return (
       <div className="min-w-32 space-y-1">
         <div className="flex items-center gap-2 text-xs font-medium text-blue-700 dark:text-blue-300">
-          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
           <span>Mirroring...</span>
           <span className="font-mono">{`${mirrored} / ${total}`}</span>
         </div>
@@ -233,7 +233,7 @@ function FolderMirroringStatus({ mirrored, total }: { mirrored: number; total: n
 
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
       Mirroring...
     </span>
   )
@@ -1572,7 +1572,7 @@ export function TrackingWorkspacePage() {
                                   {isFolderScanning ? (
                                     <LoaderCircle className="h-4 w-4 animate-spin" />
                                   ) : isFolderMirroring ? (
-                                    <FolderSync className="h-4 w-4 animate-spin" />
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
                                   ) : syncQueueActive ? (
                                     <RefreshCw className="h-4 w-4 animate-spin" />
                                   ) : wantsMirror ? (
@@ -1603,7 +1603,7 @@ export function TrackingWorkspacePage() {
                               data-testid={`delete-folder-${item.id}`}
                             >
                               {deletingItemKeys.has(`folder-${item.id}`) ? (
-                                <RefreshCw className="h-4 w-4 animate-spin" />
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
                               ) : (
                                 <Trash2 className="h-4 w-4" />
                               )}

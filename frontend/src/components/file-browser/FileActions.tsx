@@ -1,4 +1,4 @@
-import { Trash2, RefreshCw, Link } from 'lucide-react'
+import { Trash2, RefreshCw, Link, LoaderCircle } from 'lucide-react'
 import type { TrackedFile } from '@/types/file'
 
 interface FileActionsProps {
@@ -62,7 +62,11 @@ export function FileActions({
         }}
         data-testid="action-delete"
       >
-        {deleting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        {deleting ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <Trash2 className="h-4 w-4" />
+        )}
       </button>
     </div>
   )
