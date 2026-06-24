@@ -380,7 +380,7 @@ A `SyncEventBus` is created at server startup (in `run_server`) and registered a
 - `processing_active: Arc<AtomicBool>` — `true` while a background worker is running.
 - `revision: Arc<AtomicU64>` — monotonically increasing counter incremented on every publish.
 
-`SyncSummary` carries queue counts (total, pending, in_progress, completed, failed, active), pause state, processing state, and aggregated folder-scan progress (scanning, scan_total_files, scan_scanned_files, scan_active_folders). Folding scan progress into the queue summary eliminates the separate `/folders` poll.
+`SyncSummary` carries queue counts (total, pending, in_progress, completed, failed, active), pause state, processing state, aggregated folder-scan progress (scanning, scan_total_files, scan_scanned_files, scan_active_folders), and folder-delete activity (deleting, delete_active_folders). Folding folder operation progress into the queue summary eliminates the separate `/folders` poll.
 
 Every mutating route handler (`add_queue_item`, `resolve_queue_item`, `clear_completed_queue`, `pause_queue`, `resume_queue`) calls `bus.publish_snapshot(&repo)` after its DB mutation. `process_item` inside `process_all_pending` calls `publish_snapshot` twice per item (once when marking `in_progress`, once when marking `completed`/`failed`), giving granular progress updates.
 
@@ -395,6 +395,8 @@ Every mutating route handler (`add_queue_item`, `resolve_queue_item`, `clear_com
 `frontend/src/stores/sync-store.ts` holds `summary: SyncSummary | null` as the live source of truth for all queue counts, paused state, processing state, and scan state. When `summary.revision` changes, the store issues one `fetchItems` call (with stale-response guard) to refresh the item list for the current filter/page. Counts displayed in tab labels and indicators are always derived from `summary`, so they update as soon as the SSE event arrives.
 
 `frontend/src/pages/SyncQueuePage.tsx` starts the SSE stream on mount (`useEffect` → `openSyncStream`) and stops it on unmount. While `summary.scanning` is true, interactive queue controls are disabled (`Process Queue`, `Pause/Resume Queue`, filter tabs, and `Next`) and re-enable immediately when scanning becomes false. The "Processing…" button label and indicator are driven by `summary.processing_active`. The "Updating… N / M files" indicator is driven by `summary.scanning`.
+
+`frontend/src/pages/TrackingWorkspacePage.tsx` also consumes the same stream. It re-fetches tracked folders on `summary.revision` changes and derives per-folder scan/mirror/delete UI state (`scanning`, `mirroring`, `deleting`) from those folder rows rather than polling `/folders/{id}/scan/active` and `/folders/{id}/mirror/active`.
 
 
 

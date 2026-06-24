@@ -36,7 +36,7 @@ async fn test_folders_add() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/folders")
         .insert_header(("Authorization", bearer()))
@@ -67,7 +67,7 @@ async fn test_folders_add_with_virtual_path_creates_symlink() {
             secondary.path().to_str().unwrap(),
         )
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
     let req = test::TestRequest::post()
         .uri("/api/v1/folders")
         .insert_header(("Authorization", bearer()))
@@ -204,7 +204,7 @@ async fn test_folders_get_and_delete() {
     let folder = repo
         .create_tracked_folder(pair.id, "reports", None)
         .unwrap();
-    let app = make_app!(repo).await;
+    let app = make_app!(repo.clone()).await;
 
     let req = test::TestRequest::get()
         .uri(&format!("/api/v1/folders/{}", folder.id))
@@ -220,7 +220,18 @@ async fn test_folders_get_and_delete() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 204);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if repo.get_tracked_folder(folder.id).is_err() {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder delete");
 }
 
 #[actix_rt::test]
@@ -288,7 +299,18 @@ async fn test_folders_delete_cascades_folder_origin_descendants_and_preserves_di
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 204);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if repo.get_tracked_folder(folder.id).is_err() {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder cascade delete");
 
     assert!(repo.get_tracked_folder(folder.id).is_err());
     assert!(repo.get_tracked_file(folder_only.id).is_err());
@@ -531,6 +553,58 @@ async fn test_folders_mirror_endpoint_returns_409_when_already_mirroring() {
 }
 
 #[actix_rt::test]
+async fn test_folders_delete_returns_409_when_scanning_active() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir(primary.path().join("docs")).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "delete-scan-conflict",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    repo.start_folder_scan(folder.id, 1).unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/folders/{}", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+}
+
+#[actix_rt::test]
+async fn test_folders_delete_returns_409_when_mirroring_active() {
+    let primary = TempDir::new().unwrap();
+    let secondary = TempDir::new().unwrap();
+    fs::create_dir(primary.path().join("docs")).unwrap();
+
+    let repo = make_repo();
+    let pair = repo
+        .create_drive_pair(
+            "delete-mirror-conflict",
+            primary.path().to_str().unwrap(),
+            secondary.path().to_str().unwrap(),
+        )
+        .unwrap();
+    let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+    repo.start_folder_mirror(folder.id, 1).unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/folders/{}", folder.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+}
+
+#[actix_rt::test]
 async fn test_folders_mirror_active_returns_zero_state_when_idle() {
     let primary = TempDir::new().unwrap();
     let secondary = TempDir::new().unwrap();
@@ -673,7 +747,18 @@ async fn test_folders_delete_preserves_files_under_nested_tracked_subfolder() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 204);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if repo.get_tracked_folder(parent_folder.id).is_err() {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for parent folder delete");
 
     // Parent folder and its exclusive file must be gone.
     assert!(repo.get_tracked_folder(parent_folder.id).is_err());

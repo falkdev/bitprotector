@@ -76,6 +76,8 @@ export interface SyncSummary {
   scan_total_files: number
   scan_scanned_files: number
   scan_active_folders: number
+  deleting: boolean
+  delete_active_folders: number
   /** Monotonically increasing counter; incremented on every publish. */
   revision: number
 }

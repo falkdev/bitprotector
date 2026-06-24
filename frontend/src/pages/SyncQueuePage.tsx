@@ -507,33 +507,35 @@ export function SyncQueuePage() {
         />
       )}
 
-      <div className="flex items-center justify-end gap-3 text-sm">
-        {scanning && (
-          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-            Page count updating…
+      {filteredTotal > 0 ? (
+        <div className="flex items-center justify-end gap-3 text-sm">
+          {scanning && (
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              Page count updating…
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void setPage(page - 1)}
+            disabled={!hasPreviousPage}
+            className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Previous
+          </button>
+          <span className="text-muted-foreground">
+            Page {page} of {totalPages}
           </span>
-        )}
-        <button
-          type="button"
-          onClick={() => void setPage(page - 1)}
-          disabled={!hasPreviousPage}
-          className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Previous
-        </button>
-        <span className="text-muted-foreground">
-          Page {page} of {totalPages}
-        </span>
-        <button
-          type="button"
-          onClick={() => void setPage(page + 1)}
-          disabled={!hasNextPage || controlsDisabledByScan}
-          className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Next
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => void setPage(page + 1)}
+            disabled={!hasNextPage || controlsDisabledByScan}
+            className="rounded-md border border-border px-3 py-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
 
       <ResolveDialog
         item={resolveTarget}

@@ -1,5 +1,6 @@
 use crate::api::models::ApiError;
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
+use crate::core::sync_queue::SyncEventBus;
 use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use crate::logging::event_logger;
@@ -139,7 +140,11 @@ pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
 }
 
 /// DELETE /api/v1/files/{id} — untrack a file
-pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
+pub async fn delete_file(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+    path: web::Path<i64>,
+) -> impl Responder {
     let id = path.into_inner();
     let file = match repo.get_tracked_file(id) {
         Ok(file) => file,
@@ -150,6 +155,19 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
             ))
         }
     };
+    match repo.has_active_sync_for_file(id) {
+        Ok(true) => {
+            return HttpResponse::Conflict().json(ApiError::new(
+                "CONFLICT",
+                "Cannot delete file while another operation is active",
+            ))
+        }
+        Ok(false) => {}
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+        }
+    }
     if file.virtual_path.is_some() {
         if let Err(e) = virtual_path::remove_virtual_path(&repo, id) {
             return HttpResponse::BadRequest()
@@ -163,6 +181,7 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
                 .map(|dp| format!("{}/{}", dp.primary_path, file.relative_path))
                 .unwrap_or_else(|_| file.relative_path.clone());
             let _ = event_logger::log_file_untracked(&repo, id, &full_path);
+            bus.publish_snapshot(&repo);
             HttpResponse::NoContent().finish()
         }
         Err(e) => {

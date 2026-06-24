@@ -725,6 +725,7 @@ On success, the folder's `last_scanned_at` is updated.
 ### POST `/folders/{id}/mirror`
 
 Start mirroring all unmirrored tracked files under a tracked folder in a background worker.
+Mirror start/progress/completion snapshots are broadcast on `GET /sync/queue/stream`.
 
 **Response `202`:**
 
@@ -741,7 +742,7 @@ Start mirroring all unmirrored tracked files under a tracked folder in a backgro
 
 During execution, queue rows move through `pending -> in_progress -> completed` (or `failed` on error).
 
-**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `409 Conflict` (mirror already active), `500 Internal Server Error`
+**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `409 Conflict` (another folder operation is already active), `500 Internal Server Error`
 
 ---
 
@@ -766,12 +767,14 @@ When no mirror run is active, `mirroring` is `false` and both counters are `0`.
 
 ### DELETE `/folders/{id}`
 
-Stop tracking the folder.
+Start background removal of a tracked folder.
 
 Folder-origin descendant files are untracked as part of this operation when they are still marked `tracked_via_folder=true` and `tracked_direct=false`, and are not still covered by another tracked folder (for example, a separately tracked nested subfolder). Descendant files that were explicitly tracked remain tracked.
 
-**Response `204`:** No content.  
-**Errors:** `404 Not Found`, `400 Bad Request` (drive pair quiescing), `500 Internal Server Error`
+The endpoint marks the folder as `deleting=true` and returns immediately. Final deletion (including folder-origin descendant cascade cleanup) runs in the background.
+
+**Response `202`:** Accepted.  
+**Errors:** `404 Not Found`, `400 Bad Request` (drive pair quiescing), `409 Conflict` (scan/mirror/delete already active for that folder), `500 Internal Server Error`
 
 ---
 
@@ -1115,7 +1118,7 @@ Delete all sync queue rows with status `completed`.
 
 ### GET `/sync/queue/stream`
 
-Server-Sent Events (SSE) stream. Pushes a live `SyncSummary` snapshot whenever the queue state changes (item added, processed, paused, resumed, etc.) and also when a folder scan makes progress. Clients use this stream instead of polling `/sync/queue` and `/folders` separately.
+Server-Sent Events (SSE) stream. Pushes a live `SyncSummary` snapshot whenever the queue state changes (item added, processed, paused, resumed, etc.) and also when tracked-folder scan/mirror/delete state changes. Clients use this stream instead of polling `/sync/queue` and `/folders` separately.
 
 **Authorization:** `Authorization: Bearer <token>` header (same as all other endpoints).
 
@@ -1126,7 +1129,7 @@ Server-Sent Events (SSE) stream. Pushes a live `SyncSummary` snapshot whenever t
 Each event is a JSON-serialised `SyncSummary` object on a `data:` line:
 
 ```
-data: {"total":5,"active_items":2,"pending_items":2,"in_progress_items":0,"completed_items":3,"failed_items":0,"queue_paused":false,"processing_active":false,"scanning":false,"scan_total_files":0,"scan_scanned_files":0,"scan_active_folders":0,"revision":7}
+data: {"total":5,"active_items":2,"pending_items":2,"in_progress_items":0,"completed_items":3,"failed_items":0,"queue_paused":false,"processing_active":false,"scanning":false,"scan_total_files":0,"scan_scanned_files":0,"scan_active_folders":0,"deleting":false,"delete_active_folders":0,"revision":7}
 
 ```
 
@@ -1144,6 +1147,8 @@ data: {"total":5,"active_items":2,"pending_items":2,"in_progress_items":0,"compl
 | `scan_total_files` | integer | Sum of `scan_total_files` across all scanning folders |
 | `scan_scanned_files` | integer | Sum of `scan_scanned_files` across all scanning folders |
 | `scan_active_folders` | integer | Number of folders currently scanning |
+| `deleting` | boolean | `true` when at least one tracked folder is currently in background delete |
+| `delete_active_folders` | integer | Number of folders currently in background delete |
 | `revision` | integer | Monotonically increasing counter; incremented on every publish. Clients compare against their last-seen revision to decide whether to re-fetch the item list. |
 
 The stream sends an initial snapshot immediately on connect. It then pushes further updates as events occur. If the connection drops, the client is expected to reconnect (with back-off).

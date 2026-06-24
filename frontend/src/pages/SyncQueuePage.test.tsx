@@ -90,6 +90,8 @@ describe('SyncQueuePage', () => {
     renderWithApp(<SyncQueuePage />)
 
     expect(await screen.findByText('No queue items')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Previous' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
   })
 
   it('shows process queue and pause queue buttons', async () => {

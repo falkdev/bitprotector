@@ -6,6 +6,31 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
+
+const QUEUE_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
+static LAST_QUEUE_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn should_publish_queue_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
+    match last_published_at {
+        None => true,
+        Some(last) => now.saturating_duration_since(last) >= QUEUE_PROGRESS_PUBLISH_INTERVAL,
+    }
+}
+
+fn try_publish_queue_progress(bus: &SyncEventBus, repo: &Repository) {
+    let now = Instant::now();
+    let mut last = LAST_QUEUE_PROGRESS_PUBLISH_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if should_publish_queue_progress(*last, now) {
+        bus.publish_snapshot(repo);
+        *last = Some(now);
+    }
+}
 
 /// Summary of the sync queue state, broadcast over the `SyncEventBus`.
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +48,8 @@ pub struct SyncSummary {
     pub scan_total_files: i64,
     pub scan_scanned_files: i64,
     pub scan_active_folders: i64,
+    pub deleting: bool,
+    pub delete_active_folders: i64,
     /// Monotonically increasing counter; incremented on every publish.
     pub revision: u64,
 }
@@ -77,6 +104,7 @@ impl SyncEventBus {
             .map(|f| f.scan_scanned_files.min(f.scan_total_files))
             .sum();
         let scan_active_folders = folders.iter().filter(|f| f.scanning).count() as i64;
+        let delete_active_folders = folders.iter().filter(|f| f.deleting).count() as i64;
 
         let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -93,6 +121,8 @@ impl SyncEventBus {
             scan_total_files: scanning_total_files,
             scan_scanned_files: scanning_scanned_files,
             scan_active_folders,
+            deleting: delete_active_folders > 0,
+            delete_active_folders,
             revision,
         }
     }
@@ -249,10 +279,14 @@ pub fn process_all_pending(
                     return Ok(processed);
                 }
             }
-            if let Err(e) = process_item(repo, item, bus) {
+            if let Err(e) = process_item(repo, item, None) {
                 tracing::error!("Error processing sync queue item {}: {}", item.id, e);
             }
             processed += 1;
+
+            if let Some(b) = bus {
+                try_publish_queue_progress(b, repo);
+            }
         }
         // Guard against an infinite loop if every remaining item is
         // user_action_required (those items are never processed, so the pending
@@ -997,5 +1031,24 @@ mod tests {
                 .load(std::sync::atomic::Ordering::SeqCst),
             "flag must still be set after idempotent call"
         );
+    }
+
+    #[test]
+    fn test_should_publish_queue_progress_after_interval() {
+        let base = Instant::now();
+        let later = base + QUEUE_PROGRESS_PUBLISH_INTERVAL;
+        assert!(should_publish_queue_progress(Some(base), later));
+    }
+
+    #[test]
+    fn test_should_not_publish_queue_progress_before_interval() {
+        let base = Instant::now();
+        let earlier = base + Duration::from_millis(500);
+        assert!(!should_publish_queue_progress(Some(base), earlier));
+    }
+
+    #[test]
+    fn test_should_publish_queue_progress_when_never_published() {
+        assert!(should_publish_queue_progress(None, Instant::now()));
     }
 }

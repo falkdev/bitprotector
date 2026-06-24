@@ -77,6 +77,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             scan_scanned_files INTEGER NOT NULL DEFAULT 0,
             scan_total_files INTEGER NOT NULL DEFAULT 0,
             mirroring       INTEGER NOT NULL DEFAULT 0,
+            deleting        INTEGER NOT NULL DEFAULT 0,
             mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
             mirror_total_files INTEGER NOT NULL DEFAULT 0,
             last_scanned_at TEXT,
@@ -223,6 +224,10 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE tracked_folders ADD COLUMN mirroring INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0",
         [],
     );
     let _ = conn.execute(
@@ -562,5 +567,41 @@ mod tests {
             secondary_col_count, 1,
             "secondary_media_type should be added"
         );
+    }
+
+    #[test]
+    fn test_tracked_folders_deleting_column_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE tracked_folders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_pair_id   INTEGER NOT NULL,
+                folder_path     TEXT NOT NULL,
+                virtual_path    TEXT,
+                scanning        INTEGER NOT NULL DEFAULT 0,
+                scan_scanned_files INTEGER NOT NULL DEFAULT 0,
+                scan_total_files INTEGER NOT NULL DEFAULT 0,
+                mirroring       INTEGER NOT NULL DEFAULT 0,
+                mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
+                mirror_total_files INTEGER NOT NULL DEFAULT 0,
+                last_scanned_at TEXT,
+                last_mirrored_at TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(drive_pair_id, folder_path)
+            );",
+        )
+        .expect("Failed to create legacy tracked_folders");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let deleting_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tracked_folders') WHERE name='deleting'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect tracked_folders columns");
+
+        assert_eq!(deleting_col_count, 1, "deleting should be added");
     }
 }

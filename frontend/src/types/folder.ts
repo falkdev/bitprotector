@@ -7,6 +7,7 @@ export interface TrackedFolder {
   scan_scanned_files: number
   scan_total_files: number
   mirroring: boolean
+  deleting: boolean
   mirror_mirrored_files: number
   mirror_total_files: number
   last_scanned_at: string | null

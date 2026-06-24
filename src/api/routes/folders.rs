@@ -8,23 +8,23 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const SCAN_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
-static LAST_SCAN_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
+static LAST_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
     LazyLock::new(|| Mutex::new(None));
 
-fn should_publish_scan_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
+fn should_publish_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
     match last_published_at {
         None => true,
         Some(last) => now.saturating_duration_since(last) >= SCAN_PROGRESS_PUBLISH_INTERVAL,
     }
 }
 
-fn try_publish_scan_progress(bus: &SyncEventBus, repo: &Repository) {
+fn try_publish_progress(bus: &SyncEventBus, repo: &Repository) {
     let now = Instant::now();
-    let mut last = LAST_SCAN_PROGRESS_PUBLISH_AT
+    let mut last = LAST_PROGRESS_PUBLISH_AT
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if should_publish_scan_progress(*last, now) {
+    if should_publish_progress(*last, now) {
         bus.publish_snapshot(repo);
         *last = Some(now);
     }
@@ -130,7 +130,11 @@ async fn get_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpRe
 }
 
 /// DELETE /folders/{id}
-async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
+async fn delete_folder(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+    path: web::Path<i64>,
+) -> HttpResponse {
     let id = path.into_inner();
     let folder = match repo.get_tracked_folder(id) {
         Ok(folder) => folder,
@@ -146,10 +150,27 @@ async fn delete_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
         return HttpResponse::BadRequest().body(e.to_string());
     }
 
-    match tracker::untrack_folder_cascade(&repo, id) {
-        Ok(_) => HttpResponse::NoContent().finish(),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    if let Err(e) = repo.start_folder_delete(id) {
+        if e.to_string().contains("already active") {
+            return HttpResponse::Conflict().body(e.to_string());
+        }
+        return HttpResponse::InternalServerError().body(e.to_string());
     }
+
+    bus.publish_snapshot(&repo);
+
+    let repo_clone = repo.get_ref().clone();
+    let bus_clone = bus.get_ref().clone();
+    std::thread::spawn(move || {
+        let result = tracker::untrack_folder_cascade(&repo_clone, id);
+        if let Err(error) = result {
+            eprintln!("folder delete #{id} failed: {error}");
+            let _ = repo_clone.clear_folder_delete(id);
+        }
+        bus_clone.publish_snapshot(&repo_clone);
+    });
+
+    HttpResponse::Accepted().finish()
 }
 
 /// PUT /folders/{id}
@@ -220,7 +241,7 @@ async fn scan_folder(
             let pair = drive::load_operational_pair(&repo_clone, folder.drive_pair_id)?;
             tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned| {
                 repo_clone.update_scan_progress(folder_id, scanned)?;
-                try_publish_scan_progress(&bus_clone, &repo_clone);
+                try_publish_progress(&bus_clone, &repo_clone);
                 Ok(())
             })?;
             Ok(())
@@ -246,7 +267,11 @@ async fn scan_folder_active(repo: web::Data<Repository>, path: web::Path<i64>) -
 }
 
 /// POST /folders/{id}/mirror
-async fn mirror_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> HttpResponse {
+async fn mirror_folder(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+    path: web::Path<i64>,
+) -> HttpResponse {
     let folder_id = path.into_inner();
     let folder = match repo.get_tracked_folder(folder_id) {
         Ok(f) => f,
@@ -278,7 +303,10 @@ async fn mirror_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
+    bus.publish_snapshot(&repo);
+
     let repo_clone = repo.get_ref().clone();
+    let bus_clone = bus.get_ref().clone();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
             let mut processed = 0i64;
@@ -297,6 +325,7 @@ async fn mirror_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
 
                 processed += 1;
                 let _ = repo_clone.update_mirror_progress(folder_id, processed);
+                try_publish_progress(&bus_clone, &repo_clone);
             }
             Ok(())
         })();
@@ -306,6 +335,7 @@ async fn mirror_folder(repo: web::Data<Repository>, path: web::Path<i64>) -> Htt
         }
 
         let _ = repo_clone.finish_folder_mirror(folder_id);
+        bus_clone.publish_snapshot(&repo_clone);
     });
 
     HttpResponse::Accepted().json(MirrorActiveResponse::from(&status))
@@ -342,18 +372,18 @@ mod tests {
     fn test_should_publish_scan_progress_after_interval() {
         let base = Instant::now();
         let later = base + SCAN_PROGRESS_PUBLISH_INTERVAL;
-        assert!(should_publish_scan_progress(Some(base), later));
+        assert!(should_publish_progress(Some(base), later));
     }
 
     #[test]
     fn test_should_not_publish_scan_progress_before_interval() {
         let base = Instant::now();
         let earlier = base + Duration::from_millis(500);
-        assert!(!should_publish_scan_progress(Some(base), earlier));
+        assert!(!should_publish_progress(Some(base), earlier));
     }
 
     #[test]
     fn test_should_publish_scan_progress_when_never_published() {
-        assert!(should_publish_scan_progress(None, Instant::now()));
+        assert!(should_publish_progress(None, Instant::now()));
     }
 }

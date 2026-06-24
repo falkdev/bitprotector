@@ -49,6 +49,7 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
     scan_scanned_files: 0,
     scan_total_files: 0,
     mirroring: false,
+    deleting: false,
     mirror_mirrored_files: 0,
     mirror_total_files: 0,
     last_scanned_at: null,
@@ -260,6 +261,8 @@ export function makeSyncSummary(overrides: Partial<SyncSummary> = {}): SyncSumma
     scan_total_files: 0,
     scan_scanned_files: 0,
     scan_active_folders: 0,
+    deleting: false,
+    delete_active_folders: 0,
     revision: 0,
     ...overrides,
   }
