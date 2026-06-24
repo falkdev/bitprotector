@@ -569,26 +569,29 @@ export function TrackingWorkspacePage() {
     return ids
   }, [])
 
-  const loadSyncQueueRelativePathsByStatus = useCallback(async (status: 'pending' | 'in_progress') => {
-    const paths: string[] = []
-    let page = 1
-    const perPage = 200
+  const loadSyncQueueRelativePathsByStatus = useCallback(
+    async (status: 'pending' | 'in_progress') => {
+      const paths: string[] = []
+      let page = 1
+      const perPage = 200
 
-    while (true) {
-      const response = await syncApi.listQueue({ status, page, perPage })
-      for (const item of response.queue) {
-        paths.push(item.relative_path)
+      while (true) {
+        const response = await syncApi.listQueue({ status, page, perPage })
+        for (const item of response.queue) {
+          paths.push(item.relative_path)
+        }
+
+        if (page * response.per_page >= response.total || response.queue.length === 0) {
+          break
+        }
+
+        page += 1
       }
 
-      if (page * response.per_page >= response.total || response.queue.length === 0) {
-        break
-      }
-
-      page += 1
-    }
-
-    return paths
-  }, [])
+      return paths
+    },
+    []
+  )
 
   const loadActiveSyncQueueRelativePaths = useCallback(
     async (processingActive: boolean) => {
@@ -670,15 +673,16 @@ export function TrackingWorkspacePage() {
 
       void (async () => {
         try {
-          const [folders, nextInProgressSyncFileIds, inProgressQueueRelativePaths] = await Promise.all([
-            foldersApi.list(),
-            summary.in_progress_items > 0 || summary.processing_active
-              ? loadActiveSyncFileIds(summary.processing_active)
-              : Promise.resolve(new Set<number>()),
-            summary.in_progress_items > 0 || summary.processing_active
-              ? loadActiveSyncQueueRelativePaths(summary.processing_active)
-              : Promise.resolve<string[]>([]),
-          ])
+          const [folders, nextInProgressSyncFileIds, inProgressQueueRelativePaths] =
+            await Promise.all([
+              foldersApi.list(),
+              summary.in_progress_items > 0 || summary.processing_active
+                ? loadActiveSyncFileIds(summary.processing_active)
+                : Promise.resolve(new Set<number>()),
+              summary.in_progress_items > 0 || summary.processing_active
+                ? loadActiveSyncQueueRelativePaths(summary.processing_active)
+                : Promise.resolve<string[]>([]),
+            ])
           if (!active) return
 
           const nextScanStatuses: Record<number, FolderScanStatus> = {}
@@ -717,8 +721,7 @@ export function TrackingWorkspacePage() {
 
             const normalizedFolderPath = folder.folder_path.replace(/\/+$/, '')
             const hasQueueSyncInProgress = normalizedInProgressPaths.some(
-              (path) =>
-                path === normalizedFolderPath || path.startsWith(`${normalizedFolderPath}/`)
+              (path) => path === normalizedFolderPath || path.startsWith(`${normalizedFolderPath}/`)
             )
             if (hasQueueSyncInProgress) {
               nextInProgressQueueFolderIds.add(folder.id)
