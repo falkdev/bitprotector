@@ -35,6 +35,7 @@ pub struct AddFolderRequest {
     pub drive_pair_id: i64,
     pub folder_path: String,
     pub virtual_path: Option<String>,
+    pub include_checksum_sidecars: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -115,7 +116,13 @@ async fn add_folder(
             return HttpResponse::BadRequest().body(e.to_string());
         }
     };
-    match tracker::track_folder(&repo, &pair, &folder_path, body.virtual_path.as_deref()) {
+    match tracker::track_folder_with_options(
+        &repo,
+        &pair,
+        &folder_path,
+        body.virtual_path.as_deref(),
+        body.include_checksum_sidecars.unwrap_or(false),
+    ) {
         Ok(folder) => HttpResponse::Created().json(folder),
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }

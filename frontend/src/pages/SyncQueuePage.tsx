@@ -56,6 +56,10 @@ const ACTION_DESCRIPTIONS: Record<SyncAction, string> = {
   user_action_required: 'Manual conflict resolution needed',
 }
 
+const REASON_LABELS: Record<string, string> = {
+  b3_sidecar_mismatch: 'b3 sidecar checksum mismatch',
+}
+
 function ResolveDialog({
   item,
   onClose,
@@ -67,12 +71,16 @@ function ResolveDialog({
 }) {
   const [resolution, setResolution] = useState<SyncResolution>('keep_master')
   const [newFilePath, setNewFilePath] = useState('')
+  const [confirmUntrack, setConfirmUntrack] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+
+  const isB3Mismatch = item?.reason === 'b3_sidecar_mismatch'
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setResolution('keep_master')
+      setResolution(item?.reason === 'b3_sidecar_mismatch' ? 'accept_current' : 'keep_master')
       setNewFilePath('')
+      setConfirmUntrack(false)
       setSubmitting(false)
     }, 0)
 
@@ -104,47 +112,102 @@ function ResolveDialog({
         </p>
 
         <div className="mt-4 space-y-3">
-          <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
-            <input
-              type="radio"
-              name="resolution"
-              value="keep_master"
-              checked={resolution === 'keep_master'}
-              onChange={() => setResolution('keep_master')}
-            />
-            Keep the primary copy
-          </label>
-          <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
-            <input
-              type="radio"
-              name="resolution"
-              value="keep_mirror"
-              checked={resolution === 'keep_mirror'}
-              onChange={() => setResolution('keep_mirror')}
-            />
-            Keep the mirror copy
-          </label>
-          <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm">
-            <input
-              type="radio"
-              name="resolution"
-              value="provide_new"
-              checked={resolution === 'provide_new'}
-              onChange={() => setResolution('provide_new')}
-              className="mt-0.5"
-            />
-            <span className="flex-1">
-              Provide a replacement file path
-              {resolution === 'provide_new' && (
+          {isB3Mismatch ? (
+            <>
+              <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm">
                 <input
-                  value={newFilePath}
-                  onChange={(event) => setNewFilePath(event.target.value)}
-                  placeholder="/path/to/replacement/file"
-                  className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  type="radio"
+                  name="resolution"
+                  value="accept_current"
+                  checked={resolution === 'accept_current'}
+                  onChange={() => {
+                    setResolution('accept_current')
+                    setConfirmUntrack(false)
+                  }}
+                  className="mt-0.5"
                 />
-              )}
-            </span>
-          </label>
+                <span>
+                  <span className="font-medium">Accept current file</span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Update the `.b3` sidecar to match the current tracked checksum, then continue
+                    normal mirroring.
+                  </p>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="resolution"
+                  value="untrack"
+                  checked={resolution === 'untrack'}
+                  onChange={() => setResolution('untrack')}
+                  className="mt-0.5"
+                />
+                <span className="flex-1">
+                  <span className="font-medium">Delete tracking</span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Remove this tracked record and related queue items. On-disk files are not
+                    changed.
+                  </p>
+                  {resolution === 'untrack' ? (
+                    <label className="mt-2 flex items-start gap-2 rounded-md border border-border bg-muted/40 px-2 py-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={confirmUntrack}
+                        onChange={(event) => setConfirmUntrack(event.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>I understand this permanently removes the tracking record.</span>
+                    </label>
+                  ) : null}
+                </span>
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="resolution"
+                  value="keep_master"
+                  checked={resolution === 'keep_master'}
+                  onChange={() => setResolution('keep_master')}
+                />
+                Keep the primary copy
+              </label>
+              <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="resolution"
+                  value="keep_mirror"
+                  checked={resolution === 'keep_mirror'}
+                  onChange={() => setResolution('keep_mirror')}
+                />
+                Keep the mirror copy
+              </label>
+              <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="resolution"
+                  value="provide_new"
+                  checked={resolution === 'provide_new'}
+                  onChange={() => setResolution('provide_new')}
+                  className="mt-0.5"
+                />
+                <span className="flex-1">
+                  Provide a replacement file path
+                  {resolution === 'provide_new' && (
+                    <input
+                      value={newFilePath}
+                      onChange={(event) => setNewFilePath(event.target.value)}
+                      placeholder="/path/to/replacement/file"
+                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  )}
+                </span>
+              </label>
+            </>
+          )}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -158,7 +221,11 @@ function ResolveDialog({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={submitting || (resolution === 'provide_new' && !newFilePath.trim())}
+            disabled={
+              submitting ||
+              (resolution === 'provide_new' && !newFilePath.trim()) ||
+              (resolution === 'untrack' && !confirmUntrack)
+            }
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? 'Resolving…' : 'Resolve'}
@@ -473,6 +540,11 @@ export function SyncQueuePage() {
                   <div className="font-mono text-xs text-foreground">
                     {item.relative_path || '—'}
                   </div>
+                  {item.reason ? (
+                    <div className="mt-1 text-xs text-amber-700">
+                      Reason: {REASON_LABELS[item.reason] ?? item.reason}
+                    </div>
+                  ) : null}
                   {item.error_message ? (
                     <div className="mt-1 text-xs text-red-600">{item.error_message}</div>
                   ) : null}

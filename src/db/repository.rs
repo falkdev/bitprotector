@@ -88,6 +88,7 @@ pub struct TrackedFolder {
     pub drive_pair_id: i64,
     pub folder_path: String,
     pub virtual_path: Option<String>,
+    pub include_checksum_sidecars: bool,
     pub scanning: bool,
     pub scan_scanned_files: i64,
     pub scan_total_files: i64,
@@ -159,6 +160,7 @@ pub struct SyncQueueItem {
     pub action: String,
     pub status: String,
     pub error_message: Option<String>,
+    pub reason: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
 }
@@ -1110,12 +1112,28 @@ impl Repository {
         folder_path: &str,
         virtual_path: Option<&str>,
     ) -> anyhow::Result<TrackedFolder> {
+        self.create_tracked_folder_with_sidecars(drive_pair_id, folder_path, virtual_path, false)
+    }
+
+    pub fn create_tracked_folder_with_sidecars(
+        &self,
+        drive_pair_id: i64,
+        folder_path: &str,
+        virtual_path: Option<&str>,
+        include_checksum_sidecars: bool,
+    ) -> anyhow::Result<TrackedFolder> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![drive_pair_id, folder_path, virtual_path],
+                "INSERT INTO tracked_folders (
+                    drive_pair_id, folder_path, virtual_path, include_checksum_sidecars
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    drive_pair_id,
+                    folder_path,
+                    virtual_path,
+                    include_checksum_sidecars as i64
+                ],
             )?;
             conn.last_insert_rowid()
         };
@@ -1126,6 +1144,7 @@ impl Repository {
         let conn = self.conn()?;
         let folder = conn.query_row(
             "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    include_checksum_sidecars,
                     scanning, scan_scanned_files, scan_total_files,
                     mirroring, deleting, mirror_mirrored_files, mirror_total_files,
                     last_scanned_at, last_mirrored_at, created_at
@@ -1137,16 +1156,17 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    scanning: row.get::<_, i64>(4)? != 0,
-                    scan_scanned_files: row.get(5)?,
-                    scan_total_files: row.get(6)?,
-                    mirroring: row.get::<_, i64>(7)? != 0,
-                    deleting: row.get::<_, i64>(8)? != 0,
-                    mirror_mirrored_files: row.get(9)?,
-                    mirror_total_files: row.get(10)?,
-                    last_scanned_at: row.get(11)?,
-                    last_mirrored_at: row.get(12)?,
-                    created_at: row.get(13)?,
+                    include_checksum_sidecars: row.get::<_, i64>(4)? != 0,
+                    scanning: row.get::<_, i64>(5)? != 0,
+                    scan_scanned_files: row.get(6)?,
+                    scan_total_files: row.get(7)?,
+                    mirroring: row.get::<_, i64>(8)? != 0,
+                    deleting: row.get::<_, i64>(9)? != 0,
+                    mirror_mirrored_files: row.get(10)?,
+                    mirror_total_files: row.get(11)?,
+                    last_scanned_at: row.get(12)?,
+                    last_mirrored_at: row.get(13)?,
+                    created_at: row.get(14)?,
                 })
             },
         )?;
@@ -1157,6 +1177,7 @@ impl Repository {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    include_checksum_sidecars,
                     scanning, scan_scanned_files, scan_total_files,
                     mirroring, deleting, mirror_mirrored_files, mirror_total_files,
                     last_scanned_at, last_mirrored_at, created_at
@@ -1169,16 +1190,17 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    scanning: row.get::<_, i64>(4)? != 0,
-                    scan_scanned_files: row.get(5)?,
-                    scan_total_files: row.get(6)?,
-                    mirroring: row.get::<_, i64>(7)? != 0,
-                    deleting: row.get::<_, i64>(8)? != 0,
-                    mirror_mirrored_files: row.get(9)?,
-                    mirror_total_files: row.get(10)?,
-                    last_scanned_at: row.get(11)?,
-                    last_mirrored_at: row.get(12)?,
-                    created_at: row.get(13)?,
+                    include_checksum_sidecars: row.get::<_, i64>(4)? != 0,
+                    scanning: row.get::<_, i64>(5)? != 0,
+                    scan_scanned_files: row.get(6)?,
+                    scan_total_files: row.get(7)?,
+                    mirroring: row.get::<_, i64>(8)? != 0,
+                    deleting: row.get::<_, i64>(9)? != 0,
+                    mirror_mirrored_files: row.get(10)?,
+                    mirror_total_files: row.get(11)?,
+                    last_scanned_at: row.get(12)?,
+                    last_mirrored_at: row.get(13)?,
+                    created_at: row.get(14)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1829,11 +1851,31 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<SyncQueueItem> {
+        self.create_sync_queue_item_with_reason_and_error(tracked_file_id, action, None, None)
+    }
+
+    pub fn create_sync_queue_item_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<SyncQueueItem> {
+        self.create_sync_queue_item_with_reason_and_error(tracked_file_id, action, reason, None)
+    }
+
+    pub fn create_sync_queue_item_with_reason_and_error(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<SyncQueueItem> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO sync_queue (tracked_file_id, action) VALUES (?1, ?2)",
-                rusqlite::params![tracked_file_id, action],
+                "INSERT INTO sync_queue (tracked_file_id, action, reason, error_message)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![tracked_file_id, action, reason, error_message],
             )?;
             conn.last_insert_rowid()
         };
@@ -1845,8 +1887,27 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<Option<SyncQueueItem>> {
-        self.create_sync_queue_item_dedup_with_created(tracked_file_id, action)
-            .map(|(item, _created)| Some(item))
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            None,
+            None,
+        )
+        .map(|(item, _created)| Some(item))
+    }
+
+    pub fn create_sync_queue_item_dedup_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<(SyncQueueItem, bool)> {
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            reason,
+            None,
+        )
     }
 
     pub fn create_sync_queue_item_dedup_with_created(
@@ -1854,30 +1915,73 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<(SyncQueueItem, bool)> {
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            None,
+            None,
+        )
+    }
+
+    pub fn create_sync_queue_item_dedup_with_reason_and_error_with_created(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<(SyncQueueItem, bool)> {
         let conn = self.conn()?;
         let existing: Result<i64, _> = conn.query_row(
             "SELECT id FROM sync_queue
-             WHERE tracked_file_id=?1 AND action=?2 AND status IN ('pending', 'in_progress')
+             WHERE tracked_file_id=?1
+               AND action=?2
+               AND status IN ('pending', 'in_progress')
+               AND ((?3 IS NULL AND reason IS NULL) OR reason=?4)
              ORDER BY id LIMIT 1",
-            rusqlite::params![tracked_file_id, action],
+            rusqlite::params![tracked_file_id, action, reason, reason],
             |row| row.get(0),
         );
         match existing {
             Ok(id) => Ok((self.get_sync_queue_item(id)?, false)),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 drop(conn);
-                self.create_sync_queue_item(tracked_file_id, action)
-                    .map(|item| (item, true))
+                self.create_sync_queue_item_with_reason_and_error(
+                    tracked_file_id,
+                    action,
+                    reason,
+                    error_message,
+                )
+                .map(|item| (item, true))
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub fn has_pending_sync_queue_item_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM sync_queue
+             WHERE tracked_file_id=?1
+               AND action=?2
+               AND reason=?3
+               AND status IN ('pending', 'in_progress')",
+            rusqlite::params![tracked_file_id, action, reason],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn get_sync_queue_item(&self, id: i64) -> anyhow::Result<SyncQueueItem> {
         let conn = self.conn()?;
         let item = conn.query_row(
             "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
-                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at
              FROM sync_queue sq
              LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
              WHERE sq.id=?1",
@@ -1890,8 +1994,9 @@ impl Repository {
                     action: row.get(3)?,
                     status: row.get(4)?,
                     error_message: row.get(5)?,
-                    created_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+                    reason: row.get(6)?,
+                    created_at: row.get(7)?,
+                    completed_at: row.get(8)?,
                 })
             },
         )?;
@@ -1915,7 +2020,7 @@ impl Repository {
         };
         let query = format!(
             "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
-                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at
              FROM sync_queue sq
              LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
              {where_clause}
@@ -1933,8 +2038,9 @@ impl Repository {
                     action: row.get(3)?,
                     status: row.get(4)?,
                     error_message: row.get(5)?,
-                    created_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+                    reason: row.get(6)?,
+                    created_at: row.get(7)?,
+                    completed_at: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

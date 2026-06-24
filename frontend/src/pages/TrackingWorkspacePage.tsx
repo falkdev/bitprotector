@@ -807,6 +807,7 @@ export function TrackingWorkspacePage() {
               drive_pair_id: item.drive_pair_id,
               folder_path: item.path,
               virtual_path: item.virtual_path,
+              include_checksum_sidecars: false,
               scanning: false,
               scan_scanned_files: 0,
               scan_total_files: 0,

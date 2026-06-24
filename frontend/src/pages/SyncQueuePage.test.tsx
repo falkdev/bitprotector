@@ -661,6 +661,82 @@ describe('SyncQueuePage', () => {
     expect(resolutionBody).toEqual({ resolution: 'keep_master' })
   })
 
+  it('uses accept_current by default for b3 sidecar mismatch items', async () => {
+    const user = userEvent.setup()
+    let resolutionBody: unknown = null
+    const item = makeSyncQueueItem({
+      id: 74,
+      tracked_file_id: 33,
+      action: 'user_action_required',
+      status: 'pending',
+      reason: 'b3_sidecar_mismatch',
+    })
+
+    mockSseStream(makeSyncSummary({ total: 1, pending_items: 1 }))
+    server.use(
+      api.get('/sync/queue', () => queueResponse([item])),
+      api.post('/sync/queue/74/resolve', async ({ request }) => {
+        resolutionBody = await request.json()
+        return HttpResponse.json({ ...item, status: 'completed' })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByTestId('sync-queue-row-74')
+    await user.click(screen.getByRole('button', { name: 'Resolve' }))
+
+    expect(await screen.findByText('Accept current file')).toBeInTheDocument()
+    expect(screen.getByText('Delete tracking')).toBeInTheDocument()
+    expect(screen.queryByText('Keep the primary copy')).not.toBeInTheDocument()
+
+    const resolveButtons = screen.getAllByRole('button', { name: 'Resolve' })
+    await user.click(resolveButtons[resolveButtons.length - 1])
+
+    expect(resolutionBody).toEqual({ resolution: 'accept_current' })
+  })
+
+  it('requires explicit confirmation before untrack resolution is submitted', async () => {
+    const user = userEvent.setup()
+    let resolutionBody: unknown = null
+    const item = makeSyncQueueItem({
+      id: 75,
+      tracked_file_id: 34,
+      action: 'user_action_required',
+      status: 'pending',
+      reason: 'b3_sidecar_mismatch',
+    })
+
+    mockSseStream(makeSyncSummary({ total: 1, pending_items: 1 }))
+    server.use(
+      api.get('/sync/queue', () => queueResponse([item])),
+      api.post('/sync/queue/75/resolve', async ({ request }) => {
+        resolutionBody = await request.json()
+        return HttpResponse.json({ ...item, status: 'completed' })
+      })
+    )
+
+    renderWithApp(<SyncQueuePage />)
+
+    await screen.findByTestId('sync-queue-row-75')
+    await user.click(screen.getByRole('button', { name: 'Resolve' }))
+    await user.click(screen.getByRole('radio', { name: /Delete tracking/i }))
+
+    const resolveButtons = screen.getAllByRole('button', { name: 'Resolve' })
+    const submitButton = resolveButtons[resolveButtons.length - 1]
+    expect(submitButton).toBeDisabled()
+
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand this permanently removes the tracking record.',
+      })
+    )
+    expect(submitButton).toBeEnabled()
+
+    await user.click(submitButton)
+    expect(resolutionBody).toEqual({ resolution: 'untrack' })
+  })
+
   it('closes the resolve dialog when cancel is clicked', async () => {
     const user = userEvent.setup()
     mockSseStream(makeSyncSummary({ total: 1, pending_items: 1 }))

@@ -145,7 +145,7 @@ async fn get_queue_item(repo: web::Data<Repository>, path: web::Path<i64>) -> Ht
 /// POST /sync/queue/{id}/resolve
 ///
 /// Resolve a `user_action_required` sync queue item.
-/// Body: `{ "resolution": "keep_master|keep_mirror|provide_new", "new_file_path": "<path>" }`
+/// Body: `{ "resolution": "keep_master|keep_mirror|provide_new|accept_current|untrack", "new_file_path": "<path>" }`
 async fn resolve_queue_item(
     repo: web::Data<Repository>,
     bus: web::Data<SyncEventBus>,
@@ -173,6 +173,8 @@ async fn resolve_queue_item(
             } else if msg.contains("only 'user_action_required'")
                 || msg.contains("only 'pending'")
                 || msg.contains("Unknown resolution")
+                || msg.contains("requires 'accept_current' or 'untrack'")
+                || msg.contains("only valid when reason")
             {
                 HttpResponse::BadRequest().json(ApiError::new("bad_request", &msg))
             } else if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {

@@ -18,6 +18,8 @@ pub enum SyncCommand {
     Resume,
     /// Run a scheduled task once (sync or integrity-check)
     Run(RunArgs),
+    /// Resolve a pending user_action_required queue item
+    Resolve(ResolveArgs),
 }
 
 #[derive(Args, Debug)]
@@ -43,6 +45,17 @@ pub struct AddArgs {
 pub struct RunArgs {
     /// Task to run: sync or integrity-check
     pub task: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ResolveArgs {
+    /// Sync queue item ID
+    pub id: i64,
+    /// Resolution: keep_master, keep_mirror, provide_new, accept_current, untrack
+    pub resolution: String,
+    /// Replacement file path (required only for provide_new)
+    #[arg(long)]
+    pub new_file_path: Option<String>,
 }
 
 pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
@@ -120,6 +133,15 @@ pub fn handle(cmd: SyncCommand, repo: &Repository) -> anyhow::Result<()> {
                 task.as_str(),
                 count
             );
+        }
+        SyncCommand::Resolve(args) => {
+            let item = sync_queue::resolve_queue_item(
+                repo,
+                args.id,
+                &args.resolution,
+                args.new_file_path.as_deref(),
+            )?;
+            println!("Resolved queue item #{} with {}", item.id, args.resolution);
         }
     }
     Ok(())

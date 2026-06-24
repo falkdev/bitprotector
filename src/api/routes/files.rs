@@ -1,7 +1,7 @@
 use crate::api::models::ApiError;
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
 use crate::core::sync_queue::SyncEventBus;
-use crate::core::{drive, mirror, tracker, virtual_path};
+use crate::core::{drive, mirror, sync_queue, tracker, virtual_path};
 use crate::db::repository::Repository;
 use crate::logging::event_logger;
 use actix_web::{web, HttpResponse, Responder};
@@ -59,6 +59,22 @@ pub async fn track_file(
             }
         };
     if !existed_before && pair.standby_accepts_sync() {
+        let has_b3_mismatch = match repo.has_pending_sync_queue_item_with_reason(
+            tracked.id,
+            "user_action_required",
+            sync_queue::B3_SIDECAR_MISMATCH_REASON,
+        ) {
+            Ok(has_mismatch) => has_mismatch,
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+            }
+        };
+
+        if has_b3_mismatch {
+            return HttpResponse::Created().json(tracked);
+        }
+
         if let Err(e) = repo.create_sync_queue_item_dedup(tracked.id, "adopt_mirror") {
             return HttpResponse::InternalServerError()
                 .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));

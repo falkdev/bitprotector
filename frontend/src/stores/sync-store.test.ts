@@ -6,6 +6,8 @@ import { useSyncStore } from './sync-store'
 import type { SyncQueueItem } from '@/types/sync'
 
 function makeSyncItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
+  const { reason, ...rest } = overrides
+
   return {
     id: 1,
     tracked_file_id: 1,
@@ -13,9 +15,10 @@ function makeSyncItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
     action: 'mirror',
     status: 'pending',
     error_message: null,
+    reason: reason ?? null,
     created_at: '2026-01-01T00:00:00Z',
     completed_at: null,
-    ...overrides,
+    ...rest,
   }
 }
 

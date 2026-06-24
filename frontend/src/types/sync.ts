@@ -7,7 +7,12 @@ export type SyncAction =
   | 'adopt_mirror'
   | 'user_action_required'
 
-export type SyncResolution = 'keep_master' | 'keep_mirror' | 'provide_new'
+export type SyncResolution =
+  | 'keep_master'
+  | 'keep_mirror'
+  | 'provide_new'
+  | 'accept_current'
+  | 'untrack'
 
 export interface SyncQueueItem {
   id: number
@@ -16,6 +21,7 @@ export interface SyncQueueItem {
   action: SyncAction
   status: SyncStatus
   error_message: string | null
+  reason: string | null
   created_at: string
   completed_at: string | null
 }

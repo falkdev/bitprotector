@@ -10,6 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const QUEUE_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
+pub const B3_SIDECAR_MISMATCH_REASON: &str = "b3_sidecar_mismatch";
 static LAST_QUEUE_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -328,6 +329,8 @@ pub fn process_all_pending_async(repo: &Repository, bus: SyncEventBus) {
 /// - `"keep_master"` — overwrite mirror with master copy
 /// - `"keep_mirror"` — overwrite master with mirror copy
 /// - `"provide_new"` — replace both copies with the file at `new_file_path`
+/// - `"accept_current"` — refresh `<master>.b3` using the current tracked checksum
+/// - `"untrack"` — delete tracking for the file and all its queue items
 ///
 /// For `provide_new`, the path is validated to exist, be readable, and be a
 /// regular file before any copy is performed.
@@ -358,8 +361,49 @@ pub fn resolve_queue_item(
 
     let master_path = std::path::PathBuf::from(&pair.primary_path).join(&file.relative_path);
     let mirror_path = std::path::PathBuf::from(&pair.secondary_path).join(&file.relative_path);
+    let is_b3_sidecar_mismatch = item.reason.as_deref() == Some(B3_SIDECAR_MISMATCH_REASON);
+
+    if is_b3_sidecar_mismatch && !matches!(resolution, "accept_current" | "untrack") {
+        anyhow::bail!(
+            "Reason '{B3_SIDECAR_MISMATCH_REASON}' requires 'accept_current' or 'untrack'"
+        );
+    }
+    if !is_b3_sidecar_mismatch && matches!(resolution, "accept_current" | "untrack") {
+        anyhow::bail!(
+            "Resolution '{resolution}' is only valid when reason is '{B3_SIDECAR_MISMATCH_REASON}'"
+        );
+    }
 
     match resolution {
+        "accept_current" => {
+            let filename = std::path::Path::new(&file.relative_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .ok_or_else(|| anyhow::anyhow!("Unable to determine filename for sidecar write"))?;
+            let mut sidecar_name = std::ffi::OsString::from(filename.as_str());
+            sidecar_name.push(".b3");
+            let sidecar_path = master_path.with_file_name(sidecar_name);
+
+            std::fs::write(&sidecar_path, format!("{}  {}\n", file.checksum, filename))?;
+
+            repo.update_sync_queue_status(item_id, "completed", None)?;
+            let _ = repo.create_sync_queue_item_dedup(file.id, "adopt_mirror")?;
+
+            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+            let _ = event_logger::log_sync_completed(repo, file.id, resolution, &full_path);
+
+            return repo.get_sync_queue_item(item_id);
+        }
+        "untrack" => {
+            repo.update_sync_queue_status(item_id, "completed", None)?;
+            let resolved = repo.get_sync_queue_item(item_id)?;
+            repo.delete_tracked_file(file.id)?;
+
+            let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
+            let _ = event_logger::log_sync_completed(repo, file.id, resolution, &full_path);
+
+            return Ok(resolved);
+        }
         "keep_master" => {
             // Restore mirror from master
             mirror::restore_mirror_from_master(&pair, &file.relative_path, &file.checksum)?;
@@ -394,7 +438,7 @@ pub fn resolve_queue_item(
             std::fs::copy(src_path, &mirror_path)?;
         }
         other => anyhow::bail!(
-            "Unknown resolution '{other}'; expected keep_master, keep_mirror, or provide_new"
+            "Unknown resolution '{other}'; expected keep_master, keep_mirror, provide_new, accept_current, or untrack"
         ),
     }
 
@@ -445,6 +489,21 @@ pub fn create_for_new_tracking(repo: &Repository, file_id: i64) -> anyhow::Resul
             "adopt_mirror action already pending for file #{file_id}"
         ))
     }
+}
+
+pub fn create_user_action_required(
+    repo: &Repository,
+    file_id: i64,
+    reason: &str,
+    error_message: &str,
+) -> anyhow::Result<SyncQueueItem> {
+    let (item, _created) = repo.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+        file_id,
+        "user_action_required",
+        Some(reason),
+        Some(error_message),
+    )?;
+    Ok(item)
 }
 
 #[cfg(test)]
@@ -702,6 +761,111 @@ mod tests {
             secondary.path().join("cyc.txt").exists(),
             "Mirror should be restored"
         );
+    }
+
+    #[test]
+    fn test_resolve_b3_mismatch_accept_current_updates_sidecar_and_queues_adopt_mirror() {
+        let (primary, secondary, repo) = setup();
+        let content = b"accept-current";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("doc.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "doc.txt", &hash, content.len() as i64, None)
+            .unwrap();
+
+        fs::write(
+            primary.path().join("doc.txt.b3"),
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  doc.txt\n",
+        )
+        .unwrap();
+
+        let item = repo
+            .create_sync_queue_item_with_reason_and_error(
+                file.id,
+                "user_action_required",
+                Some(B3_SIDECAR_MISMATCH_REASON),
+                Some("mismatch"),
+            )
+            .unwrap();
+
+        let resolved = resolve_queue_item(&repo, item.id, "accept_current", None).unwrap();
+        assert_eq!(resolved.status, "completed");
+
+        let sidecar = fs::read_to_string(primary.path().join("doc.txt.b3")).unwrap();
+        assert_eq!(sidecar, format!("{}  doc.txt\n", hash));
+
+        let (pending, _) = repo.list_sync_queue(Some("pending"), 1, 20).unwrap();
+        assert!(pending
+            .iter()
+            .any(|q| q.tracked_file_id == file.id && q.action == "adopt_mirror"));
+    }
+
+    #[test]
+    fn test_resolve_b3_mismatch_untrack_deletes_tracked_file() {
+        let (primary, secondary, repo) = setup();
+        let content = b"untrack";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("doc.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "doc.txt", &hash, content.len() as i64, None)
+            .unwrap();
+
+        let item = repo
+            .create_sync_queue_item_with_reason_and_error(
+                file.id,
+                "user_action_required",
+                Some(B3_SIDECAR_MISMATCH_REASON),
+                Some("mismatch"),
+            )
+            .unwrap();
+
+        let resolved = resolve_queue_item(&repo, item.id, "untrack", None).unwrap();
+        assert_eq!(resolved.status, "completed");
+        assert!(repo.get_tracked_file(file.id).is_err());
+    }
+
+    #[test]
+    fn test_resolve_accept_current_rejected_for_non_b3_reason() {
+        let (primary, secondary, repo) = setup();
+        let content = b"plain";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("doc.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "doc.txt", &hash, content.len() as i64, None)
+            .unwrap();
+
+        let item = repo
+            .create_sync_queue_item(file.id, "user_action_required")
+            .unwrap();
+
+        let err = resolve_queue_item(&repo, item.id, "accept_current", None).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("only valid when reason is 'b3_sidecar_mismatch'"));
     }
 
     /// Verifies that process_all_pending drains a queue larger than the internal

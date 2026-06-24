@@ -3,6 +3,7 @@ export interface TrackedFolder {
   drive_pair_id: number
   folder_path: string
   virtual_path: string | null
+  include_checksum_sidecars: boolean
   scanning: boolean
   scan_scanned_files: number
   scan_total_files: number
@@ -19,6 +20,7 @@ export interface CreateFolderRequest {
   drive_pair_id: number
   folder_path: string
   virtual_path?: string | null
+  include_checksum_sidecars?: boolean
 }
 
 export interface UpdateFolderRequest {

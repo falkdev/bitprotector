@@ -16,6 +16,7 @@ import type { CreateFolderRequest } from '@/types/folder'
 const schema = z.object({
   drive_pair_id: z.coerce.number().min(1, 'Select a drive pair'),
   folder_path: z.string().min(1, 'Folder path is required'),
+  include_checksum_sidecars: z.boolean().optional(),
   virtual_path: z
     .string()
     .optional()
@@ -79,6 +80,7 @@ export function FolderFormModal({
                 drive_pair_id: Number(data.drive_pair_id),
                 folder_path: resolution.relativePath,
                 virtual_path: data.virtual_path?.trim() || undefined,
+                include_checksum_sidecars: Boolean(data.include_checksum_sidecars),
               })
             })}
             className="space-y-4"
@@ -153,6 +155,22 @@ export function FolderFormModal({
               {errors.virtual_path ? (
                 <p className="mt-1 text-xs text-destructive">{errors.virtual_path.message}</p>
               ) : null}
+            </div>
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  {...register('include_checksum_sidecars')}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">Include `.b3` checksum sidecar files</span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    By default, `.b3` files are used for verification only and are not tracked or
+                    mirrored.
+                  </p>
+                </span>
+              </label>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
