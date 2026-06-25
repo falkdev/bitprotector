@@ -6,13 +6,10 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
-use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const QUEUE_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
 pub const B3_SIDECAR_MISMATCH_REASON: &str = "b3_sidecar_mismatch";
-static LAST_QUEUE_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
-    LazyLock::new(|| Mutex::new(None));
 
 fn should_publish_queue_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
     match last_published_at {
@@ -21,15 +18,16 @@ fn should_publish_queue_progress(last_published_at: Option<Instant>, now: Instan
     }
 }
 
-fn try_publish_queue_progress(bus: &SyncEventBus, repo: &Repository) {
+fn try_publish_queue_progress(
+    last_published_at: &mut Option<Instant>,
+    bus: &SyncEventBus,
+    repo: &Repository,
+) {
     let now = Instant::now();
-    let mut last = LAST_QUEUE_PROGRESS_PUBLISH_AT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if should_publish_queue_progress(*last, now) {
+    if should_publish_queue_progress(*last_published_at, now) {
         bus.publish_snapshot(repo);
-        *last = Some(now);
+        *last_published_at = Some(now);
     }
 }
 
@@ -258,6 +256,7 @@ pub fn process_all_pending(
     repo.requeue_in_progress_sync_queue()?;
     let page_size: i64 = 1000;
     let mut processed = 0u32;
+    let mut last_progress_published_at = None;
     loop {
         // Always fetch page 1: processed items are no longer "pending" so the
         // window slides forward naturally without needing an explicit offset.
@@ -280,13 +279,13 @@ pub fn process_all_pending(
                     return Ok(processed);
                 }
             }
-            if let Err(e) = process_item(repo, item, None) {
+            if let Err(e) = process_item(repo, item, bus) {
                 tracing::error!("Error processing sync queue item {}: {}", item.id, e);
             }
             processed += 1;
 
             if let Some(b) = bus {
-                try_publish_queue_progress(b, repo);
+                try_publish_queue_progress(&mut last_progress_published_at, b, repo);
             }
         }
         // Guard against an infinite loop if every remaining item is
@@ -397,10 +396,10 @@ pub fn resolve_queue_item(
         "untrack" => {
             repo.update_sync_queue_status(item_id, "completed", None)?;
             let resolved = repo.get_sync_queue_item(item_id)?;
-            repo.delete_tracked_file(file.id)?;
 
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             let _ = event_logger::log_sync_completed(repo, file.id, resolution, &full_path);
+            repo.delete_tracked_file(file.id)?;
 
             return Ok(resolved);
         }
@@ -838,6 +837,19 @@ mod tests {
         let resolved = resolve_queue_item(&repo, item.id, "untrack", None).unwrap();
         assert_eq!(resolved.status, "completed");
         assert!(repo.get_tracked_file(file.id).is_err());
+
+        let (events, total) = repo
+            .list_event_logs(Some("sync_completed"), None, None, None, 1, 20)
+            .unwrap();
+        assert!(total >= 1);
+        assert!(events.iter().any(|entry| {
+            entry.message.contains("Sync completed (untrack):")
+                && entry
+                    .details
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("\"action\":\"untrack\"")
+        }));
     }
 
     #[test]

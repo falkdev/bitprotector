@@ -53,16 +53,20 @@ async fn queue_stream(repo: web::Data<Repository>, bus: web::Data<SyncEventBus>)
     // Subscribe before taking the snapshot so no concurrent mutations are missed.
     let rx = bus.subscribe();
     let initial = bus.snapshot(&repo);
+    let initial_revision = initial.revision;
 
     let initial_stream = futures_util::stream::once(std::future::ready({
         let json = serde_json::to_string(&initial).unwrap_or_default();
         Ok::<Bytes, actix_web::Error>(Bytes::from(format!("data: {json}\n\n")))
     }));
 
-    let event_stream = futures_util::stream::unfold(rx, |mut rx| async move {
+    let event_stream = futures_util::stream::unfold(rx, move |mut rx| async move {
         loop {
             match rx.recv().await {
                 Ok(summary) => {
+                    if summary.revision < initial_revision {
+                        continue;
+                    }
                     let json = serde_json::to_string(&summary).unwrap_or_default();
                     return Some((
                         Ok::<Bytes, actix_web::Error>(Bytes::from(format!("data: {json}\n\n"))),

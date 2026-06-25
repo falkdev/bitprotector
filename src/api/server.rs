@@ -365,6 +365,12 @@ pub async fn run_server(
         if let Err(e) = repo.cleanup_stale_integrity_runs() {
             tracing::warn!("Failed to clean up stale integrity runs on startup: {}", e);
         }
+        if let Err(e) = repo.reset_stale_folder_flags() {
+            tracing::warn!(
+                "Failed to reset stale folder operation flags on startup: {}",
+                e
+            );
+        }
         let mut sched = Scheduler::new_with_bus(
             Arc::clone(&repo_arc),
             db_path.to_string(),

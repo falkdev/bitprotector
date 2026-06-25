@@ -4,12 +4,9 @@ use crate::core::{drive, mirror, tracker, virtual_path};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const SCAN_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
-static LAST_PROGRESS_PUBLISH_AT: LazyLock<Mutex<Option<Instant>>> =
-    LazyLock::new(|| Mutex::new(None));
 
 fn should_publish_progress(last_published_at: Option<Instant>, now: Instant) -> bool {
     match last_published_at {
@@ -18,15 +15,16 @@ fn should_publish_progress(last_published_at: Option<Instant>, now: Instant) -> 
     }
 }
 
-fn try_publish_progress(bus: &SyncEventBus, repo: &Repository) {
+fn try_publish_progress(
+    last_published_at: &mut Option<Instant>,
+    bus: &SyncEventBus,
+    repo: &Repository,
+) {
     let now = Instant::now();
-    let mut last = LAST_PROGRESS_PUBLISH_AT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if should_publish_progress(*last, now) {
+    if should_publish_progress(*last_published_at, now) {
         bus.publish_snapshot(repo);
-        *last = Some(now);
+        *last_published_at = Some(now);
     }
 }
 
@@ -84,7 +82,7 @@ impl From<&crate::db::repository::TrackedFolder> for MirrorActiveResponse {
             mirroring: folder.mirroring,
             mirrored: folder.mirror_mirrored_files,
             total: folder.mirror_total_files,
-            mirrored_files: folder.mirror_total_files,
+            mirrored_files: folder.mirror_mirrored_files,
         }
     }
 }
@@ -171,8 +169,10 @@ async fn delete_folder(
     std::thread::spawn(move || {
         let result = tracker::untrack_folder_cascade(&repo_clone, id);
         if let Err(error) = result {
-            eprintln!("folder delete #{id} failed: {error}");
-            let _ = repo_clone.clear_folder_delete(id);
+            tracing::error!(folder_id = id, error = %error, "folder delete failed");
+            if let Err(clear_error) = repo_clone.clear_folder_delete(id) {
+                tracing::error!(folder_id = id, error = %clear_error, "failed to clear folder delete flag");
+            }
         }
         bus_clone.publish_snapshot(&repo_clone);
     });
@@ -243,19 +243,20 @@ async fn scan_folder(
     let repo_clone = repo.get_ref().clone();
     let bus_clone = bus.get_ref().clone();
     std::thread::spawn(move || {
+        let mut last_progress_published_at = None;
         let result = (|| -> anyhow::Result<()> {
             let folder = repo_clone.get_tracked_folder(folder_id)?;
             let pair = drive::load_operational_pair(&repo_clone, folder.drive_pair_id)?;
             tracker::scan_tracked_folder(&repo_clone, &pair, &folder, |scanned| {
                 repo_clone.update_scan_progress(folder_id, scanned)?;
-                try_publish_progress(&bus_clone, &repo_clone);
+                try_publish_progress(&mut last_progress_published_at, &bus_clone, &repo_clone);
                 Ok(())
             })?;
             Ok(())
         })();
 
         if let Err(error) = result {
-            eprintln!("folder scan #{folder_id} failed: {error}");
+            tracing::error!(folder_id = folder_id, error = %error, "folder scan failed");
         }
 
         let _ = repo_clone.finish_folder_scan(folder_id);
@@ -315,6 +316,7 @@ async fn mirror_folder(
     let repo_clone = repo.get_ref().clone();
     let bus_clone = bus.get_ref().clone();
     std::thread::spawn(move || {
+        let mut last_progress_published_at = None;
         let result = (|| -> anyhow::Result<()> {
             let mut processed = 0i64;
             for file in queued_files {
@@ -332,13 +334,13 @@ async fn mirror_folder(
 
                 processed += 1;
                 let _ = repo_clone.update_mirror_progress(folder_id, processed);
-                try_publish_progress(&bus_clone, &repo_clone);
+                try_publish_progress(&mut last_progress_published_at, &bus_clone, &repo_clone);
             }
             Ok(())
         })();
 
         if let Err(error) = result {
-            eprintln!("folder mirror #{folder_id} failed: {error}");
+            tracing::error!(folder_id = folder_id, error = %error, "folder mirror failed");
         }
 
         let _ = repo_clone.finish_folder_mirror(folder_id);

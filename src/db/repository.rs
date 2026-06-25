@@ -982,6 +982,20 @@ impl Repository {
         Ok(count)
     }
 
+    /// Reset stale tracked-folder operation flags left active by a prior crash/restart.
+    pub fn reset_stale_folder_flags(&self) -> anyhow::Result<usize> {
+        let conn = self.conn()?;
+        let count = conn.execute(
+            "UPDATE tracked_folders
+             SET scanning = 0,
+                 mirroring = 0,
+                 deleting = 0
+             WHERE scanning = 1 OR mirroring = 1 OR deleting = 1",
+            [],
+        )?;
+        Ok(count)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn append_integrity_run_result(
         &self,
@@ -3196,6 +3210,27 @@ mod tests {
 
         repo.clear_folder_delete(folder.id).unwrap();
         assert!(repo.start_folder_scan(folder.id, 1).is_ok());
+    }
+
+    #[test]
+    fn test_reset_stale_folder_flags_clears_active_folder_operations() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+
+        let scan_folder = repo.create_tracked_folder(pair.id, "scan", None).unwrap();
+        let mirror_folder = repo.create_tracked_folder(pair.id, "mirror", None).unwrap();
+        let delete_folder = repo.create_tracked_folder(pair.id, "delete", None).unwrap();
+
+        repo.start_folder_scan(scan_folder.id, 2).unwrap();
+        repo.start_folder_mirror(mirror_folder.id, 2).unwrap();
+        repo.start_folder_delete(delete_folder.id).unwrap();
+
+        let reset_count = repo.reset_stale_folder_flags().unwrap();
+        assert_eq!(reset_count, 3);
+
+        assert!(!repo.get_tracked_folder(scan_folder.id).unwrap().scanning);
+        assert!(!repo.get_tracked_folder(mirror_folder.id).unwrap().mirroring);
+        assert!(!repo.get_tracked_folder(delete_folder.id).unwrap().deleting);
     }
 
     #[test]

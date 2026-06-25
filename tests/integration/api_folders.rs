@@ -491,6 +491,7 @@ async fn test_folders_mirror_endpoint_processes_unmirrored_files_under_folder() 
     assert_eq!(body["mirroring"], true);
     assert_eq!(body["mirrored"], 0);
     assert_eq!(body["total"], 2);
+    assert_eq!(body["mirrored_files"], 0);
 
     actix_rt::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -632,6 +633,7 @@ async fn test_folders_mirror_active_returns_zero_state_when_idle() {
     assert_eq!(body["mirroring"], false);
     assert_eq!(body["mirrored"], 0);
     assert_eq!(body["total"], 0);
+    assert_eq!(body["mirrored_files"], 0);
 }
 
 #[actix_rt::test]
