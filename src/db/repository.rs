@@ -961,7 +961,7 @@ impl Repository {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE integrity_runs
-             SET status=?1, ended_at=datetime('now'), error_message=?2
+             SET status=?1, ended_at=datetime('now'), error_message=?2, active_workers=0
              WHERE id=?3",
             rusqlite::params![status, error_message, id],
         )?;
