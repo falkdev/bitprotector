@@ -725,7 +725,18 @@ async fn test_tracking_provenance_lifecycle_folder_scan_direct_track_and_folder_
         .insert_header(("Authorization", bearer()))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 204);
+    assert_eq!(resp.status(), 202);
+
+    actix_rt::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if repo.get_tracked_folder(folder_id).is_err() {
+                break;
+            }
+            actix_rt::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for folder delete");
 
     let req = test::TestRequest::get()
         .uri(&format!(
@@ -788,6 +799,26 @@ async fn test_files_delete() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 204);
+}
+
+#[actix_rt::test]
+async fn test_files_delete_returns_conflict_when_sync_in_progress() {
+    let repo = make_repo();
+    let pair = repo.create_drive_pair("pair-conflict", "/p", "/s").unwrap();
+    let file = repo
+        .create_tracked_file(pair.id, "busy.txt", "abc", 3, None)
+        .unwrap();
+    let queue_item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+    repo.update_sync_queue_status(queue_item.id, "in_progress", None)
+        .unwrap();
+
+    let app = make_app!(repo).await;
+    let req = test::TestRequest::delete()
+        .uri(&format!("/api/v1/files/{}", file.id))
+        .insert_header(("Authorization", bearer()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
 }
 
 #[actix_rt::test]
@@ -871,14 +902,26 @@ async fn test_files_track_pre_existing_matching_mirror() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let process_resp = test::call_service(&app, process_req).await;
-    assert_eq!(process_resp.status(), 200);
+    assert_eq!(process_resp.status(), 202);
+
+    // Processing is async — wait up to 2 s for the background worker to finish.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let queue_after = loop {
+        let item = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+        if item.status == "completed" || item.status == "failed" {
+            break item;
+        }
+        if std::time::Instant::now() >= deadline {
+            break item;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
 
     let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
     assert!(
         tracked_after.is_mirrored,
         "adopt_mirror should mark matching standby as mirrored"
     );
-    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
     assert_eq!(queue_after.status, "completed");
     assert_eq!(
         fs::read(secondary.path().join("match.txt")).unwrap(),
@@ -923,14 +966,26 @@ async fn test_files_track_pre_existing_stale_mirror() {
         .insert_header(("Authorization", bearer()))
         .to_request();
     let process_resp = test::call_service(&app, process_req).await;
-    assert_eq!(process_resp.status(), 200);
+    assert_eq!(process_resp.status(), 202);
+
+    // Processing is async — wait up to 2 s for the background worker to finish.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let queue_after = loop {
+        let item = repo.get_sync_queue_item(queue_items[0].id).unwrap();
+        if item.status == "completed" || item.status == "failed" {
+            break item;
+        }
+        if std::time::Instant::now() >= deadline {
+            break item;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
 
     let tracked_after = repo.get_tracked_file(tracked_id).unwrap();
     assert!(
         tracked_after.is_mirrored,
         "adopt_mirror should mark stale standby as mirrored after copy"
     );
-    let queue_after = repo.get_sync_queue_item(queue_items[0].id).unwrap();
     assert_eq!(queue_after.status, "completed");
     assert_eq!(
         fs::read(secondary.path().join("stale.txt")).unwrap(),

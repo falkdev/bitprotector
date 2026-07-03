@@ -5,6 +5,7 @@ pub mod integrity;
 pub mod integrity_runs;
 pub mod mirror;
 pub mod scheduler;
+pub mod sidecar;
 pub mod sync_queue;
 pub mod system;
 pub mod tracker;

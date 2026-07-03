@@ -45,7 +45,6 @@ pub fn start_run_async(
         if let Err(error) = process_run(&repo_clone, run_id, deadline, cfg) {
             let message = error.to_string();
             let _ = repo_clone.finish_integrity_run(run_id, RUN_STATUS_FAILED, Some(&message));
-            let _ = repo_clone.set_integrity_run_active_workers(run_id, 0);
         }
     });
 
@@ -68,7 +67,6 @@ pub fn run_sync(
     if let Err(e) = process_run(repo, run.id, deadline, cfg) {
         let message = e.to_string();
         let _ = repo.finish_integrity_run(run.id, RUN_STATUS_FAILED, Some(&message));
-        let _ = repo.set_integrity_run_active_workers(run.id, 0);
         return Err(e);
     }
     repo.get_integrity_run(run.id)

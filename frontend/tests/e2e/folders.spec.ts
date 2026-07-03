@@ -18,6 +18,8 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
   await page.getByLabel(/Virtual Path/i).fill(fixture.folderVirtualPath)
   await page.getByRole('button', { name: 'Add Folder' }).last().click()
   await expectToast(page, 'Folder added')
+  await page.getByRole('combobox').first().selectOption({ label: fixture.driveName })
+  await page.getByPlaceholder('Search by path').fill(fixture.folderRelativePath)
 
   const row = page
     .locator('[data-testid^="folder-row-"]')
@@ -27,14 +29,16 @@ test('adds a tracked folder and scans it against the live backend', async ({ pag
 
   await row.getByRole('button', { name: 'Scan' }).click()
   await expectToast(page, 'Folder scan started')
+  await page.getByPlaceholder('Search by path').fill(`${fixture.folderRelativePath}/${fileName}`)
   const trackedFileRow = page
     .locator('[data-testid^="file-row-"]')
     .filter({ hasText: `${fixture.folderRelativePath}/${fileName}` })
     .first()
   await expect(trackedFileRow).toBeVisible()
+  await page.getByPlaceholder('Search by path').fill(fixture.folderRelativePath)
 
   await row.getByRole('button', { name: 'Mirror' }).click()
-  await expectToast(page, /Mirror complete:/)
+  await expectToast(page, 'Folder mirror started')
   await expect(await qemu.pathExists(fixture.secondaryFilePath)).toBe(true)
   await expect(await qemu.readFile(fixture.secondaryFilePath)).toContain(
     `report for ${fixture.runId}`

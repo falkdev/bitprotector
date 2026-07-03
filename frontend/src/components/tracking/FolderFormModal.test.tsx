@@ -59,6 +59,7 @@ describe('FolderFormModal', () => {
       drive_pair_id: 1,
       folder_path: 'documents',
       virtual_path: undefined,
+      include_checksum_sidecars: false,
     })
   })
 
@@ -141,6 +142,7 @@ describe('FolderFormModal', () => {
       drive_pair_id: 1,
       folder_path: 'documents',
       virtual_path: '/virtual/docs',
+      include_checksum_sidecars: false,
     })
   })
 
@@ -164,6 +166,29 @@ describe('FolderFormModal', () => {
       drive_pair_id: 1,
       folder_path: 'documents',
       virtual_path: '/mnt/secondary/selected/documents',
+      include_checksum_sidecars: false,
+    })
+  })
+
+  it('submits include_checksum_sidecars=true when checkbox is enabled', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+
+    render(<FolderFormModal drives={[drive]} onClose={() => {}} onSave={onSave} />)
+
+    await user.selectOptions(screen.getByRole('combobox'), '1')
+    await user.type(
+      screen.getByPlaceholderText('documents or /mnt/drive-a/documents'),
+      '/mnt/secondary/documents'
+    )
+    await user.click(screen.getByRole('checkbox', { name: /Include .*checksum sidecar files/i }))
+    await user.click(screen.getByRole('button', { name: 'Add Folder' }))
+
+    expect(onSave).toHaveBeenCalledWith({
+      drive_pair_id: 1,
+      folder_path: 'documents',
+      virtual_path: undefined,
+      include_checksum_sidecars: true,
     })
   })
 

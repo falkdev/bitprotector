@@ -1,4 +1,4 @@
-use crate::core::{drive, mirror, tracker, virtual_path};
+use crate::core::{drive, mirror, sync_queue, tracker, virtual_path};
 use crate::db::repository::Repository;
 use crate::logging::event_logger;
 use clap::{Args, Subcommand};
@@ -72,7 +72,13 @@ pub fn handle(cmd: FilesCommand, repo: &Repository) -> anyhow::Result<()> {
             println!("Tracked file #{}: {}", tracked.id, tracked.relative_path);
             println!("  Checksum:  {}", tracked.checksum);
             println!("  Size:      {} bytes", tracked.file_size);
-            if !existed_before && pair.standby_accepts_sync() {
+            let has_b3_mismatch = repo.has_pending_sync_queue_item_with_reason(
+                tracked.id,
+                "user_action_required",
+                sync_queue::B3_SIDECAR_MISMATCH_REASON,
+            )?;
+
+            if !existed_before && pair.standby_accepts_sync() && !has_b3_mismatch {
                 repo.create_sync_queue_item_dedup(tracked.id, "adopt_mirror")?;
                 println!("  Mirror queued: yes");
             } else {

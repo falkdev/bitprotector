@@ -1,4 +1,4 @@
-use crate::core::{checksum, drive, sync_queue, virtual_path};
+use crate::core::{checksum, drive, sidecar, sync_queue, virtual_path};
 use crate::db::repository::{DrivePair, Repository, TrackedFile, TrackedFolder};
 use crate::logging::event_logger;
 use anyhow::Context;
@@ -36,13 +36,25 @@ fn ensure_world_readable(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct SidecarMismatch {
+    expected_checksum: String,
+    computed_checksum: String,
+}
+
+#[derive(Debug, Clone)]
+struct TrackedFileFromDisk {
+    tracked_file: TrackedFile,
+    sidecar_mismatch: Option<SidecarMismatch>,
+}
+
 fn create_tracked_file_from_disk(
     repo: &Repository,
     drive_pair: &DrivePair,
     relative_path: &str,
     tracked_direct: bool,
     tracked_via_folder: bool,
-) -> anyhow::Result<TrackedFile> {
+) -> anyhow::Result<TrackedFileFromDisk> {
     let master_path = PathBuf::from(drive_pair.active_path()).join(relative_path);
 
     if !master_path.exists() {
@@ -59,9 +71,28 @@ fn create_tracked_file_from_disk(
     let file_checksum =
         checksum::checksum_file(&master_path, checksum::ChecksumStrategy::Streaming)
             .context("Failed to compute file checksum")?;
+
+    let sidecar_mismatch = match sidecar::read_b3_sidecar(&master_path) {
+        Ok(Some(expected_checksum)) if expected_checksum != file_checksum => {
+            Some(SidecarMismatch {
+                expected_checksum,
+                computed_checksum: file_checksum.clone(),
+            })
+        }
+        Ok(_) => None,
+        Err(error) => {
+            tracing::warn!(
+                "Ignoring malformed .b3 sidecar for {}: {}",
+                master_path.display(),
+                error
+            );
+            None
+        }
+    };
+
     let file_size = master_path.metadata()?.len() as i64;
 
-    repo.create_tracked_file_with_source(
+    let tracked_file = repo.create_tracked_file_with_source(
         drive_pair.id,
         relative_path,
         &file_checksum,
@@ -69,7 +100,42 @@ fn create_tracked_file_from_disk(
         None,
         tracked_direct,
         tracked_via_folder,
-    )
+    )?;
+
+    Ok(TrackedFileFromDisk {
+        tracked_file,
+        sidecar_mismatch,
+    })
+}
+
+fn queue_b3_sidecar_mismatch(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+    file: &TrackedFile,
+    mismatch: &SidecarMismatch,
+) -> anyhow::Result<()> {
+    let message = format!(
+        "Expected {} from .b3 sidecar, computed {}",
+        mismatch.expected_checksum, mismatch.computed_checksum
+    );
+
+    sync_queue::create_user_action_required(
+        repo,
+        file.id,
+        sync_queue::B3_SIDECAR_MISMATCH_REASON,
+        &message,
+    )?;
+
+    let full_path = format!("{}/{}", drive_pair.primary_path, file.relative_path);
+    let _ = event_logger::log_sync_failed(
+        repo,
+        file.id,
+        sync_queue::B3_SIDECAR_MISMATCH_REASON,
+        &message,
+        &full_path,
+    );
+
+    Ok(())
 }
 
 /// Track a new file: compute checksum, record in database, and mirror it.
@@ -98,10 +164,19 @@ pub fn track_file(
         return repo.get_tracked_file(existing.id);
     }
 
-    let tracked = create_tracked_file_from_disk(repo, drive_pair, relative_path, true, false)?;
+    let tracked_from_disk =
+        create_tracked_file_from_disk(repo, drive_pair, relative_path, true, false)?;
+    let tracked = tracked_from_disk.tracked_file;
 
     if let Some(virtual_path) = virtual_path {
         if let Err(error) = virtual_path::set_virtual_path(repo, tracked.id, virtual_path) {
+            let _ = repo.delete_tracked_file(tracked.id);
+            return Err(error);
+        }
+    }
+
+    if let Some(mismatch) = tracked_from_disk.sidecar_mismatch.as_ref() {
+        if let Err(error) = queue_b3_sidecar_mismatch(repo, drive_pair, &tracked, mismatch) {
             let _ = repo.delete_tracked_file(tracked.id);
             return Err(error);
         }
@@ -122,6 +197,17 @@ pub fn track_folder(
     folder_path: &str,
     virtual_path: Option<&str>,
 ) -> anyhow::Result<TrackedFolder> {
+    track_folder_with_options(repo, drive_pair, folder_path, virtual_path, false)
+}
+
+/// Register a folder so it can be auto-scanned for new files.
+pub fn track_folder_with_options(
+    repo: &Repository,
+    drive_pair: &DrivePair,
+    folder_path: &str,
+    virtual_path: Option<&str>,
+    include_checksum_sidecars: bool,
+) -> anyhow::Result<TrackedFolder> {
     drive::require_pair_mutation_allowed(drive_pair)?;
     drive::ensure_drive_root_marker(drive_pair.active_path())?;
 
@@ -132,7 +218,12 @@ pub fn track_folder(
             full_path.display()
         );
     }
-    let tracked = repo.create_tracked_folder(drive_pair.id, folder_path, None)?;
+    let tracked = repo.create_tracked_folder_with_sidecars(
+        drive_pair.id,
+        folder_path,
+        None,
+        include_checksum_sidecars,
+    )?;
 
     if let Some(virtual_path) = virtual_path {
         if let Err(error) = virtual_path::set_folder_virtual_path(repo, tracked.id, virtual_path) {
@@ -248,6 +339,10 @@ pub fn auto_track_folder_files(
                 .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path"))?
                 .to_string();
 
+            if !folder.include_checksum_sidecars && relative_path.ends_with(".b3") {
+                continue;
+            }
+
             if repo
                 .get_tracked_file_by_path(drive_pair.id, &relative_path)
                 .is_ok()
@@ -255,11 +350,14 @@ pub fn auto_track_folder_files(
                 continue;
             }
 
-            let file =
+            let tracked_from_disk =
                 create_tracked_file_from_disk(repo, drive_pair, &relative_path, false, true)?;
+            let file = tracked_from_disk.tracked_file;
             let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
             let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
-            if drive_pair.standby_accepts_sync() {
+            if let Some(mismatch) = tracked_from_disk.sidecar_mismatch.as_ref() {
+                queue_b3_sidecar_mismatch(repo, drive_pair, &file, mismatch)?;
+            } else if drive_pair.standby_accepts_sync() {
                 let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
             } else {
                 repo.update_tracked_file_mirror_status(file.id, false)?;
@@ -301,6 +399,10 @@ pub fn count_folder_files(drive_pair: &DrivePair, folder: &TrackedFolder) -> any
                 continue;
             }
             if path.is_file() {
+                let relative_path = relative_path_for_entry(&path, drive_pair)?;
+                if !folder.include_checksum_sidecars && relative_path.ends_with(".b3") {
+                    continue;
+                }
                 count += 1;
             }
         }
@@ -316,12 +418,11 @@ pub fn scan_tracked_folder<F>(
     mut on_progress: F,
 ) -> anyhow::Result<FolderScanSummary>
 where
-    F: FnMut(i64, i64) -> anyhow::Result<()>,
+    F: FnMut(i64) -> anyhow::Result<()>,
 {
     drive::require_pair_mutation_allowed(drive_pair)?;
 
     let folder_full_path = PathBuf::from(drive_pair.active_path()).join(&folder.folder_path);
-    let total_files = count_folder_files(drive_pair, folder)?;
     let mut scanned_files = 0i64;
     let mut new_files = 0usize;
     let mut changed_files = 0usize;
@@ -342,6 +443,10 @@ where
             }
 
             let relative_path = relative_path_for_entry(&path, drive_pair)?;
+
+            if !folder.include_checksum_sidecars && relative_path.ends_with(".b3") {
+                continue;
+            }
 
             match repo.get_tracked_file_by_path(drive_pair.id, &relative_path) {
                 Ok(existing) => {
@@ -369,16 +474,19 @@ where
                 }
                 Err(error) => match error.downcast_ref::<SqlError>() {
                     Some(SqlError::QueryReturnedNoRows) => {
-                        let file = create_tracked_file_from_disk(
+                        let tracked_from_disk = create_tracked_file_from_disk(
                             repo,
                             drive_pair,
                             &relative_path,
                             false,
                             true,
                         )?;
+                        let file = tracked_from_disk.tracked_file;
                         let full_path = format!("{}/{}", drive_pair.primary_path, relative_path);
                         let _ = event_logger::log_file_tracked(repo, file.id, &full_path);
-                        if drive_pair.standby_accepts_sync() {
+                        if let Some(mismatch) = tracked_from_disk.sidecar_mismatch.as_ref() {
+                            queue_b3_sidecar_mismatch(repo, drive_pair, &file, mismatch)?;
+                        } else if drive_pair.standby_accepts_sync() {
                             let _ = sync_queue::create_for_new_tracking(repo, file.id)?;
                         } else {
                             repo.update_tracked_file_mirror_status(file.id, false)?;
@@ -390,7 +498,7 @@ where
             }
 
             scanned_files += 1;
-            on_progress(scanned_files, total_files)?;
+            on_progress(scanned_files)?
         }
     }
 
@@ -555,16 +663,19 @@ mod tests {
         fs::write(primary.path().join("docs/new.txt"), b"new").unwrap();
         let folder = track_folder(&repo, &pair, "docs", None).unwrap();
 
+        // Establish the total before the scan (as the route does via start_folder_scan).
+        repo.start_folder_scan(folder.id, 2).unwrap();
+
         let mut progress_updates = Vec::new();
-        let summary = scan_tracked_folder(&repo, &pair, &folder, |scanned, total| {
-            progress_updates.push((scanned, total));
-            repo.update_scan_progress(folder.id, scanned, total)
+        let summary = scan_tracked_folder(&repo, &pair, &folder, |scanned| {
+            progress_updates.push(scanned);
+            repo.update_scan_progress(folder.id, scanned)
         })
         .unwrap();
 
         assert_eq!(summary.new_files, 1);
         assert_eq!(summary.changed_files, 1);
-        assert_eq!(progress_updates.last().copied(), Some((2, 2)));
+        assert_eq!(progress_updates.last().copied(), Some(2));
 
         let updated_existing = repo.get_tracked_file(existing.id).unwrap();
         assert_eq!(
@@ -652,6 +763,149 @@ mod tests {
         assert_eq!(
             queue[0].action, "adopt_mirror",
             "Folder scan should enqueue adopt_mirror, not mirror"
+        );
+    }
+
+    #[test]
+    fn test_track_file_with_matching_sidecar_creates_no_manual_queue_item() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+        let content = b"hello sidecar";
+        let checksum = checksum::checksum_bytes(content);
+
+        fs::write(primary.path().join("doc.txt"), content).unwrap();
+        fs::write(
+            primary.path().join("doc.txt.b3"),
+            format!("{}  doc.txt\n", checksum),
+        )
+        .unwrap();
+
+        let tracked = track_file(&repo, &pair, "doc.txt", None).unwrap();
+        assert_eq!(tracked.relative_path, "doc.txt");
+
+        let (items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert_eq!(total, 0);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_track_file_with_mismatching_sidecar_enqueues_user_action_required() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::write(primary.path().join("doc.txt"), b"current content").unwrap();
+        fs::write(
+            primary.path().join("doc.txt.b3"),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  doc.txt\n",
+        )
+        .unwrap();
+
+        let tracked = track_file(&repo, &pair, "doc.txt", None).unwrap();
+
+        let (items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert_eq!(total, 1);
+        let item = &items[0];
+        assert_eq!(item.tracked_file_id, tracked.id);
+        assert_eq!(item.action, "user_action_required");
+        assert_eq!(
+            item.reason.as_deref(),
+            Some(sync_queue::B3_SIDECAR_MISMATCH_REASON)
+        );
+        assert!(item
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Expected"));
+    }
+
+    #[test]
+    fn test_track_file_with_malformed_sidecar_warns_and_proceeds() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::write(primary.path().join("bad.txt"), b"content").unwrap();
+        fs::write(primary.path().join("bad.txt.b3"), "not-a-valid-hash").unwrap();
+
+        let tracked = track_file(&repo, &pair, "bad.txt", None).unwrap();
+        assert_eq!(tracked.relative_path, "bad.txt");
+
+        let (items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert_eq!(total, 0);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_auto_track_folder_skips_b3_files_by_default() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::create_dir(primary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/report.txt"), b"report").unwrap();
+        fs::write(
+            primary.path().join("docs/report.txt.b3"),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  report.txt\n",
+        )
+        .unwrap();
+        fs::write(primary.path().join("docs/standalone.b3"), b"raw").unwrap();
+
+        let folder = track_folder(&repo, &pair, "docs", None).unwrap();
+        let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
+
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].relative_path, "docs/report.txt");
+        assert!(repo
+            .get_tracked_file_by_path(pair.id, "docs/report.txt.b3")
+            .is_err());
+        assert!(repo
+            .get_tracked_file_by_path(pair.id, "docs/standalone.b3")
+            .is_err());
+    }
+
+    #[test]
+    fn test_auto_track_folder_includes_b3_files_when_opted_in() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::create_dir(primary.path().join("docs")).unwrap();
+        fs::write(primary.path().join("docs/report.txt"), b"report").unwrap();
+        fs::write(
+            primary.path().join("docs/report.txt.b3"),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  report.txt\n",
+        )
+        .unwrap();
+
+        let folder = track_folder_with_options(&repo, &pair, "docs", None, true).unwrap();
+        let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
+        assert_eq!(tracked.len(), 2);
+        assert!(tracked.iter().any(|f| f.relative_path == "docs/report.txt"));
+        assert!(tracked
+            .iter()
+            .any(|f| f.relative_path == "docs/report.txt.b3"));
+    }
+
+    #[test]
+    fn test_auto_track_folder_sidecar_mismatch_queues_user_action_required() {
+        let (primary, secondary, repo) = setup();
+        let pair = make_pair(&primary, &secondary, &repo);
+
+        fs::create_dir(primary.path().join("inbox")).unwrap();
+        fs::write(primary.path().join("inbox/new.txt"), b"fresh").unwrap();
+        fs::write(
+            primary.path().join("inbox/new.txt.b3"),
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  new.txt\n",
+        )
+        .unwrap();
+
+        let folder = track_folder(&repo, &pair, "inbox", None).unwrap();
+        let tracked = auto_track_folder_files(&repo, &pair, &folder).unwrap();
+        assert_eq!(tracked.len(), 1);
+
+        let (items, total) = repo.list_sync_queue(Some("pending"), 1, 10).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(items[0].action, "user_action_required");
+        assert_eq!(
+            items[0].reason.as_deref(),
+            Some(sync_queue::B3_SIDECAR_MISMATCH_REASON)
         );
     }
 

@@ -2,6 +2,7 @@ use crate::api::auth::{JwtSecret, RevokedTokens};
 use crate::api::models::ApiError;
 use crate::core::checksum::ChecksumConfig;
 use crate::core::scheduler::Scheduler;
+use crate::core::sync_queue::SyncEventBus;
 use crate::db::repository::{create_pool, Repository};
 use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
@@ -355,16 +356,26 @@ pub async fn run_server(
     }
     let repo_arc = Arc::new(repo.clone());
 
+    // Create the event bus — shared between the server (SSE) and the scheduler.
+    let sync_bus = SyncEventBus::new();
+
     // Create and load the scheduler from persisted DB schedules.
     let scheduler = {
         // Clean up any integrity runs left in "running"/"stopping" state by a previous crash.
         if let Err(e) = repo.cleanup_stale_integrity_runs() {
             tracing::warn!("Failed to clean up stale integrity runs on startup: {}", e);
         }
-        let mut sched = Scheduler::new_with_checksum_config(
+        if let Err(e) = repo.reset_stale_folder_flags() {
+            tracing::warn!(
+                "Failed to reset stale folder operation flags on startup: {}",
+                e
+            );
+        }
+        let mut sched = Scheduler::new_with_bus(
             Arc::clone(&repo_arc),
             db_path.to_string(),
             checksum_cfg.clone(),
+            sync_bus.clone(),
         );
         let _ = sched.reload(); // ignore startup errors; schedules may be empty
         Arc::new(Mutex::new(sched))
@@ -378,6 +389,7 @@ pub async fn run_server(
     let scheduler_data = web::Data::new(scheduler);
     let checksum_cfg_data = web::Data::new(checksum_cfg);
     let revoked_tokens = web::Data::new(RevokedTokens::default());
+    let sync_bus_data = web::Data::new(sync_bus);
     let limiter = Arc::new(RateLimiter::new(rate_limit_rps, 1));
     let frontend_dir = PathBuf::from(FRONTEND_DIST_DIR);
 
@@ -398,6 +410,7 @@ pub async fn run_server(
             .app_data(scheduler_data.clone())
             .app_data(checksum_cfg_data.clone())
             .app_data(revoked_tokens.clone())
+            .app_data(sync_bus_data.clone())
             .configure(|cfg| configure_application(cfg, Some(frontend_dir.clone())))
     });
 

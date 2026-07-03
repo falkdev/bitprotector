@@ -29,6 +29,8 @@ macro_rules! make_app_with_db_path {
         let _sd = actix_web::web::Data::new(std::sync::Arc::new(std::sync::Mutex::new(
             bitprotector_lib::core::scheduler::Scheduler::new(_ra),
         )));
+        let _bus = bitprotector_lib::core::sync_queue::SyncEventBus::new();
+        let _bus_data = actix_web::web::Data::new(_bus);
         actix_web::test::init_service(
             actix_web::App::new()
                 .app_data(actix_web::web::Data::new(_r))
@@ -42,7 +44,44 @@ macro_rules! make_app_with_db_path {
                     bitprotector_lib::core::checksum::ChecksumConfig::default(),
                 ))
                 .app_data(_sd)
+                .app_data(_bus_data)
                 .configure(bitprotector_lib::api::server::configure_routes),
         )
+    }};
+}
+
+/// Like `make_app_with_db_path!` but also returns the `SyncEventBus` so tests
+/// can subscribe and verify that mutations push events.
+#[macro_export]
+macro_rules! make_app_and_bus {
+    ($repo:expr) => {{
+        let _r = $repo;
+        let _ra = std::sync::Arc::new(_r.clone());
+        let _sd = actix_web::web::Data::new(std::sync::Arc::new(std::sync::Mutex::new(
+            bitprotector_lib::core::scheduler::Scheduler::new(_ra),
+        )));
+        let _bus = bitprotector_lib::core::sync_queue::SyncEventBus::new();
+        let _bus_out = _bus.clone();
+        let _bus_data = actix_web::web::Data::new(_bus);
+        let _app = actix_web::test::init_service(
+            actix_web::App::new()
+                .app_data(actix_web::web::Data::new(_r))
+                .app_data(actix_web::web::Data::new(
+                    bitprotector_lib::api::routes::database::DatabasePath(
+                        "/tmp/bitprotector-test.db".to_string(),
+                    ),
+                ))
+                .app_data(actix_web::web::Data::new(
+                    bitprotector_lib::api::auth::JwtSecret($crate::common::SECRET.to_vec()),
+                ))
+                .app_data(actix_web::web::Data::new(
+                    bitprotector_lib::core::checksum::ChecksumConfig::default(),
+                ))
+                .app_data(_sd)
+                .app_data(_bus_data)
+                .configure(bitprotector_lib::api::server::configure_routes),
+        )
+        .await;
+        (_app, _bus_out)
     }};
 }

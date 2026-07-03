@@ -12,6 +12,7 @@ You are a documentation specialist for the **bitprotector** project. Your job is
 docs/
   API.md              — REST API reference
   ARCHITECTURE.md     — System design and component overview
+  BUILDING.md         — Build and packaging instructions
   CI.md               — CI pipeline documentation
   CONFIGURATION.md    — Configuration reference
   testing/            — Testing guides

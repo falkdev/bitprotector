@@ -73,10 +73,16 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             drive_pair_id   INTEGER NOT NULL REFERENCES drive_pairs(id),
             folder_path     TEXT NOT NULL,
             virtual_path    TEXT,
+            include_checksum_sidecars INTEGER NOT NULL DEFAULT 0,
             scanning        INTEGER NOT NULL DEFAULT 0,
             scan_scanned_files INTEGER NOT NULL DEFAULT 0,
             scan_total_files INTEGER NOT NULL DEFAULT 0,
+            mirroring       INTEGER NOT NULL DEFAULT 0,
+            deleting        INTEGER NOT NULL DEFAULT 0,
+            mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
+            mirror_total_files INTEGER NOT NULL DEFAULT 0,
             last_scanned_at TEXT,
+            last_mirrored_at TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(drive_pair_id, folder_path)
         );",
@@ -139,6 +145,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
                                 'pending', 'in_progress', 'completed', 'failed'
                             )),
             error_message   TEXT,
+            reason          TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             completed_at    TEXT
         );",
@@ -206,6 +213,10 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         [],
     );
     let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN include_checksum_sidecars INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
         "ALTER TABLE tracked_folders ADD COLUMN scanning INTEGER NOT NULL DEFAULT 0",
         [],
     );
@@ -217,6 +228,27 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE tracked_folders ADD COLUMN scan_total_files INTEGER NOT NULL DEFAULT 0",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirroring INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirror_mirrored_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN mirror_total_files INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE tracked_folders ADD COLUMN last_mirrored_at TEXT",
+        [],
+    );
+    let _ = conn.execute("ALTER TABLE sync_queue ADD COLUMN reason TEXT", []);
     let _ = conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_tracked_files_integrity_check
          ON tracked_files(last_integrity_check_at);",
@@ -304,10 +336,18 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
                                          'pending', 'in_progress', 'completed', 'failed'
                                      )),
                      error_message   TEXT,
+                     reason          TEXT,
                      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
                      completed_at    TEXT
                  );
-                 INSERT INTO sync_queue SELECT * FROM sync_queue_old;
+                 INSERT INTO sync_queue (
+                     id, tracked_file_id, action, status,
+                     error_message, reason, created_at, completed_at
+                 )
+                 SELECT
+                     id, tracked_file_id, action, status,
+                     error_message, NULL, created_at, completed_at
+                 FROM sync_queue_old;
                  DROP TABLE sync_queue_old;",
             )?;
             conn.execute_batch("COMMIT;")?;
@@ -542,5 +582,110 @@ mod tests {
             secondary_col_count, 1,
             "secondary_media_type should be added"
         );
+    }
+
+    #[test]
+    fn test_tracked_folders_deleting_column_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE tracked_folders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_pair_id   INTEGER NOT NULL,
+                folder_path     TEXT NOT NULL,
+                virtual_path    TEXT,
+                scanning        INTEGER NOT NULL DEFAULT 0,
+                scan_scanned_files INTEGER NOT NULL DEFAULT 0,
+                scan_total_files INTEGER NOT NULL DEFAULT 0,
+                mirroring       INTEGER NOT NULL DEFAULT 0,
+                mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
+                mirror_total_files INTEGER NOT NULL DEFAULT 0,
+                last_scanned_at TEXT,
+                last_mirrored_at TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(drive_pair_id, folder_path)
+            );",
+        )
+        .expect("Failed to create legacy tracked_folders");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let deleting_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tracked_folders') WHERE name='deleting'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect tracked_folders columns");
+
+        assert_eq!(deleting_col_count, 1, "deleting should be added");
+    }
+
+    #[test]
+    fn test_tracked_folders_include_checksum_sidecars_column_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE tracked_folders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_pair_id   INTEGER NOT NULL,
+                folder_path     TEXT NOT NULL,
+                virtual_path    TEXT,
+                scanning        INTEGER NOT NULL DEFAULT 0,
+                scan_scanned_files INTEGER NOT NULL DEFAULT 0,
+                scan_total_files INTEGER NOT NULL DEFAULT 0,
+                mirroring       INTEGER NOT NULL DEFAULT 0,
+                deleting        INTEGER NOT NULL DEFAULT 0,
+                mirror_mirrored_files INTEGER NOT NULL DEFAULT 0,
+                mirror_total_files INTEGER NOT NULL DEFAULT 0,
+                last_scanned_at TEXT,
+                last_mirrored_at TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(drive_pair_id, folder_path)
+            );",
+        )
+        .expect("Failed to create legacy tracked_folders");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let include_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tracked_folders') WHERE name='include_checksum_sidecars'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect tracked_folders columns");
+
+        assert_eq!(
+            include_col_count, 1,
+            "include_checksum_sidecars should be added"
+        );
+    }
+
+    #[test]
+    fn test_sync_queue_reason_column_migrated_for_existing_table() {
+        let conn = open_memory_db();
+        conn.execute_batch(
+            "CREATE TABLE sync_queue (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracked_file_id INTEGER NOT NULL,
+                action          TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                error_message   TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                completed_at    TEXT
+            );",
+        )
+        .expect("Failed to create legacy sync_queue");
+
+        initialize_schema(&conn).expect("Schema migration failed");
+
+        let reason_col_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('sync_queue') WHERE name='reason'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to inspect sync_queue columns");
+
+        assert_eq!(reason_col_count, 1, "reason should be added");
     }
 }

@@ -724,32 +724,57 @@ On success, the folder's `last_scanned_at` is updated.
 
 ### POST `/folders/{id}/mirror`
 
-Immediately mirror all unmirrored tracked files under a tracked folder.
+Start mirroring all unmirrored tracked files under a tracked folder in a background worker.
+Mirror start/progress/completion snapshots are broadcast on `GET /sync/queue/stream`.
+
+**Response `202`:**
+
+```json
+{
+    "mirroring": true,
+    "mirrored": 0,
+    "total": 2,
+    "mirrored_files": 2
+}
+```
+
+`mirrored_files` is a compatibility alias for the scheduled total. Use `mirrored` and `total` to track in-progress mirror runs.
+
+During execution, queue rows move through `pending -> in_progress -> completed` (or `failed` on error).
+
+**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `409 Conflict` (another folder operation is already active), `500 Internal Server Error`
+
+---
+
+### GET `/folders/{id}/mirror/active`
+
+Return current mirror progress for one tracked folder.
 
 **Response `200`:**
 
 ```json
 {
+    "mirroring": true,
+    "mirrored": 1,
+    "total": 2,
     "mirrored_files": 2
 }
 ```
 
-`mirrored_files` counts files mirrored during this request.
-
-After a successful mirror, pending/in-progress `mirror` queue rows for mirrored files are marked `completed`.
-
-**Errors:** `404 Not Found`, `400 Bad Request` (standby slot unavailable), `500 Internal Server Error`
+When no mirror run is active, `mirroring` is `false` and both counters are `0`.
 
 ---
 
 ### DELETE `/folders/{id}`
 
-Stop tracking the folder.
+Start background removal of a tracked folder.
 
 Folder-origin descendant files are untracked as part of this operation when they are still marked `tracked_via_folder=true` and `tracked_direct=false`, and are not still covered by another tracked folder (for example, a separately tracked nested subfolder). Descendant files that were explicitly tracked remain tracked.
 
-**Response `204`:** No content.  
-**Errors:** `404 Not Found`, `400 Bad Request` (drive pair quiescing), `500 Internal Server Error`
+The endpoint marks the folder as `deleting=true` and returns immediately. Final deletion (including folder-origin descendant cascade cleanup) runs in the background.
+
+**Response `202`:** Accepted.  
+**Errors:** `404 Not Found`, `400 Bad Request` (drive pair quiescing), `409 Conflict` (scan/mirror/delete already active for that folder), `500 Internal Server Error`
 
 ---
 
@@ -999,11 +1024,18 @@ Get paged results for a specific run.
     "total": 42,
     "page": 1,
     "per_page": 50,
-    "queue_paused": false
+    "queue_paused": false,
+    "active_items": 12,
+    "in_progress_items": 1,
+    "pending_items": 11,
+    "completed_items": 30,
+    "failed_items": 1
 }
 ```
 
 `queue_paused` is `true` when automatic queue processing has been suspended via `POST /sync/pause`. The queue contents are unchanged; no new items will be processed until `POST /sync/resume` is called.
+
+`total` is the count for the current filter page query. The per-status fields report global queue totals independent of the active filter.
 
 ---
 
@@ -1084,15 +1116,58 @@ Delete all sync queue rows with status `completed`.
 
 ---
 
-### POST `/sync/process`
+### GET `/sync/queue/stream`
 
-Process all pending sync queue items immediately (synchronous). If the queue is paused (`queue_paused: true`), this call returns `{ "processed": 0 }` without touching any items.
+Server-Sent Events (SSE) stream. Pushes a live `SyncSummary` snapshot whenever the queue state changes (item added, processed, paused, resumed, etc.) and also when tracked-folder scan/mirror/delete state changes. Clients use this stream instead of polling `/sync/queue` and `/folders` separately.
+
+**Authorization:** `Authorization: Bearer <token>` header (same as all other endpoints).
 
 **Response `200`:**
 
-```json
-{ "processed": 10 }
+`Content-Type: text/event-stream`
+
+Each event is a JSON-serialised `SyncSummary` object on a `data:` line:
+
 ```
+data: {"total":5,"active_items":2,"pending_items":2,"in_progress_items":0,"completed_items":3,"failed_items":0,"queue_paused":false,"processing_active":false,"scanning":false,"scan_total_files":0,"scan_scanned_files":0,"scan_active_folders":0,"deleting":false,"delete_active_folders":0,"revision":7}
+
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `total` | integer | Total queue items (all statuses, unfiltered) |
+| `active_items` | integer | `pending + in_progress` |
+| `pending_items` | integer | Items waiting to be processed |
+| `in_progress_items` | integer | Items currently being processed |
+| `completed_items` | integer | Successfully processed items |
+| `failed_items` | integer | Items that failed processing |
+| `queue_paused` | boolean | `true` when processing is suspended |
+| `processing_active` | boolean | `true` while a background worker spawned by `POST /sync/process` is running |
+| `scanning` | boolean | `true` when at least one tracked folder is actively scanning |
+| `scan_total_files` | integer | Sum of `scan_total_files` across all scanning folders |
+| `scan_scanned_files` | integer | Sum of `scan_scanned_files` across all scanning folders |
+| `scan_active_folders` | integer | Number of folders currently scanning |
+| `deleting` | boolean | `true` when at least one tracked folder is currently in background delete |
+| `delete_active_folders` | integer | Number of folders currently in background delete |
+| `revision` | integer | Monotonically increasing counter; incremented on every publish. Clients compare against their last-seen revision to decide whether to re-fetch the item list. |
+
+The stream sends an initial snapshot immediately on connect. It then pushes further updates as events occur. If the connection drops, the client is expected to reconnect (with back-off).
+
+**Errors:** `401 Unauthorized` (missing or invalid token)
+
+---
+
+### POST `/sync/process`
+
+Enqueue all pending sync queue items for background processing. Returns immediately (`202 Accepted`) so the request is non-blocking. Only one background worker runs at a time; calling this while a worker is already active is a no-op (both calls still return `202`).
+
+**Response `202`:**
+
+```json
+{ "status": "started" }
+```
+
+The queue state change (including `processing_active: true`) is broadcast via the SSE stream at `GET /sync/queue/stream`.
 
 ---
 

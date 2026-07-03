@@ -40,6 +40,7 @@ fn test_folders_add_and_list() {
             drive_pair_id: pair.id,
             folder_path: "documents".to_string(),
             virtual_path: None,
+            include_b3: false,
         }),
         &repo,
     )
@@ -91,6 +92,7 @@ fn test_folders_scan_auto_tracks_new_files() {
             drive_pair_id: pair.id,
             folder_path: "uploads".to_string(),
             virtual_path: None,
+            include_b3: false,
         }),
         &repo,
     )
@@ -137,6 +139,7 @@ fn test_folders_mirror_command_mirrors_scanned_unmirrored_files() {
             drive_pair_id: pair.id,
             folder_path: "docs".to_string(),
             virtual_path: None,
+            include_b3: false,
         }),
         &repo,
     )
@@ -164,6 +167,7 @@ fn test_folders_add_nonexistent_folder_fails() {
             drive_pair_id: pair.id,
             folder_path: "no_such_folder".to_string(),
             virtual_path: None,
+            include_b3: false,
         }),
         &repo,
     );
@@ -186,6 +190,7 @@ fn test_folders_add_with_virtual_path() {
             drive_pair_id: pair.id,
             folder_path: "photos".to_string(),
             virtual_path: Some(virtual_path_on_disk.to_str().unwrap().to_string()),
+            include_b3: false,
         }),
         &repo,
     )
@@ -219,6 +224,7 @@ fn test_folders_scan_uses_secondary_after_primary_failover() {
             drive_pair_id: pair.id,
             folder_path: "docs".to_string(),
             virtual_path: None,
+            include_b3: false,
         }),
         &repo,
     )

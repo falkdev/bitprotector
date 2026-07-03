@@ -5,6 +5,7 @@ import type {
   UpdateFolderRequest,
   FolderScanStatus,
   MirrorFolderResult,
+  FolderMirrorStatus,
 } from '@/types/folder'
 
 export const foldersApi = {
@@ -38,5 +39,9 @@ export const foldersApi = {
 
   mirror(id: number): Promise<MirrorFolderResult> {
     return apiClient.post<MirrorFolderResult>(`/folders/${id}/mirror`).then((r) => r.data)
+  },
+
+  mirrorActive(id: number): Promise<FolderMirrorStatus> {
+    return apiClient.get<FolderMirrorStatus>(`/folders/${id}/mirror/active`).then((r) => r.data)
   },
 }

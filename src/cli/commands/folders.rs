@@ -29,6 +29,9 @@ pub struct AddArgs {
     /// Exact virtual path for the tracked folder
     #[arg(long)]
     pub virtual_path: Option<String>,
+    /// Include *.b3 checksum sidecar files during folder tracking scans
+    #[arg(long)]
+    pub include_b3: bool,
 }
 
 #[derive(Args, Debug)]
@@ -47,15 +50,24 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
     match cmd {
         FoldersCommand::Add(args) => {
             let pair = drive::load_operational_pair(repo, args.drive_pair_id)?;
-            let folder = tracker::track_folder(
+            let folder = tracker::track_folder_with_options(
                 repo,
                 &pair,
                 &args.folder_path,
                 args.virtual_path.as_deref(),
+                args.include_b3,
             )?;
             println!(
                 "Registered folder #{}: {} (drive pair #{})",
                 folder.id, folder.folder_path, folder.drive_pair_id
+            );
+            println!(
+                "  Include .b3 sidecars: {}",
+                if folder.include_checksum_sidecars {
+                    "yes"
+                } else {
+                    "no"
+                }
             );
         }
         FoldersCommand::List => {
@@ -89,6 +101,14 @@ pub fn handle(cmd: FoldersCommand, repo: &Repository) -> anyhow::Result<()> {
                 folder.virtual_path.as_deref().unwrap_or("(none)")
             );
             println!("  Created:           {}", folder.created_at);
+            println!(
+                "  Include .b3:       {}",
+                if folder.include_checksum_sidecars {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
         }
         FoldersCommand::Remove { id } => {
             let result = tracker::untrack_folder_cascade(repo, id)?;
@@ -219,6 +239,7 @@ mod tests {
                 drive_pair_id: pair.id,
                 folder_path: "docs".to_string(),
                 virtual_path: None,
+                include_b3: false,
             }),
             &repo,
         )
@@ -327,6 +348,7 @@ mod tests {
                 drive_pair_id: pair.id,
                 folder_path: "photos".to_string(),
                 virtual_path: Some(virtual_path_on_disk.to_str().unwrap().to_string()),
+                include_b3: false,
             }),
             &repo,
         )

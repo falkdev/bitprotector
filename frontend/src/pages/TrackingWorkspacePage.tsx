@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { useTrackingFiltersStore, DEFAULT_TRACKING_FILTERS } from '@/stores/tracking-filters-store'
+import {
+  FolderSync,
+  Link,
+  LoaderCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RefreshCw,
+  ScanSearch,
+  Trash2,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { drivesApi } from '@/api/drives'
 import { filesApi } from '@/api/files'
 import { foldersApi } from '@/api/folders'
+import { syncApi } from '@/api/sync'
+import { openSyncStream } from '@/api/sync-stream'
 import { trackingApi } from '@/api/tracking'
 import { virtualPathsApi } from '@/api/virtual-paths'
 import { FileActions } from '@/components/file-browser/FileActions'
@@ -24,7 +37,7 @@ import { suggestVirtualPathFromParent } from '@/lib/path'
 import { getErrorMessage } from '@/lib/utils'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackFileRequest } from '@/types/file'
-import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
+import type { FolderMirrorStatus, FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type { TrackingItem, TrackingListParams } from '@/types/tracking'
 import type { VirtualPathTreeNode } from '@/types/virtual-path'
 
@@ -193,6 +206,35 @@ function FolderScanningStatus({ scanned, total }: { scanned: number; total: numb
     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
       <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
       Scanning...
+    </span>
+  )
+}
+
+function FolderMirroringStatus({ mirrored, total }: { mirrored: number; total: number }) {
+  if (total > 0) {
+    const progress = Math.min(100, Math.max(0, (mirrored / total) * 100))
+
+    return (
+      <div className="min-w-32 space-y-1">
+        <div className="flex items-center gap-2 text-xs font-medium text-blue-700 dark:text-blue-300">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          <span>Mirroring...</span>
+          <span className="font-mono">{`${mirrored} / ${total}`}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/30">
+          <div
+            className="h-full rounded-full bg-blue-600 transition-[width] duration-300 dark:bg-blue-400"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+      Mirroring...
     </span>
   )
 }
@@ -442,7 +484,14 @@ function VirtualPathTree({
 export function TrackingWorkspacePage() {
   const [scanningFolderIds, setScanningFolderIds] = useState<Set<number>>(new Set())
   const [mirroringFolderIds, setMirroringFolderIds] = useState<Set<number>>(new Set())
+  const [inProgressQueueFolderIds, setInProgressQueueFolderIds] = useState<Set<number>>(new Set())
+  const [deletingItemKeys, setDeletingItemKeys] = useState<Set<string>>(new Set())
   const [folderScanStatuses, setFolderScanStatuses] = useState<Record<number, FolderScanStatus>>({})
+  const [folderMirrorStatuses, setFolderMirrorStatuses] = useState<
+    Record<number, FolderMirrorStatus>
+  >({})
+  const [inProgressSyncFileIds, setInProgressSyncFileIds] = useState<Set<number>>(new Set())
+  const [syncQueueActive, setSyncQueueActive] = useState(false)
   const [response, setResponse] = useState<{
     items: TrackingItem[]
     total: number
@@ -451,11 +500,10 @@ export function TrackingWorkspacePage() {
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [drives, setDrives] = useState<DrivePair[]>([])
+  const { filters: persistedFilters, setFilters, resetFilters } = useTrackingFiltersStore()
   const [params, setParams] = useState<TrackingListParams>({
+    ...persistedFilters,
     page: 1,
-    per_page: 50,
-    item_kind: 'all',
-    source: 'all',
   })
   const [showTrackModal, setShowTrackModal] = useState(false)
   const [showFolderModal, setShowFolderModal] = useState(false)
@@ -468,9 +516,13 @@ export function TrackingWorkspacePage() {
   const [treeRefreshKey, setTreeRefreshKey] = useState(0)
   const [virtualPaneCollapsed, setVirtualPaneCollapsed] = useState(true)
   const [bulkMirroring, setBulkMirroring] = useState(false)
-  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [postDeleteDetailAction, setPostDeleteDetailAction] =
     useState<DetailPostDeleteAction | null>(null)
+  const latestParamsRef = useRef(params)
+  const lastFolderRevisionRef = useRef<number | null>(null)
+  const hadActiveFolderOpsRef = useRef(false)
+  const activeFolderOpsRef = useRef<Set<number>>(new Set())
+  const hadActiveQueueOpsRef = useRef(false)
 
   const virtualPrefix = params.virtual_prefix ?? ''
   const hasDrivePairs = drives.length > 0
@@ -496,6 +548,87 @@ export function TrackingWorkspacePage() {
     }
   }, [])
 
+  const loadSyncQueueFileIdsByStatus = useCallback(async (status: 'pending' | 'in_progress') => {
+    const ids = new Set<number>()
+    let page = 1
+    const perPage = 200
+
+    while (true) {
+      const response = await syncApi.listQueue({ status, page, perPage })
+      for (const item of response.queue) {
+        ids.add(item.tracked_file_id)
+      }
+
+      if (page * response.per_page >= response.total || response.queue.length === 0) {
+        break
+      }
+
+      page += 1
+    }
+
+    return ids
+  }, [])
+
+  const loadSyncQueueRelativePathsByStatus = useCallback(
+    async (status: 'pending' | 'in_progress') => {
+      const paths: string[] = []
+      let page = 1
+      const perPage = 200
+
+      while (true) {
+        const response = await syncApi.listQueue({ status, page, perPage })
+        for (const item of response.queue) {
+          paths.push(item.relative_path)
+        }
+
+        if (page * response.per_page >= response.total || response.queue.length === 0) {
+          break
+        }
+
+        page += 1
+      }
+
+      return paths
+    },
+    []
+  )
+
+  const loadActiveSyncQueueRelativePaths = useCallback(
+    async (processingActive: boolean) => {
+      const inProgressPaths = await loadSyncQueueRelativePathsByStatus('in_progress')
+
+      if (!processingActive) {
+        return inProgressPaths
+      }
+
+      const pendingPaths = await loadSyncQueueRelativePathsByStatus('pending')
+      if (pendingPaths.length === 0) {
+        return inProgressPaths
+      }
+
+      return [...inProgressPaths, ...pendingPaths]
+    },
+    [loadSyncQueueRelativePathsByStatus]
+  )
+
+  const loadActiveSyncFileIds = useCallback(
+    async (processingActive: boolean) => {
+      const inProgressIds = await loadSyncQueueFileIdsByStatus('in_progress')
+
+      if (!processingActive) {
+        return inProgressIds
+      }
+
+      const pendingIds = await loadSyncQueueFileIdsByStatus('pending')
+      const merged = new Set<number>(inProgressIds)
+      for (const id of pendingIds) {
+        merged.add(id)
+      }
+      return merged
+    },
+    [loadSyncQueueFileIdsByStatus]
+  )
+
   useEffect(() => {
     let active = true
     const loadDrives = async () => {
@@ -515,6 +648,10 @@ export function TrackingWorkspacePage() {
   }, [])
 
   useEffect(() => {
+    latestParamsRef.current = params
+  }, [params])
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void load(params)
     }, 0)
@@ -524,69 +661,121 @@ export function TrackingWorkspacePage() {
     }
   }, [load, params])
 
-  const activeFolderScanIds = useMemo(
-    () =>
-      Object.entries(folderScanStatuses)
-        .filter(([, status]) => status.scanning)
-        .map(([id]) => Number(id))
-        .sort((a, b) => a - b),
-    [folderScanStatuses]
-  )
-  const activeFolderScanIdsKey = useMemo(() => activeFolderScanIds.join(','), [activeFolderScanIds])
-
   useEffect(() => {
-    if (!activeFolderScanIdsKey) return
-
-    const scanFolderIds = activeFolderScanIdsKey.split(',').map(Number)
-
     let active = true
+    const stream = openSyncStream((summary) => {
+      if (!active) return
+      if (lastFolderRevisionRef.current === summary.revision) return
+      lastFolderRevisionRef.current = summary.revision
 
-    const poll = async () => {
-      try {
-        const scanStatuses = await Promise.all(
-          scanFolderIds.map(async (folderId) => ({
-            folderId,
-            status: await foldersApi.scanActive(folderId),
-          }))
-        )
-        if (!active) return
+      const queueOpsActive = summary.processing_active || summary.in_progress_items > 0
+      setSyncQueueActive(queueOpsActive)
 
-        const completedFolderIds = scanStatuses
-          .filter(({ status }) => !status.scanning)
-          .map(({ folderId }) => folderId)
+      void (async () => {
+        try {
+          const [folders, nextInProgressSyncFileIds, inProgressQueueRelativePaths] =
+            await Promise.all([
+              foldersApi.list(),
+              summary.in_progress_items > 0 || summary.processing_active
+                ? loadActiveSyncFileIds(summary.processing_active)
+                : Promise.resolve(new Set<number>()),
+              summary.in_progress_items > 0 || summary.processing_active
+                ? loadActiveSyncQueueRelativePaths(summary.processing_active)
+                : Promise.resolve<string[]>([]),
+            ])
+          if (!active) return
 
-        setFolderScanStatuses((current) => {
-          const next = { ...current }
-          for (const { folderId, status } of scanStatuses) {
-            if (status.scanning) {
-              next[folderId] = status
-            } else {
-              delete next[folderId]
+          const nextScanStatuses: Record<number, FolderScanStatus> = {}
+          const nextMirrorStatuses: Record<number, FolderMirrorStatus> = {}
+          const nextInProgressQueueFolderIds = new Set<number>()
+          const activeFolderOps = new Set<number>()
+          const deletingFolderKeys = new Set<string>()
+
+          const normalizedInProgressPaths = inProgressQueueRelativePaths.map((path) =>
+            path.replace(/\/+$/, '')
+          )
+
+          for (const folder of folders) {
+            if (folder.scanning) {
+              nextScanStatuses[folder.id] = {
+                scanning: true,
+                scanned: folder.scan_scanned_files,
+                total: folder.scan_total_files,
+              }
+              activeFolderOps.add(folder.id)
+            }
+
+            if (folder.mirroring) {
+              nextMirrorStatuses[folder.id] = {
+                mirroring: true,
+                mirrored: folder.mirror_mirrored_files,
+                total: folder.mirror_total_files,
+              }
+              activeFolderOps.add(folder.id)
+            }
+
+            if (folder.deleting) {
+              deletingFolderKeys.add(`folder-${folder.id}`)
+              activeFolderOps.add(folder.id)
+            }
+
+            const normalizedFolderPath = folder.folder_path.replace(/\/+$/, '')
+            const hasQueueSyncInProgress = normalizedInProgressPaths.some(
+              (path) => path === normalizedFolderPath || path.startsWith(`${normalizedFolderPath}/`)
+            )
+            if (hasQueueSyncInProgress) {
+              nextInProgressQueueFolderIds.add(folder.id)
             }
           }
-          return next
-        })
 
-        if (completedFolderIds.length > 0) {
-          await load(params)
-          if (!active) return
-          setTreeRefreshKey((current) => current + 1)
+          setFolderScanStatuses(nextScanStatuses)
+          setFolderMirrorStatuses(nextMirrorStatuses)
+          setInProgressQueueFolderIds(nextInProgressQueueFolderIds)
+          setScanningFolderIds(
+            (current) => new Set(Array.from(current).filter((id) => nextScanStatuses[id]?.scanning))
+          )
+          setMirroringFolderIds(
+            (current) =>
+              new Set(Array.from(current).filter((id) => nextMirrorStatuses[id]?.mirroring))
+          )
+          setDeletingItemKeys((current) => {
+            const next = new Set(Array.from(current).filter((key) => key.startsWith('file-')))
+            for (const key of deletingFolderKeys) {
+              next.add(key)
+            }
+            return next
+          })
+          setInProgressSyncFileIds(nextInProgressSyncFileIds)
+
+          const completedFolderOpsCount = Array.from(activeFolderOpsRef.current).filter(
+            (id) => !activeFolderOps.has(id)
+          ).length
+          const anyFolderOpCompleted = completedFolderOpsCount > 0
+          const folderOpsCompleted = hadActiveFolderOpsRef.current && activeFolderOps.size === 0
+          hadActiveFolderOpsRef.current = activeFolderOps.size > 0
+          activeFolderOpsRef.current = new Set(activeFolderOps)
+
+          const queueOpsCompleted = hadActiveQueueOpsRef.current && !queueOpsActive
+          hadActiveQueueOpsRef.current = queueOpsActive
+
+          if (anyFolderOpCompleted || folderOpsCompleted || queueOpsActive || queueOpsCompleted) {
+            await load(latestParamsRef.current)
+            if (!active) return
+            if (folderOpsCompleted) {
+              setTreeRefreshKey((current) => current + 1)
+            }
+          }
+        } catch {
+          // SSE sync is best-effort; table loader reports failures.
         }
-      } catch {
-        // Polling is best-effort; the table loader reports fetch failures.
-      }
-    }
-
-    void poll()
-    const timer = window.setInterval(() => {
-      void poll()
-    }, 1000)
+      })()
+    })
 
     return () => {
       active = false
-      window.clearInterval(timer)
+      stream.abort()
     }
-  }, [activeFolderScanIdsKey, load, params])
+  }, [load, loadActiveSyncFileIds, loadActiveSyncQueueRelativePaths])
 
   const driveName = useCallback(
     (id: number) => drives.find((drive) => drive.id === id)?.name ?? `Drive #${id}`,
@@ -601,6 +790,11 @@ export function TrackingWorkspacePage() {
     }))
   }
 
+  useEffect(() => {
+    const { q, drive_id, virtual_prefix, has_virtual_path, item_kind, source, per_page } = params
+    setFilters({ q, drive_id, virtual_prefix, has_virtual_path, item_kind, source, per_page })
+  }, [params, setFilters])
+
   const items = response?.items ?? EMPTY_TRACKING_ITEMS
   const folderItems = useMemo(
     () =>
@@ -613,10 +807,16 @@ export function TrackingWorkspacePage() {
               drive_pair_id: item.drive_pair_id,
               folder_path: item.path,
               virtual_path: item.virtual_path,
+              include_checksum_sidecars: false,
               scanning: false,
               scan_scanned_files: 0,
               scan_total_files: 0,
+              mirroring: false,
+              deleting: false,
+              mirror_mirrored_files: 0,
+              mirror_total_files: 0,
               last_scanned_at: null,
+              last_mirrored_at: null,
               created_at: item.created_at,
             }) satisfies TrackedFolder
         ),
@@ -718,6 +918,7 @@ export function TrackingWorkspacePage() {
 
   const handleScanFolder = async (folder: TrackedFolder) => {
     setScanningFolderIds((current) => new Set(current).add(folder.id))
+    hadActiveFolderOpsRef.current = true
     try {
       const status = await foldersApi.scan(folder.id)
       setFolderScanStatuses((current) => ({
@@ -740,11 +941,18 @@ export function TrackingWorkspacePage() {
 
   const handleMirrorFolder = async (folder: TrackedFolder) => {
     setMirroringFolderIds((current) => new Set(current).add(folder.id))
+    hadActiveFolderOpsRef.current = true
     try {
       const result = await foldersApi.mirror(folder.id)
-      toast.success(`Mirror complete: ${result.mirrored_files} file(s) mirrored`)
-      await load(params)
-      setTreeRefreshKey((current) => current + 1)
+      setFolderMirrorStatuses((current) => ({
+        ...current,
+        [folder.id]: {
+          mirroring: result.mirroring,
+          mirrored: result.mirrored,
+          total: result.total,
+        },
+      }))
+      toast.success('Folder mirror started')
     } catch (error) {
       // Extract meaningful error message from backend response
       const errorMessage = getErrorMessage(error, 'Folder mirror failed')
@@ -788,22 +996,46 @@ export function TrackingWorkspacePage() {
     async (targets: TrackingItem[]) => {
       if (targets.length === 0) return
 
-      setBulkDeleting(true)
       const deleted: TrackingItem[] = []
       let failedCount = 0
+      let conflictCount = 0
 
-      for (const target of targets) {
-        try {
-          if (target.kind === 'file') {
-            await filesApi.delete(target.id)
-          } else {
-            await foldersApi.delete(target.id)
+      await Promise.allSettled(
+        targets.map(async (target) => {
+          const key = trackingRowKey(target)
+          setDeletingItemKeys((current) => new Set(current).add(key))
+
+          try {
+            if (target.kind === 'file') {
+              await filesApi.delete(target.id)
+            } else {
+              await foldersApi.delete(target.id)
+            }
+            deleted.push(target)
+          } catch (error) {
+            const status = (error as { response?: { status?: number } })?.response?.status
+            if (status === 409) {
+              conflictCount += 1
+            } else {
+              failedCount += 1
+            }
+            setDeletingItemKeys((current) => {
+              const next = new Set(current)
+              next.delete(key)
+              return next
+            })
+            return
           }
-          deleted.push(target)
-        } catch {
-          failedCount += 1
-        }
-      }
+
+          if (target.kind === 'file') {
+            setDeletingItemKeys((current) => {
+              const next = new Set(current)
+              next.delete(key)
+              return next
+            })
+          }
+        })
+      )
 
       const deletedCount = deleted.length
       if (deletedCount > 0) {
@@ -828,12 +1060,16 @@ export function TrackingWorkspacePage() {
 
         if (targets.length === 1) {
           toast.success(
-            targets[0].kind === 'file' ? 'File removed from tracking' : 'Folder removed'
+            targets[0].kind === 'file' ? 'File removed from tracking' : 'Folder delete started'
           )
         } else {
-          toast.success(`Removed ${deletedCount} item(s) from tracking`)
+          toast.success(`Delete requested for ${deletedCount} item(s)`)
         }
         setTreeRefreshKey((current) => current + 1)
+      }
+
+      if (conflictCount > 0) {
+        toast.error('Cannot delete while another operation is active')
       }
 
       if (failedCount > 0) {
@@ -845,7 +1081,6 @@ export function TrackingWorkspacePage() {
       setDeleteTarget(null)
       setConfirmBulkDeleteOpen(false)
       await load(params)
-      setBulkDeleting(false)
     },
     [items, load, params, selectedFile]
   )
@@ -1086,30 +1321,23 @@ export function TrackingWorkspacePage() {
                 <option value="no">Without Virtual Path</option>
               </select>
             </div>
-            {hasActiveFilters ? (
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateParams({
-                      q: undefined,
-                      drive_id: undefined,
-                      item_kind: 'all',
-                      source: 'all',
-                      has_virtual_path: undefined,
-                      virtual_prefix: undefined,
-                      page: 1,
-                    })
-                  }
-                  className="text-xs text-muted-foreground underline hover:text-foreground"
-                >
-                  Clear filters
-                </button>
-              </div>
-            ) : null}
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  resetFilters()
+                  setParams({ ...DEFAULT_TRACKING_FILTERS, page: 1 })
+                }}
+                disabled={!hasActiveFilters}
+                className="text-xs text-muted-foreground underline hover:text-foreground disabled:cursor-default disabled:no-underline disabled:opacity-40"
+                data-testid="reset-filters-button"
+              >
+                Reset filters
+              </button>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-auto p-4">
+          <div className="flex-1 overflow-auto p-4 [scrollbar-gutter:stable]">
             {loading && !response ? (
               <div className="flex items-center justify-center py-16">
                 <LoadingSpinner />
@@ -1214,6 +1442,28 @@ export function TrackingWorkspacePage() {
                           )
                         }
 
+                        const mirrorStatus = folderMirrorStatuses[item.id]
+                        const isFolderMirroring =
+                          mirroringFolderIds.has(item.id) || mirrorStatus?.mirroring === true
+
+                        if (isFolderMirroring) {
+                          return (
+                            <FolderMirroringStatus
+                              mirrored={mirrorStatus?.mirrored ?? 0}
+                              total={mirrorStatus?.total ?? 0}
+                            />
+                          )
+                        }
+
+                        if (inProgressQueueFolderIds.has(item.id)) {
+                          return (
+                            <FolderMirroringStatus
+                              mirrored={item.folder_mirrored_files ?? 0}
+                              total={item.folder_total_files ?? 0}
+                            />
+                          )
+                        }
+
                         const status = item.folder_status ?? 'not_scanned'
                         const total = item.folder_total_files ?? 0
                         const mirrored = item.folder_mirrored_files ?? 0
@@ -1232,25 +1482,39 @@ export function TrackingWorkspacePage() {
                       header: '',
                       cell: (item) =>
                         item.kind === 'file' ? (
-                          <FileActions
-                            file={toTrackedFile(item)}
-                            onMirror={handleMirror}
-                            onDelete={(file) => setDeleteTarget({ ...item, id: file.id })}
-                            onSetVirtualPath={(file) =>
-                              setFilePathModal({ ...toTrackedFile(item), id: file.id })
-                            }
-                          />
+                          (() => {
+                            const syncInProgress =
+                              inProgressSyncFileIds.has(item.id) || syncQueueActive
+                            const isDeleting = deletingItemKeys.has(`file-${item.id}`)
+
+                            return (
+                              <FileActions
+                                file={toTrackedFile(item)}
+                                onMirror={handleMirror}
+                                onDelete={(file) => setDeleteTarget({ ...item, id: file.id })}
+                                onSetVirtualPath={(file) =>
+                                  setFilePathModal({ ...toTrackedFile(item), id: file.id })
+                                }
+                                mirroring={syncInProgress}
+                                mirrorDisabled={syncInProgress || isDeleting}
+                                deleteDisabled={isDeleting || syncInProgress}
+                                deleting={isDeleting}
+                              />
+                            )
+                          })()
                         ) : (
-                          <div className="flex items-center gap-2">
+                          <div className="flex w-full items-center justify-end gap-1">
                             <button
                               onClick={(event) => {
                                 event.stopPropagation()
                                 const folder = folderItems.find((entry) => entry.id === item.id)
                                 if (folder) setFolderPathModal(folder)
                               }}
-                              className="rounded-md border border-input px-2 py-1 text-xs hover:bg-accent"
+                              className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                              title="Set Path"
+                              aria-label="Set Path"
                             >
-                              Set Path
+                              <Link className="h-4 w-4" />
                             </button>
                             {(() => {
                               const folder = folderItems.find((entry) => entry.id === item.id)
@@ -1259,8 +1523,15 @@ export function TrackingWorkspacePage() {
                               const scanStatus = folderScanStatuses[item.id]
                               const isFolderScanning =
                                 scanningFolderIds.has(item.id) || scanStatus?.scanning === true
-                              const isFolderMirroring = mirroringFolderIds.has(item.id)
-                              const isFolderBusy = isFolderScanning || isFolderMirroring
+                              const mirrorStatus = folderMirrorStatuses[item.id]
+                              const isFolderMirroring =
+                                mirroringFolderIds.has(item.id) || mirrorStatus?.mirroring === true
+                              const isFolderDeleting = deletingItemKeys.has(`folder-${item.id}`)
+                              const isFolderBusy =
+                                isFolderScanning ||
+                                isFolderMirroring ||
+                                isFolderDeleting ||
+                                syncQueueActive
 
                               return (
                                 <button
@@ -1274,23 +1545,41 @@ export function TrackingWorkspacePage() {
                                     void handleScanFolder(folder)
                                   }}
                                   disabled={isFolderBusy}
-                                  className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                  className="rounded p-1 text-muted-foreground hover:bg-green-500/10 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-50"
                                   data-testid={`folder-action-${item.id}`}
+                                  title={
+                                    isFolderScanning
+                                      ? 'Scanning folder'
+                                      : isFolderMirroring
+                                        ? 'Mirroring folder'
+                                        : syncQueueActive
+                                          ? 'Queue processing'
+                                          : wantsMirror
+                                            ? 'Mirror folder'
+                                            : 'Scan folder'
+                                  }
+                                  aria-label={
+                                    isFolderScanning
+                                      ? 'Scanning...'
+                                      : isFolderMirroring
+                                        ? 'Mirroring...'
+                                        : syncQueueActive
+                                          ? 'Queue processing'
+                                          : wantsMirror
+                                            ? 'Mirror'
+                                            : 'Scan'
+                                  }
                                 >
                                   {isFolderScanning ? (
-                                    <>
-                                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                                      Scanning...
-                                    </>
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
                                   ) : isFolderMirroring ? (
-                                    <>
-                                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                                      Mirroring...
-                                    </>
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : syncQueueActive ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
                                   ) : wantsMirror ? (
-                                    'Mirror'
+                                    <FolderSync className="h-4 w-4" />
                                   ) : (
-                                    'Scan'
+                                    <ScanSearch className="h-4 w-4" />
                                   )}
                                 </button>
                               )
@@ -1298,12 +1587,27 @@ export function TrackingWorkspacePage() {
                             <button
                               onClick={(event) => {
                                 event.stopPropagation()
+                                if (deletingItemKeys.has(`folder-${item.id}`)) return
                                 setDeleteTarget(item)
                               }}
-                              className="rounded-md border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                              disabled={
+                                deletingItemKeys.has(`folder-${item.id}`) ||
+                                scanningFolderIds.has(item.id) ||
+                                folderScanStatuses[item.id]?.scanning === true ||
+                                mirroringFolderIds.has(item.id) ||
+                                folderMirrorStatuses[item.id]?.mirroring === true ||
+                                syncQueueActive
+                              }
+                              className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Delete folder"
+                              aria-label="Delete folder"
                               data-testid={`delete-folder-${item.id}`}
                             >
-                              Delete
+                              {deletingItemKeys.has(`folder-${item.id}`) ? (
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
                             </button>
                           </div>
                         ),
@@ -1317,7 +1621,6 @@ export function TrackingWorkspacePage() {
                       void openFileDetails(item)
                     }
                   }}
-                  selectedRowKey={selectedFile ? `file-${selectedFile.id}` : null}
                   selectedRowKeys={selectedRowKeys}
                   emptyState={
                     hasActiveFilters ? (
@@ -1370,7 +1673,7 @@ export function TrackingWorkspacePage() {
                   <button
                     type="button"
                     onClick={() => void handleMirrorSelected()}
-                    disabled={bulkMirroring || bulkDeleting}
+                    disabled={bulkMirroring}
                     className="shrink-0 whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
                     data-testid="bulk-mirror"
                   >
@@ -1379,8 +1682,8 @@ export function TrackingWorkspacePage() {
                   <button
                     type="button"
                     onClick={() => setConfirmBulkDeleteOpen(true)}
-                    disabled={bulkDeleting || bulkMirroring}
-                    className="shrink-0 whitespace-nowrap rounded-md border border-destructive/40 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={bulkMirroring}
+                    className="shrink-0 whitespace-nowrap rounded-md border border-destructive/40 px-3 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                     data-testid="bulk-delete"
                   >
                     Delete selected

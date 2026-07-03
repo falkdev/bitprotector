@@ -1,4 +1,5 @@
 use crate::api::models::ApiError;
+use crate::core::sync_queue::SyncEventBus;
 use crate::core::{scheduler, sync_queue};
 use crate::db::repository::Repository;
 use actix_web::{web, HttpResponse};
@@ -24,8 +25,8 @@ pub struct ResolveRequest {
 }
 
 #[derive(Serialize)]
-struct ProcessResult {
-    processed: u32,
+struct ProcessStarted {
+    status: &'static str,
 }
 
 #[derive(Serialize)]
@@ -44,6 +45,47 @@ struct QueuePausedResult {
     queue_paused: bool,
 }
 
+/// GET /sync/queue/stream  — Server-Sent Events with live queue summary + scan progress.
+async fn queue_stream(repo: web::Data<Repository>, bus: web::Data<SyncEventBus>) -> HttpResponse {
+    use actix_web::web::Bytes;
+    use futures_util::StreamExt as _;
+
+    // Subscribe before taking the snapshot so no concurrent mutations are missed.
+    let rx = bus.subscribe();
+    let initial = bus.snapshot(&repo);
+    let initial_revision = initial.revision;
+
+    let initial_stream = futures_util::stream::once(std::future::ready({
+        let json = serde_json::to_string(&initial).unwrap_or_default();
+        Ok::<Bytes, actix_web::Error>(Bytes::from(format!("data: {json}\n\n")))
+    }));
+
+    let event_stream = futures_util::stream::unfold(rx, move |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(summary) => {
+                    if summary.revision < initial_revision {
+                        continue;
+                    }
+                    let json = serde_json::to_string(&summary).unwrap_or_default();
+                    return Some((
+                        Ok::<Bytes, actix_web::Error>(Bytes::from(format!("data: {json}\n\n"))),
+                        rx,
+                    ));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("X-Accel-Buffering", "no"))
+        .streaming(initial_stream.chain(event_stream))
+}
+
 /// GET /sync/queue
 async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -> HttpResponse {
     let page = query.page.unwrap_or(1).max(1);
@@ -57,6 +99,13 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
         Ok(count) => count,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+    let counts_by_status = match repo.count_sync_queue_by_status() {
+        Ok(counts) => counts,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+    let pending_items = *counts_by_status.get("pending").unwrap_or(&0);
+    let completed_items = *counts_by_status.get("completed").unwrap_or(&0);
+    let failed_items = *counts_by_status.get("failed").unwrap_or(&0);
     match repo.list_sync_queue(query.status.as_deref(), page, per_page) {
         Ok((items, total)) => HttpResponse::Ok().json(serde_json::json!({
             "queue": items,
@@ -66,6 +115,9 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
             "queue_paused": queue_paused,
             "active_items": active_items,
             "in_progress_items": in_progress_items,
+            "pending_items": pending_items,
+            "completed_items": completed_items,
+            "failed_items": failed_items,
         })),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
@@ -74,10 +126,14 @@ async fn list_queue(repo: web::Data<Repository>, query: web::Query<ListQuery>) -
 /// POST /sync/queue
 async fn add_queue_item(
     repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
     body: web::Json<AddQueueItem>,
 ) -> HttpResponse {
     match repo.create_sync_queue_item(body.tracked_file_id, &body.action) {
-        Ok(item) => HttpResponse::Created().json(item),
+        Ok(item) => {
+            bus.publish_snapshot(&repo);
+            HttpResponse::Created().json(item)
+        }
         Err(e) => HttpResponse::BadRequest().body(e.to_string()),
     }
 }
@@ -93,9 +149,10 @@ async fn get_queue_item(repo: web::Data<Repository>, path: web::Path<i64>) -> Ht
 /// POST /sync/queue/{id}/resolve
 ///
 /// Resolve a `user_action_required` sync queue item.
-/// Body: `{ "resolution": "keep_master|keep_mirror|provide_new", "new_file_path": "<path>" }`
+/// Body: `{ "resolution": "keep_master|keep_mirror|provide_new|accept_current|untrack", "new_file_path": "<path>" }`
 async fn resolve_queue_item(
     repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
     path: web::Path<i64>,
     body: web::Json<ResolveRequest>,
 ) -> HttpResponse {
@@ -106,7 +163,10 @@ async fn resolve_queue_item(
         &body.resolution,
         body.new_file_path.as_deref(),
     ) {
-        Ok(item) => HttpResponse::Ok().json(item),
+        Ok(item) => {
+            bus.publish_snapshot(&repo);
+            HttpResponse::Ok().json(item)
+        }
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("does not exist")
@@ -117,6 +177,8 @@ async fn resolve_queue_item(
             } else if msg.contains("only 'user_action_required'")
                 || msg.contains("only 'pending'")
                 || msg.contains("Unknown resolution")
+                || msg.contains("requires 'accept_current' or 'untrack'")
+                || msg.contains("only valid when reason")
             {
                 HttpResponse::BadRequest().json(ApiError::new("bad_request", &msg))
             } else if msg.contains("no rows") || msg.contains("QueryReturnedNoRows") {
@@ -128,18 +190,23 @@ async fn resolve_queue_item(
     }
 }
 
-/// POST /sync/process
-async fn process_queue(repo: web::Data<Repository>) -> HttpResponse {
-    match sync_queue::process_all_pending(&repo, None) {
-        Ok(processed) => HttpResponse::Ok().json(ProcessResult { processed }),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-    }
+/// POST /sync/process — start a non-blocking background worker that drains the queue.
+/// Returns 202 Accepted immediately; a second call while the worker is running is idempotent.
+async fn process_queue(repo: web::Data<Repository>, bus: web::Data<SyncEventBus>) -> HttpResponse {
+    sync_queue::process_all_pending_async(&repo, bus.as_ref().clone());
+    HttpResponse::Accepted().json(ProcessStarted { status: "started" })
 }
 
 /// DELETE /sync/queue/completed
-async fn clear_completed_queue(repo: web::Data<Repository>) -> HttpResponse {
+async fn clear_completed_queue(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+) -> HttpResponse {
     match repo.clear_completed_sync_queue() {
-        Ok(deleted) => HttpResponse::Ok().json(ClearCompletedResult { deleted }),
+        Ok(deleted) => {
+            bus.publish_snapshot(&repo);
+            HttpResponse::Ok().json(ClearCompletedResult { deleted })
+        }
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -147,6 +214,7 @@ async fn clear_completed_queue(repo: web::Data<Repository>) -> HttpResponse {
 /// POST /sync/run/{task}
 async fn run_task(
     repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
     path: web::Path<String>,
     checksum_cfg: web::Data<crate::core::checksum::ChecksumConfig>,
 ) -> HttpResponse {
@@ -156,7 +224,7 @@ async fn run_task(
         "integrity-check" | "integrity_check" => scheduler::TaskType::IntegrityCheck,
         other => return HttpResponse::BadRequest().body(format!("Unknown task: {other}")),
     };
-    match scheduler::run_task(&task, &repo, None, &checksum_cfg) {
+    match scheduler::run_task(&task, &repo, None, &checksum_cfg, Some(bus.as_ref())) {
         Ok(count) => HttpResponse::Ok().json(TaskResult {
             task: task.as_str().to_string(),
             count,
@@ -166,19 +234,25 @@ async fn run_task(
 }
 
 /// POST /sync/pause — pause all automatic sync queue processing
-async fn pause_queue(repo: web::Data<Repository>) -> HttpResponse {
+async fn pause_queue(repo: web::Data<Repository>, bus: web::Data<SyncEventBus>) -> HttpResponse {
     match repo.set_sync_queue_paused(true) {
-        Ok(()) => HttpResponse::Ok().json(QueuePausedResult { queue_paused: true }),
+        Ok(()) => {
+            bus.publish_snapshot(&repo);
+            HttpResponse::Ok().json(QueuePausedResult { queue_paused: true })
+        }
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 /// POST /sync/resume — resume automatic sync queue processing
-async fn resume_queue(repo: web::Data<Repository>) -> HttpResponse {
+async fn resume_queue(repo: web::Data<Repository>, bus: web::Data<SyncEventBus>) -> HttpResponse {
     match repo.set_sync_queue_paused(false) {
-        Ok(()) => HttpResponse::Ok().json(QueuePausedResult {
-            queue_paused: false,
-        }),
+        Ok(()) => {
+            bus.publish_snapshot(&repo);
+            HttpResponse::Ok().json(QueuePausedResult {
+                queue_paused: false,
+            })
+        }
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -186,6 +260,7 @@ async fn resume_queue(repo: web::Data<Repository>) -> HttpResponse {
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/sync")
+            .route("/queue/stream", web::get().to(queue_stream))
             .route("/queue", web::get().to(list_queue))
             .route("/queue", web::post().to(add_queue_item))
             .route("/queue/completed", web::delete().to(clear_completed_queue))

@@ -7,7 +7,7 @@ import type {
 } from '@/types/database'
 import type { DrivePair } from '@/types/drive'
 import type { TrackedFile, TrackedFileListResponse } from '@/types/file'
-import type { FolderScanStatus, TrackedFolder } from '@/types/folder'
+import type { FolderMirrorStatus, FolderScanStatus, TrackedFolder } from '@/types/folder'
 import type {
   IntegrityRun,
   IntegrityRunResult,
@@ -17,7 +17,7 @@ import type {
 import type { EventLogEntry } from '@/types/log'
 import type { ScheduleConfig } from '@/types/scheduler'
 import type { SystemStatus } from '@/types/status'
-import type { SyncQueueItem } from '@/types/sync'
+import type { SyncQueueItem, SyncSummary } from '@/types/sync'
 import type { TrackingItem, TrackingListResponse } from '@/types/tracking'
 
 const DEFAULT_DATE = '2026-01-01T00:00:00Z'
@@ -45,11 +45,28 @@ export function makeTrackedFolder(overrides: Partial<TrackedFolder> = {}): Track
     drive_pair_id: 1,
     folder_path: 'documents',
     virtual_path: null,
+    include_checksum_sidecars: false,
     scanning: false,
     scan_scanned_files: 0,
     scan_total_files: 0,
+    mirroring: false,
+    deleting: false,
+    mirror_mirrored_files: 0,
+    mirror_total_files: 0,
     last_scanned_at: null,
+    last_mirrored_at: null,
     created_at: DEFAULT_DATE,
+    ...overrides,
+  }
+}
+
+export function makeFolderMirrorActive(
+  overrides: Partial<FolderMirrorStatus> = {}
+): FolderMirrorStatus {
+  return {
+    mirroring: false,
+    mirrored: 0,
+    total: 0,
     ...overrides,
   }
 }
@@ -225,8 +242,30 @@ export function makeSyncQueueItem(overrides: Partial<SyncQueueItem> = {}): SyncQ
     action: 'mirror',
     status: 'pending',
     error_message: null,
+    reason: null,
     created_at: DEFAULT_DATE,
     completed_at: null,
+    ...overrides,
+  }
+}
+
+export function makeSyncSummary(overrides: Partial<SyncSummary> = {}): SyncSummary {
+  return {
+    total: 0,
+    active_items: 0,
+    pending_items: 0,
+    in_progress_items: 0,
+    completed_items: 0,
+    failed_items: 0,
+    queue_paused: false,
+    processing_active: false,
+    scanning: false,
+    scan_total_files: 0,
+    scan_scanned_files: 0,
+    scan_active_folders: 0,
+    deleting: false,
+    delete_active_folders: 0,
+    revision: 0,
     ...overrides,
   }
 }

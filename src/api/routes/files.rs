@@ -1,6 +1,7 @@
 use crate::api::models::ApiError;
 use crate::api::path_resolution::{resolve_path_within_drive_root, PathTargetKind};
-use crate::core::{drive, mirror, tracker, virtual_path};
+use crate::core::sync_queue::SyncEventBus;
+use crate::core::{drive, mirror, sync_queue, tracker, virtual_path};
 use crate::db::repository::Repository;
 use crate::logging::event_logger;
 use actix_web::{web, HttpResponse, Responder};
@@ -58,6 +59,22 @@ pub async fn track_file(
             }
         };
     if !existed_before && pair.standby_accepts_sync() {
+        let has_b3_mismatch = match repo.has_pending_sync_queue_item_with_reason(
+            tracked.id,
+            "user_action_required",
+            sync_queue::B3_SIDECAR_MISMATCH_REASON,
+        ) {
+            Ok(has_mismatch) => has_mismatch,
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+            }
+        };
+
+        if has_b3_mismatch {
+            return HttpResponse::Created().json(tracked);
+        }
+
         if let Err(e) = repo.create_sync_queue_item_dedup(tracked.id, "adopt_mirror") {
             return HttpResponse::InternalServerError()
                 .json(ApiError::new("INTERNAL_ERROR", &e.to_string()));
@@ -139,7 +156,11 @@ pub async fn mirror_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
 }
 
 /// DELETE /api/v1/files/{id} — untrack a file
-pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> impl Responder {
+pub async fn delete_file(
+    repo: web::Data<Repository>,
+    bus: web::Data<SyncEventBus>,
+    path: web::Path<i64>,
+) -> impl Responder {
     let id = path.into_inner();
     let file = match repo.get_tracked_file(id) {
         Ok(file) => file,
@@ -150,6 +171,19 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
             ))
         }
     };
+    match repo.has_active_sync_for_file(id) {
+        Ok(true) => {
+            return HttpResponse::Conflict().json(ApiError::new(
+                "CONFLICT",
+                "Cannot delete file while another operation is active",
+            ))
+        }
+        Ok(false) => {}
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(ApiError::new("INTERNAL_ERROR", &e.to_string()))
+        }
+    }
     if file.virtual_path.is_some() {
         if let Err(e) = virtual_path::remove_virtual_path(&repo, id) {
             return HttpResponse::BadRequest()
@@ -163,6 +197,7 @@ pub async fn delete_file(repo: web::Data<Repository>, path: web::Path<i64>) -> i
                 .map(|dp| format!("{}/{}", dp.primary_path, file.relative_path))
                 .unwrap_or_else(|_| file.relative_path.clone());
             let _ = event_logger::log_file_untracked(&repo, id, &full_path);
+            bus.publish_snapshot(&repo);
             HttpResponse::NoContent().finish()
         }
         Err(e) => {

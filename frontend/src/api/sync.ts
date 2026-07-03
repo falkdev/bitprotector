@@ -3,7 +3,7 @@ import type {
   SyncQueueItem,
   AddQueueItemRequest,
   ResolveQueueItemRequest,
-  ProcessQueueResult,
+  ProcessQueueStarted,
   ClearCompletedQueueResult,
   QueuePausedResult,
   SyncQueueListResponse,
@@ -40,8 +40,9 @@ export const syncApi = {
     return apiClient.post<SyncQueueItem>(`/sync/queue/${id}/resolve`, data).then((r) => r.data)
   },
 
-  processQueue(): Promise<ProcessQueueResult> {
-    return apiClient.post<ProcessQueueResult>('/sync/process').then((r) => r.data)
+  /** Returns 202 Accepted immediately; processing runs in the background. */
+  processQueue(): Promise<ProcessQueueStarted> {
+    return apiClient.post<ProcessQueueStarted>('/sync/process').then((r) => r.data)
   },
 
   clearCompletedQueue(): Promise<ClearCompletedQueueResult> {

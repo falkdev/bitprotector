@@ -7,7 +7,12 @@ export type SyncAction =
   | 'adopt_mirror'
   | 'user_action_required'
 
-export type SyncResolution = 'keep_master' | 'keep_mirror' | 'provide_new'
+export type SyncResolution =
+  | 'keep_master'
+  | 'keep_mirror'
+  | 'provide_new'
+  | 'accept_current'
+  | 'untrack'
 
 export interface SyncQueueItem {
   id: number
@@ -16,6 +21,7 @@ export interface SyncQueueItem {
   action: SyncAction
   status: SyncStatus
   error_message: string | null
+  reason: string | null
   created_at: string
   completed_at: string | null
 }
@@ -30,8 +36,9 @@ export interface ResolveQueueItemRequest {
   new_file_path?: string
 }
 
-export interface ProcessQueueResult {
-  processed: number
+/** Response from POST /sync/process (202 Accepted). */
+export interface ProcessQueueStarted {
+  status: 'started'
 }
 
 export interface ClearCompletedQueueResult {
@@ -50,4 +57,33 @@ export interface SyncQueueListResponse {
   queue_paused: boolean
   active_items: number
   in_progress_items: number
+  pending_items: number
+  completed_items: number
+  failed_items: number
+}
+
+/**
+ * Live summary pushed over the SSE stream at `/sync/queue/stream`.
+ * Carries queue counts, processing state, and folder-scan progress so
+ * the frontend no longer needs a separate folders poll.
+ */
+export interface SyncSummary {
+  total: number
+  active_items: number
+  pending_items: number
+  in_progress_items: number
+  completed_items: number
+  failed_items: number
+  queue_paused: boolean
+  /** True while a background `POST /sync/process` worker is running. */
+  processing_active: boolean
+  /** True when at least one tracked folder is currently being scanned. */
+  scanning: boolean
+  scan_total_files: number
+  scan_scanned_files: number
+  scan_active_folders: number
+  deleting: boolean
+  delete_active_folders: number
+  /** Monotonically increasing counter; incremented on every publish. */
+  revision: number
 }

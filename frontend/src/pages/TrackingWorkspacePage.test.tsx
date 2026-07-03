@@ -1,14 +1,17 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TrackingWorkspacePage } from './TrackingWorkspacePage'
 import { api } from '@/test/msw/http'
 import { server } from '@/test/msw/server'
 import {
   makeDrivePair,
+  makeFolderMirrorActive,
   makeFolderScanStatus,
+  makeSyncSummary,
   makeTrackedFile,
+  makeTrackedFolder,
   makeTrackingItem,
   makeTrackingListResponse,
 } from '@/test/factories'
@@ -34,6 +37,25 @@ vi.mock('@/components/shared/PathPickerDialog', () => ({
   },
 }))
 
+vi.mock('@/api/sync-stream', () => {
+  let revision = 0
+
+  return {
+    openSyncStream(onSummary: (summary: ReturnType<typeof makeSyncSummary>) => void) {
+      onSummary(makeSyncSummary({ revision: ++revision }))
+      const interval = window.setInterval(() => {
+        onSummary(makeSyncSummary({ revision: ++revision }))
+      }, 100)
+
+      return {
+        abort() {
+          window.clearInterval(interval)
+        },
+      }
+    },
+  }
+})
+
 function mockBaseTrackingPage(items = [makeTrackingItem()], drivePairs = [makeDrivePair()]) {
   server.use(
     api.get('/drives', () => HttpResponse.json(drivePairs)),
@@ -52,6 +74,12 @@ function mockBaseTrackingPage(items = [makeTrackingItem()], drivePairs = [makeDr
 }
 
 describe('TrackingWorkspacePage', () => {
+  // Provide a default stub for GET /folders so the mount-time bootstrap call
+  // is satisfied as a no-op in every test that does not explicitly override it.
+  beforeEach(() => {
+    server.use(api.get('/folders', () => HttpResponse.json([])))
+  })
+
   it('renders a unified mixed list with source badges', async () => {
     mockBaseTrackingPage([
       makeTrackingItem({
@@ -314,8 +342,16 @@ describe('TrackingWorkspacePage', () => {
       }),
       api.post('/folders/21/mirror', () => {
         mirroredFolders += 1
-        return HttpResponse.json({ mirrored_files: 3 })
+        return HttpResponse.json({
+          mirroring: true,
+          mirrored: 0,
+          total: 3,
+          mirrored_files: 3,
+        })
       }),
+      api.get('/folders/21/mirror/active', () =>
+        HttpResponse.json(makeFolderMirrorActive({ mirroring: false, mirrored: 3, total: 3 }))
+      ),
       api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
     )
 
@@ -647,6 +683,7 @@ describe('TrackingWorkspacePage', () => {
   it('switches folder action from Scan to Mirror after scan marks files unmirrored', async () => {
     const user = userEvent.setup()
     let listCalls = 0
+    let mirrorRequests = 0
 
     server.use(
       api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
@@ -706,13 +743,16 @@ describe('TrackingWorkspacePage', () => {
         )
       }),
       api.post('/folders/31/scan', () => HttpResponse.json(makeFolderScanStatus())),
-      api.get('/folders/:id/scan/active', () =>
-        HttpResponse.json(makeFolderScanStatus({ scanning: false, scanned: 2, total: 2 }))
-      ),
       api.post('/folders/31/mirror', () =>
-        HttpResponse.json({
-          mirrored_files: 2,
-        })
+        (() => {
+          mirrorRequests += 1
+          return HttpResponse.json({
+            mirroring: true,
+            mirrored: 0,
+            total: 2,
+            mirrored_files: 2,
+          })
+        })()
       ),
       api.get('/virtual-paths/tree', () =>
         HttpResponse.json({
@@ -731,6 +771,9 @@ describe('TrackingWorkspacePage', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Mirror' }))
+    await waitFor(() => {
+      expect(mirrorRequests).toBe(1)
+    })
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Scan' })).toBeInTheDocument()
     })
@@ -808,8 +851,7 @@ describe('TrackingWorkspacePage', () => {
   })
 
   it('shows scanning progress and disables the folder action while a scan is active', async () => {
-    const user = userEvent.setup()
-    let scanActiveCalls = 0
+    let folderListCalls = 0
 
     server.use(
       api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
@@ -834,12 +876,26 @@ describe('TrackingWorkspacePage', () => {
       api.post('/folders/61/scan', () =>
         HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 0, total: 4 }))
       ),
-      api.get('/folders/:id/scan/active', () => {
-        scanActiveCalls += 1
-        if (scanActiveCalls === 1) {
-          return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 2, total: 4 }))
+      api.get('/folders', () => {
+        folderListCalls += 1
+        if (folderListCalls === 1) {
+          return HttpResponse.json([
+            makeTrackedFolder({
+              id: 61,
+              scanning: true,
+              scan_scanned_files: 2,
+              scan_total_files: 4,
+            }),
+          ])
         }
-        return HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 3, total: 4 }))
+        return HttpResponse.json([
+          makeTrackedFolder({
+            id: 61,
+            scanning: true,
+            scan_scanned_files: 3,
+            scan_total_files: 4,
+          }),
+        ])
       }),
       api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
     )
@@ -847,11 +903,81 @@ describe('TrackingWorkspacePage', () => {
     renderWithApp(<TrackingWorkspacePage />)
 
     const row = await screen.findByTestId('folder-row-61')
-    await user.click(within(row).getByRole('button', { name: 'Scan' }))
 
     expect(await within(row).findByRole('button', { name: 'Scanning...' })).toBeDisabled()
     await waitFor(() => {
       expect(within(row).getByText(/^[23] \/ 4$/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows mirror progress and disables the folder action while mirroring is active', async () => {
+    const user = userEvent.setup()
+    let mirrorRequests = 0
+    let folderListCallsAfterMirror = 0
+
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 62,
+              kind: 'folder',
+              path: 'library',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'tracked',
+              folder_total_files: 10,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      api.get('/folders', () => {
+        if (mirrorRequests === 0) {
+          return HttpResponse.json([makeTrackedFolder({ id: 62 })])
+        }
+        folderListCallsAfterMirror += 1
+        const stillMirroring = folderListCallsAfterMirror <= 3
+        return HttpResponse.json([
+          makeTrackedFolder({
+            id: 62,
+            mirroring: stillMirroring,
+            mirror_mirrored_files: stillMirroring ? 0 : 10,
+            mirror_total_files: 10,
+          }),
+        ])
+      }),
+      api.post('/folders/62/mirror', () =>
+        (() => {
+          mirrorRequests += 1
+          return HttpResponse.json({
+            mirroring: true,
+            mirrored: 0,
+            total: 10,
+            mirrored_files: 10,
+          })
+        })()
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const row = await screen.findByTestId('folder-row-62')
+    await user.click(within(row).getByRole('button', { name: 'Mirror' }))
+
+    await waitFor(() => {
+      expect(mirrorRequests).toBe(1)
+    })
+    await waitFor(() => {
+      expect(within(row).getAllByText('Mirroring...').length).toBeGreaterThan(0)
+      expect(within(row).getByText('0 / 10')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(within(row).getByRole('button', { name: 'Mirror' })).toBeEnabled()
     })
   })
 
@@ -1168,5 +1294,134 @@ describe('TrackingWorkspacePage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('file-details')).not.toBeInTheDocument()
     })
+  })
+
+  it('resumes scan progress indicator after navigating back to the page (bootstrap from /folders)', async () => {
+    // Simulate: folder 71 was already scanning when the page mounts
+    // (i.e. the user navigated away and back).
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 71,
+              kind: 'folder',
+              path: 'library',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      // Bootstrap: /folders returns the folder with scanning: true
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({
+            id: 71,
+            scanning: true,
+            scan_scanned_files: 3,
+            scan_total_files: 10,
+          }),
+        ])
+      ),
+      api.get('/folders/:id/scan/active', () =>
+        HttpResponse.json(makeFolderScanStatus({ scanning: true, scanned: 3, total: 10 }))
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    // The scanning spinner and progress counter should appear without the user
+    // having clicked Scan — they are restored from the bootstrap.
+    const row = await screen.findByTestId('folder-row-71')
+    // The action button shows "Scanning..." and is disabled while scanning.
+    expect(await within(row).findByRole('button', { name: 'Scanning...' })).toBeDisabled()
+  })
+
+  it('restores in-progress mirror state on mount from /folders bootstrap', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 73,
+              kind: 'folder',
+              path: 'archive',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'tracked',
+              folder_total_files: 10,
+              folder_mirrored_files: 2,
+            }),
+          ])
+        )
+      ),
+      api.get('/folders', () =>
+        HttpResponse.json([
+          makeTrackedFolder({
+            id: 73,
+            mirroring: true,
+            mirror_mirrored_files: 2,
+            mirror_total_files: 10,
+          }),
+        ])
+      ),
+      api.get('/folders/:id/mirror/active', () =>
+        HttpResponse.json(makeFolderMirrorActive({ mirroring: true, mirrored: 2, total: 10 }))
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+    const row = await screen.findByTestId('folder-row-73')
+    expect(await within(row).findByRole('button', { name: 'Mirroring...' })).toBeDisabled()
+    expect(within(row).getAllByText('Mirroring...').length).toBeGreaterThan(0)
+    expect(within(row).getByText('2 / 10')).toBeInTheDocument()
+  })
+
+  it('does not show scanning indicator on mount when /folders reports scanning: false', async () => {
+    server.use(
+      api.get('/drives', () => HttpResponse.json([makeDrivePair()])),
+      api.get('/tracking/items', () =>
+        HttpResponse.json(
+          makeTrackingListResponse([
+            makeTrackingItem({
+              id: 72,
+              kind: 'folder',
+              path: 'archive',
+              source: 'folder',
+              is_mirrored: null,
+              tracked_direct: null,
+              tracked_via_folder: null,
+              folder_status: 'not_scanned',
+              folder_total_files: 0,
+              folder_mirrored_files: 0,
+            }),
+          ])
+        )
+      ),
+      // Bootstrap: folder is not scanning
+      api.get('/folders', () =>
+        HttpResponse.json([makeTrackedFolder({ id: 72, scanning: false })])
+      ),
+      api.get('/virtual-paths/tree', () => HttpResponse.json({ parent: '/', children: [] }))
+    )
+
+    renderWithApp(<TrackingWorkspacePage />)
+
+    const row = await screen.findByTestId('folder-row-72')
+    // Scan button should be present, not a spinner
+    expect(within(row).getByRole('button', { name: 'Scan' })).toBeInTheDocument()
+    expect(within(row).queryByText(/Scanning/)).not.toBeInTheDocument()
   })
 })

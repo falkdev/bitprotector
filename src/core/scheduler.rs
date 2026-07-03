@@ -1,4 +1,5 @@
 use crate::core::checksum::ChecksumConfig;
+use crate::core::sync_queue::SyncEventBus;
 use crate::core::{integrity_runs, sync_queue};
 use crate::db::backup;
 use crate::db::repository::{Repository, ScheduleConfig};
@@ -34,9 +35,10 @@ pub fn run_task(
     repo: &Repository,
     stop_by: Option<std::time::Instant>,
     cfg: &ChecksumConfig,
+    bus: Option<&SyncEventBus>,
 ) -> anyhow::Result<u32> {
     match task {
-        TaskType::Sync => sync_queue::process_all_pending(repo, stop_by),
+        TaskType::Sync => sync_queue::process_all_pending(repo, stop_by, bus),
         TaskType::IntegrityCheck => {
             integrity_runs::run_sync(repo, None, false, "scheduler", stop_by, cfg.clone())
                 .map(|run| run.attention_files as u32)
@@ -77,15 +79,17 @@ pub struct Scheduler {
     threads: HashMap<i64, (Arc<AtomicBool>, thread::JoinHandle<()>)>,
     /// database-backup task key → (stop_flag, thread_handle)
     backup_threads: HashMap<&'static str, (Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    /// Optional event bus so scheduled sync runs publish live summaries.
+    bus: Option<SyncEventBus>,
 }
 
 impl Scheduler {
     pub fn new(repo: Arc<Repository>) -> Self {
-        Self::new_inner(repo, None, ChecksumConfig::default())
+        Self::new_inner(repo, None, ChecksumConfig::default(), None)
     }
 
     pub fn new_with_database_path(repo: Arc<Repository>, db_path: String) -> Self {
-        Self::new_inner(repo, Some(db_path), ChecksumConfig::default())
+        Self::new_inner(repo, Some(db_path), ChecksumConfig::default(), None)
     }
 
     pub fn new_with_checksum_config(
@@ -93,13 +97,23 @@ impl Scheduler {
         db_path: String,
         checksum_cfg: ChecksumConfig,
     ) -> Self {
-        Self::new_inner(repo, Some(db_path), checksum_cfg)
+        Self::new_inner(repo, Some(db_path), checksum_cfg, None)
+    }
+
+    pub fn new_with_bus(
+        repo: Arc<Repository>,
+        db_path: String,
+        checksum_cfg: ChecksumConfig,
+        bus: SyncEventBus,
+    ) -> Self {
+        Self::new_inner(repo, Some(db_path), checksum_cfg, Some(bus))
     }
 
     fn new_inner(
         repo: Arc<Repository>,
         db_path: Option<String>,
         checksum_cfg: ChecksumConfig,
+        bus: Option<SyncEventBus>,
     ) -> Self {
         Self {
             repo,
@@ -107,6 +121,7 @@ impl Scheduler {
             checksum_cfg,
             threads: HashMap::new(),
             backup_threads: HashMap::new(),
+            bus,
         }
     }
 
@@ -157,6 +172,7 @@ impl Scheduler {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let checksum_cfg = self.checksum_cfg.clone();
+        let bus = self.bus.clone();
 
         let task_type = match config.task_type.as_str() {
             "integrity_check" => TaskType::IntegrityCheck,
@@ -196,7 +212,7 @@ impl Scheduler {
             let stop_by = max_duration_secs
                 .map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s as u64));
 
-            if let Err(e) = run_task(&task_type, &repo, stop_by, &checksum_cfg) {
+            if let Err(e) = run_task(&task_type, &repo, stop_by, &checksum_cfg, bus.as_ref()) {
                 tracing::error!("Scheduled task '{}' failed: {}", task_type.as_str(), e);
             }
 
@@ -329,6 +345,7 @@ mod tests {
             &repo,
             None,
             &checksum::ChecksumConfig::default(),
+            None,
         )
         .unwrap();
         assert_eq!(processed, 1, "Should process one pending item");
@@ -361,6 +378,7 @@ mod tests {
             &repo,
             None,
             &checksum::ChecksumConfig::default(),
+            None,
         )
         .unwrap();
         assert_eq!(attention, 1, "Should persist one integrity attention row");

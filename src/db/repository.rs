@@ -1,6 +1,7 @@
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Result;
+use std::collections::HashMap;
 
 const DUPLICATE_DRIVE_PATH_ERROR: &str = "Drive path is already registered to another drive pair";
 
@@ -87,10 +88,16 @@ pub struct TrackedFolder {
     pub drive_pair_id: i64,
     pub folder_path: String,
     pub virtual_path: Option<String>,
+    pub include_checksum_sidecars: bool,
     pub scanning: bool,
     pub scan_scanned_files: i64,
     pub scan_total_files: i64,
+    pub mirroring: bool,
+    pub deleting: bool,
+    pub mirror_mirrored_files: i64,
+    pub mirror_total_files: i64,
     pub last_scanned_at: Option<String>,
+    pub last_mirrored_at: Option<String>,
     pub created_at: String,
 }
 
@@ -153,6 +160,7 @@ pub struct SyncQueueItem {
     pub action: String,
     pub status: String,
     pub error_message: Option<String>,
+    pub reason: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
 }
@@ -953,7 +961,7 @@ impl Repository {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE integrity_runs
-             SET status=?1, ended_at=datetime('now'), error_message=?2
+             SET status=?1, ended_at=datetime('now'), error_message=?2, active_workers=0
              WHERE id=?3",
             rusqlite::params![status, error_message, id],
         )?;
@@ -969,6 +977,20 @@ impl Repository {
              SET status='failed', ended_at=datetime('now'), active_workers=0,
                  error_message='Interrupted by service restart'
              WHERE status IN ('running', 'stopping')",
+            [],
+        )?;
+        Ok(count)
+    }
+
+    /// Reset stale tracked-folder operation flags left active by a prior crash/restart.
+    pub fn reset_stale_folder_flags(&self) -> anyhow::Result<usize> {
+        let conn = self.conn()?;
+        let count = conn.execute(
+            "UPDATE tracked_folders
+             SET scanning = 0,
+                 mirroring = 0,
+                 deleting = 0
+             WHERE scanning = 1 OR mirroring = 1 OR deleting = 1",
             [],
         )?;
         Ok(count)
@@ -1104,12 +1126,28 @@ impl Repository {
         folder_path: &str,
         virtual_path: Option<&str>,
     ) -> anyhow::Result<TrackedFolder> {
+        self.create_tracked_folder_with_sidecars(drive_pair_id, folder_path, virtual_path, false)
+    }
+
+    pub fn create_tracked_folder_with_sidecars(
+        &self,
+        drive_pair_id: i64,
+        folder_path: &str,
+        virtual_path: Option<&str>,
+        include_checksum_sidecars: bool,
+    ) -> anyhow::Result<TrackedFolder> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO tracked_folders (drive_pair_id, folder_path, virtual_path)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![drive_pair_id, folder_path, virtual_path],
+                "INSERT INTO tracked_folders (
+                    drive_pair_id, folder_path, virtual_path, include_checksum_sidecars
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    drive_pair_id,
+                    folder_path,
+                    virtual_path,
+                    include_checksum_sidecars as i64
+                ],
             )?;
             conn.last_insert_rowid()
         };
@@ -1120,8 +1158,10 @@ impl Repository {
         let conn = self.conn()?;
         let folder = conn.query_row(
             "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    include_checksum_sidecars,
                     scanning, scan_scanned_files, scan_total_files,
-                    last_scanned_at, created_at
+                    mirroring, deleting, mirror_mirrored_files, mirror_total_files,
+                    last_scanned_at, last_mirrored_at, created_at
              FROM tracked_folders WHERE id=?1",
             rusqlite::params![id],
             |row| {
@@ -1130,11 +1170,17 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    scanning: row.get::<_, i64>(4)? != 0,
-                    scan_scanned_files: row.get(5)?,
-                    scan_total_files: row.get(6)?,
-                    last_scanned_at: row.get(7)?,
-                    created_at: row.get(8)?,
+                    include_checksum_sidecars: row.get::<_, i64>(4)? != 0,
+                    scanning: row.get::<_, i64>(5)? != 0,
+                    scan_scanned_files: row.get(6)?,
+                    scan_total_files: row.get(7)?,
+                    mirroring: row.get::<_, i64>(8)? != 0,
+                    deleting: row.get::<_, i64>(9)? != 0,
+                    mirror_mirrored_files: row.get(10)?,
+                    mirror_total_files: row.get(11)?,
+                    last_scanned_at: row.get(12)?,
+                    last_mirrored_at: row.get(13)?,
+                    created_at: row.get(14)?,
                 })
             },
         )?;
@@ -1145,8 +1191,10 @@ impl Repository {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, drive_pair_id, folder_path, virtual_path,
+                    include_checksum_sidecars,
                     scanning, scan_scanned_files, scan_total_files,
-                    last_scanned_at, created_at
+                    mirroring, deleting, mirror_mirrored_files, mirror_total_files,
+                    last_scanned_at, last_mirrored_at, created_at
              FROM tracked_folders ORDER BY id",
         )?;
         let folders = stmt
@@ -1156,11 +1204,17 @@ impl Repository {
                     drive_pair_id: row.get(1)?,
                     folder_path: row.get(2)?,
                     virtual_path: row.get(3)?,
-                    scanning: row.get::<_, i64>(4)? != 0,
-                    scan_scanned_files: row.get(5)?,
-                    scan_total_files: row.get(6)?,
-                    last_scanned_at: row.get(7)?,
-                    created_at: row.get(8)?,
+                    include_checksum_sidecars: row.get::<_, i64>(4)? != 0,
+                    scanning: row.get::<_, i64>(5)? != 0,
+                    scan_scanned_files: row.get(6)?,
+                    scan_total_files: row.get(7)?,
+                    mirroring: row.get::<_, i64>(8)? != 0,
+                    deleting: row.get::<_, i64>(9)? != 0,
+                    mirror_mirrored_files: row.get(10)?,
+                    mirror_total_files: row.get(11)?,
+                    last_scanned_at: row.get(12)?,
+                    last_mirrored_at: row.get(13)?,
+                    created_at: row.get(14)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1175,7 +1229,7 @@ impl Repository {
                  SET scanning = 1,
                      scan_scanned_files = 0,
                      scan_total_files = ?1
-                 WHERE id = ?2 AND scanning = 0",
+                 WHERE id = ?2 AND scanning = 0 AND mirroring = 0 AND deleting = 0",
                 rusqlite::params![total_files.max(0), id],
             )?
         };
@@ -1187,19 +1241,13 @@ impl Repository {
         self.get_tracked_folder(id)
     }
 
-    pub fn update_scan_progress(
-        &self,
-        id: i64,
-        scanned_files: i64,
-        total_files: i64,
-    ) -> anyhow::Result<()> {
+    pub fn update_scan_progress(&self, id: i64, scanned_files: i64) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE tracked_folders
-             SET scan_scanned_files = ?1,
-                 scan_total_files = ?2
-             WHERE id = ?3",
-            rusqlite::params![scanned_files.max(0), total_files.max(0), id],
+             SET scan_scanned_files = ?1
+             WHERE id = ?2",
+            rusqlite::params![scanned_files.max(0), id],
         )?;
         Ok(())
     }
@@ -1209,6 +1257,78 @@ impl Repository {
             let conn = self.conn()?;
             conn.execute(
                 "UPDATE tracked_folders SET scanning = 0 WHERE id = ?1",
+                rusqlite::params![id],
+            )?;
+        }
+        self.get_tracked_folder(id)
+    }
+
+    pub fn start_folder_mirror(&self, id: i64, total_files: i64) -> anyhow::Result<TrackedFolder> {
+        let updated = {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE tracked_folders
+                 SET mirroring = 1,
+                     mirror_mirrored_files = 0,
+                     mirror_total_files = ?1
+                 WHERE id = ?2 AND mirroring = 0 AND scanning = 0 AND deleting = 0",
+                rusqlite::params![total_files.max(0), id],
+            )?
+        };
+
+        if updated == 0 {
+            anyhow::bail!("Folder mirror already active");
+        }
+
+        self.get_tracked_folder(id)
+    }
+
+    pub fn start_folder_delete(&self, id: i64) -> anyhow::Result<TrackedFolder> {
+        let updated = {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE tracked_folders
+                 SET deleting = 1
+                 WHERE id = ?1 AND scanning = 0 AND mirroring = 0 AND deleting = 0",
+                rusqlite::params![id],
+            )?
+        };
+
+        if updated == 0 {
+            anyhow::bail!("Folder operation already active");
+        }
+
+        self.get_tracked_folder(id)
+    }
+
+    pub fn clear_folder_delete(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_folders SET deleting = 0 WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_mirror_progress(&self, id: i64, mirrored_files: i64) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE tracked_folders
+             SET mirror_mirrored_files = ?1
+             WHERE id = ?2",
+            rusqlite::params![mirrored_files.max(0), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_folder_mirror(&self, id: i64) -> anyhow::Result<TrackedFolder> {
+        {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE tracked_folders
+                 SET mirroring = 0,
+                     last_mirrored_at = datetime('now')
+                 WHERE id = ?1",
                 rusqlite::params![id],
             )?;
         }
@@ -1745,11 +1865,31 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<SyncQueueItem> {
+        self.create_sync_queue_item_with_reason_and_error(tracked_file_id, action, None, None)
+    }
+
+    pub fn create_sync_queue_item_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<SyncQueueItem> {
+        self.create_sync_queue_item_with_reason_and_error(tracked_file_id, action, reason, None)
+    }
+
+    pub fn create_sync_queue_item_with_reason_and_error(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<SyncQueueItem> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO sync_queue (tracked_file_id, action) VALUES (?1, ?2)",
-                rusqlite::params![tracked_file_id, action],
+                "INSERT INTO sync_queue (tracked_file_id, action, reason, error_message)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![tracked_file_id, action, reason, error_message],
             )?;
             conn.last_insert_rowid()
         };
@@ -1761,8 +1901,27 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<Option<SyncQueueItem>> {
-        self.create_sync_queue_item_dedup_with_created(tracked_file_id, action)
-            .map(|(item, _created)| Some(item))
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            None,
+            None,
+        )
+        .map(|(item, _created)| Some(item))
+    }
+
+    pub fn create_sync_queue_item_dedup_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<(SyncQueueItem, bool)> {
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            reason,
+            None,
+        )
     }
 
     pub fn create_sync_queue_item_dedup_with_created(
@@ -1770,30 +1929,73 @@ impl Repository {
         tracked_file_id: i64,
         action: &str,
     ) -> anyhow::Result<(SyncQueueItem, bool)> {
+        self.create_sync_queue_item_dedup_with_reason_and_error_with_created(
+            tracked_file_id,
+            action,
+            None,
+            None,
+        )
+    }
+
+    pub fn create_sync_queue_item_dedup_with_reason_and_error_with_created(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: Option<&str>,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<(SyncQueueItem, bool)> {
         let conn = self.conn()?;
         let existing: Result<i64, _> = conn.query_row(
             "SELECT id FROM sync_queue
-             WHERE tracked_file_id=?1 AND action=?2 AND status IN ('pending', 'in_progress')
+             WHERE tracked_file_id=?1
+               AND action=?2
+               AND status IN ('pending', 'in_progress')
+               AND ((?3 IS NULL AND reason IS NULL) OR reason=?4)
              ORDER BY id LIMIT 1",
-            rusqlite::params![tracked_file_id, action],
+            rusqlite::params![tracked_file_id, action, reason, reason],
             |row| row.get(0),
         );
         match existing {
             Ok(id) => Ok((self.get_sync_queue_item(id)?, false)),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 drop(conn);
-                self.create_sync_queue_item(tracked_file_id, action)
-                    .map(|item| (item, true))
+                self.create_sync_queue_item_with_reason_and_error(
+                    tracked_file_id,
+                    action,
+                    reason,
+                    error_message,
+                )
+                .map(|item| (item, true))
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub fn has_pending_sync_queue_item_with_reason(
+        &self,
+        tracked_file_id: i64,
+        action: &str,
+        reason: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM sync_queue
+             WHERE tracked_file_id=?1
+               AND action=?2
+               AND reason=?3
+               AND status IN ('pending', 'in_progress')",
+            rusqlite::params![tracked_file_id, action, reason],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn get_sync_queue_item(&self, id: i64) -> anyhow::Result<SyncQueueItem> {
         let conn = self.conn()?;
         let item = conn.query_row(
             "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
-                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at
              FROM sync_queue sq
              LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
              WHERE sq.id=?1",
@@ -1806,8 +2008,9 @@ impl Repository {
                     action: row.get(3)?,
                     status: row.get(4)?,
                     error_message: row.get(5)?,
-                    created_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+                    reason: row.get(6)?,
+                    created_at: row.get(7)?,
+                    completed_at: row.get(8)?,
                 })
             },
         )?;
@@ -1831,7 +2034,7 @@ impl Repository {
         };
         let query = format!(
             "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
-                    sq.status, sq.error_message, sq.created_at, sq.completed_at
+                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at
              FROM sync_queue sq
              LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
              {where_clause}
@@ -1849,8 +2052,9 @@ impl Repository {
                     action: row.get(3)?,
                     status: row.get(4)?,
                     error_message: row.get(5)?,
-                    created_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+                    reason: row.get(6)?,
+                    created_at: row.get(7)?,
+                    completed_at: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1914,6 +2118,40 @@ impl Repository {
                AND action IN ('mirror', 'adopt_mirror')
                AND status IN ('pending', 'in_progress')",
             rusqlite::params![tracked_file_id],
+        )?;
+        Ok(affected as u64)
+    }
+
+    pub fn start_pending_mirror_queue_for_file(&self, tracked_file_id: i64) -> anyhow::Result<u64> {
+        let conn = self.conn()?;
+        let affected = conn.execute(
+            "UPDATE sync_queue
+             SET status='in_progress',
+                 error_message=NULL,
+                 completed_at=NULL
+             WHERE tracked_file_id=?1
+               AND action IN ('mirror', 'adopt_mirror')
+               AND status='pending'",
+            rusqlite::params![tracked_file_id],
+        )?;
+        Ok(affected as u64)
+    }
+
+    pub fn fail_pending_mirror_queue_for_file(
+        &self,
+        tracked_file_id: i64,
+        error_message: &str,
+    ) -> anyhow::Result<u64> {
+        let conn = self.conn()?;
+        let affected = conn.execute(
+            "UPDATE sync_queue
+             SET status='failed',
+                 error_message=?2,
+                 completed_at=datetime('now')
+             WHERE tracked_file_id=?1
+               AND action IN ('mirror', 'adopt_mirror')
+               AND status IN ('pending', 'in_progress')",
+            rusqlite::params![tracked_file_id, error_message],
         )?;
         Ok(affected as u64)
     }
@@ -2225,6 +2463,33 @@ impl Repository {
             |r| r.get(0),
         )?;
         Ok(count)
+    }
+
+    pub fn has_active_sync_for_file(&self, tracked_file_id: i64) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE tracked_file_id=?1 AND status='in_progress'",
+            rusqlite::params![tracked_file_id],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn count_sync_queue_by_status(&self) -> anyhow::Result<HashMap<String, i64>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM sync_queue GROUP BY status")?;
+        let rows = stmt.query_map([], |row| {
+            let status: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((status, count))
+        })?;
+
+        let mut counts = HashMap::new();
+        for row in rows {
+            let (status, count) = row?;
+            counts.insert(status, count);
+        }
+        Ok(counts)
     }
 
     /// Returns `true` when the sync queue processing is globally paused.
@@ -2870,7 +3135,7 @@ mod tests {
         assert_eq!(started.scan_total_files, 4);
         assert!(repo.start_folder_scan(folder.id, 4).is_err());
 
-        repo.update_scan_progress(folder.id, 3, 4).unwrap();
+        repo.update_scan_progress(folder.id, 3).unwrap();
         let in_progress = repo.get_tracked_folder(folder.id).unwrap();
         assert!(in_progress.scanning);
         assert_eq!(in_progress.scan_scanned_files, 3);
@@ -2885,6 +3150,133 @@ mod tests {
         assert!(!finished.scanning);
         assert_eq!(finished.scan_scanned_files, 4);
         assert_eq!(finished.scan_total_files, 4);
+    }
+
+    #[test]
+    fn test_update_scan_progress_does_not_change_scan_total_files() {
+        // Regression test: update_scan_progress must only update scan_scanned_files.
+        // Previously it also overwrote scan_total_files, which could cause scanned > total
+        // when files were created between the count and the directory walk.
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        repo.start_folder_scan(folder.id, 10).unwrap();
+
+        // Simulate: progress callback passes a smaller count (as if new files appeared
+        // mid-walk pushing scanned past the original total).
+        repo.update_scan_progress(folder.id, 7).unwrap();
+        let mid = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(mid.scan_scanned_files, 7);
+        assert_eq!(
+            mid.scan_total_files, 10,
+            "update_scan_progress must never change scan_total_files"
+        );
+
+        // Calling it again with a higher scanned value also must not touch the total.
+        repo.update_scan_progress(folder.id, 12).unwrap();
+        let over = repo.get_tracked_folder(folder.id).unwrap();
+        assert_eq!(over.scan_scanned_files, 12);
+        assert_eq!(
+            over.scan_total_files, 10,
+            "scan_total_files must remain stable even when scanned surpasses it"
+        );
+    }
+
+    #[test]
+    fn test_start_folder_mirror_blocks_double_start() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        let started = repo.start_folder_mirror(folder.id, 4).unwrap();
+        assert!(started.mirroring);
+        assert_eq!(started.mirror_mirrored_files, 0);
+        assert_eq!(started.mirror_total_files, 4);
+
+        assert!(repo.start_folder_mirror(folder.id, 4).is_err());
+    }
+
+    #[test]
+    fn test_folder_operation_mutual_exclusion_with_deleting_flag() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        let deleting = repo.start_folder_delete(folder.id).unwrap();
+        assert!(deleting.deleting);
+        assert!(repo.start_folder_scan(folder.id, 1).is_err());
+        assert!(repo.start_folder_mirror(folder.id, 1).is_err());
+
+        repo.clear_folder_delete(folder.id).unwrap();
+        assert!(repo.start_folder_scan(folder.id, 1).is_ok());
+    }
+
+    #[test]
+    fn test_reset_stale_folder_flags_clears_active_folder_operations() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+
+        let scan_folder = repo.create_tracked_folder(pair.id, "scan", None).unwrap();
+        let mirror_folder = repo.create_tracked_folder(pair.id, "mirror", None).unwrap();
+        let delete_folder = repo.create_tracked_folder(pair.id, "delete", None).unwrap();
+
+        repo.start_folder_scan(scan_folder.id, 2).unwrap();
+        repo.start_folder_mirror(mirror_folder.id, 2).unwrap();
+        repo.start_folder_delete(delete_folder.id).unwrap();
+
+        let reset_count = repo.reset_stale_folder_flags().unwrap();
+        assert_eq!(reset_count, 3);
+
+        assert!(!repo.get_tracked_folder(scan_folder.id).unwrap().scanning);
+        assert!(!repo.get_tracked_folder(mirror_folder.id).unwrap().mirroring);
+        assert!(!repo.get_tracked_folder(delete_folder.id).unwrap().deleting);
+    }
+
+    #[test]
+    fn test_folder_delete_blocked_while_scan_or_mirror_active() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+
+        let scan_folder = repo.create_tracked_folder(pair.id, "scan", None).unwrap();
+        repo.start_folder_scan(scan_folder.id, 2).unwrap();
+        assert!(repo.start_folder_delete(scan_folder.id).is_err());
+        repo.finish_folder_scan(scan_folder.id).unwrap();
+
+        let mirror_folder = repo.create_tracked_folder(pair.id, "mirror", None).unwrap();
+        repo.start_folder_mirror(mirror_folder.id, 2).unwrap();
+        assert!(repo.start_folder_delete(mirror_folder.id).is_err());
+    }
+
+    #[test]
+    fn test_update_mirror_progress_persists_value() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        repo.start_folder_mirror(folder.id, 5).unwrap();
+        repo.update_mirror_progress(folder.id, 3).unwrap();
+
+        let updated = repo.get_tracked_folder(folder.id).unwrap();
+        assert!(updated.mirroring);
+        assert_eq!(updated.mirror_mirrored_files, 3);
+        assert_eq!(updated.mirror_total_files, 5);
+    }
+
+    #[test]
+    fn test_finish_folder_mirror_clears_flag_and_stamps_last_mirrored_at() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let folder = repo.create_tracked_folder(pair.id, "docs", None).unwrap();
+
+        repo.start_folder_mirror(folder.id, 2).unwrap();
+        repo.update_mirror_progress(folder.id, 2).unwrap();
+
+        let finished = repo.finish_folder_mirror(folder.id).unwrap();
+        assert!(!finished.mirroring);
+        assert_eq!(finished.mirror_mirrored_files, 2);
+        assert_eq!(finished.mirror_total_files, 2);
+        assert!(finished.last_mirrored_at.is_some());
     }
 
     // ─── Sync Queue ───────────────────────────────────────────────────────────────
@@ -2907,6 +3299,77 @@ mod tests {
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
         assert!(updated.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_count_sync_queue_by_status_empty_table() {
+        let repo = make_repo();
+        let counts = repo.count_sync_queue_by_status().unwrap();
+        assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn test_has_active_sync_for_file_checks_in_progress_only() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "busy.txt", "h", 1, None)
+            .unwrap();
+        let queue = repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        assert!(!repo.has_active_sync_for_file(file.id).unwrap());
+        repo.update_sync_queue_status(queue.id, "in_progress", None)
+            .unwrap();
+        assert!(repo.has_active_sync_for_file(file.id).unwrap());
+
+        repo.update_sync_queue_status(queue.id, "completed", None)
+            .unwrap();
+        assert!(!repo.has_active_sync_for_file(file.id).unwrap());
+    }
+
+    #[test]
+    fn test_count_sync_queue_by_status_returns_all_buckets() {
+        let repo = make_repo();
+        let pair = repo.create_drive_pair("p", "/a", "/b").unwrap();
+        let file_pending = repo
+            .create_tracked_file(pair.id, "pending.txt", "h1", 1, None)
+            .unwrap();
+        let file_in_progress = repo
+            .create_tracked_file(pair.id, "progress.txt", "h2", 1, None)
+            .unwrap();
+        let file_completed = repo
+            .create_tracked_file(pair.id, "done.txt", "h3", 1, None)
+            .unwrap();
+        let file_failed = repo
+            .create_tracked_file(pair.id, "failed.txt", "h4", 1, None)
+            .unwrap();
+
+        let _pending = repo
+            .create_sync_queue_item(file_pending.id, "mirror")
+            .unwrap();
+        let in_progress = repo
+            .create_sync_queue_item(file_in_progress.id, "mirror")
+            .unwrap();
+        repo.update_sync_queue_status(in_progress.id, "in_progress", None)
+            .unwrap();
+
+        let completed = repo
+            .create_sync_queue_item(file_completed.id, "mirror")
+            .unwrap();
+        repo.update_sync_queue_status(completed.id, "completed", None)
+            .unwrap();
+
+        let failed = repo
+            .create_sync_queue_item(file_failed.id, "mirror")
+            .unwrap();
+        repo.update_sync_queue_status(failed.id, "failed", Some("forced"))
+            .unwrap();
+
+        let counts = repo.count_sync_queue_by_status().unwrap();
+        assert_eq!(counts.get("pending"), Some(&1));
+        assert_eq!(counts.get("in_progress"), Some(&1));
+        assert_eq!(counts.get("completed"), Some(&1));
+        assert_eq!(counts.get("failed"), Some(&1));
     }
 
     #[test]
