@@ -143,7 +143,7 @@ impl Default for SyncEventBus {
 /// Process a single pending sync queue item.
 ///
 /// Progress events are intentionally **not** published here to avoid
-/// per-item SQLite overhead when processing large queues (e.g. 12 000+ files).
+/// per-item SQLite overhead when processing large queues (e.g. 12,000+ files).
 /// Callers that want live progress updates should use the rate-limited
 /// `try_publish_queue_progress` helper after each item (see `process_all_pending`).
 pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<()> {
@@ -1164,6 +1164,11 @@ mod tests {
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
         assert!(secondary.path().join("btest.txt").exists());
+        assert_eq!(
+            fs::read(secondary.path().join("btest.txt")).unwrap(),
+            content,
+            "mirrored file content must match original"
+        );
     }
 
     #[test]
