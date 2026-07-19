@@ -114,7 +114,7 @@ fn test_sync_operation_creates_log_entry() {
         .create_tracked_file(pair.id, "synclog.txt", &hash, content.len() as i64, None)
         .unwrap();
     let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
-    sync_queue::process_item(&repo, &item, None).unwrap();
+    sync_queue::process_item(&repo, &item).unwrap();
 
     let (entries, _) = repo
         .list_event_logs(Some("sync_completed"), None, None, None, 1, 10)

@@ -141,11 +141,12 @@ impl Default for SyncEventBus {
 }
 
 /// Process a single pending sync queue item.
-pub fn process_item(
-    repo: &Repository,
-    item: &SyncQueueItem,
-    bus: Option<&SyncEventBus>,
-) -> anyhow::Result<()> {
+///
+/// Progress events are intentionally **not** published here to avoid
+/// per-item SQLite overhead when processing large queues (e.g. 12,000+ files).
+/// Callers that want live progress updates should use the rate-limited
+/// `try_publish_queue_progress` helper after each item (see `process_all_pending`).
+pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<()> {
     let file = repo.get_tracked_file(item.tracked_file_id)?;
     let pair = drive::load_operational_pair(repo, file.drive_pair_id)?;
     if pair.is_quiescing() {
@@ -158,9 +159,6 @@ pub fn process_item(
     }
 
     repo.update_sync_queue_status(item.id, "in_progress", None)?;
-    if let Some(b) = bus {
-        b.publish_snapshot(repo);
-    }
 
     let result = match item.action.as_str() {
         "mirror" => mirror::mirror_file(&pair, &file.relative_path).map(|_| ()),
@@ -205,9 +203,6 @@ pub fn process_item(
     match result {
         Ok(()) => {
             repo.update_sync_queue_status(item.id, "completed", None)?;
-            if let Some(b) = bus {
-                b.publish_snapshot(repo);
-            }
             if matches!(
                 item.action.as_str(),
                 "mirror" | "adopt_mirror" | "restore_master" | "restore_mirror"
@@ -224,9 +219,6 @@ pub fn process_item(
         Err(e) => {
             let full_path = format!("{}/{}", pair.primary_path, file.relative_path);
             repo.update_sync_queue_status(item.id, "failed", Some(&e.to_string()))?;
-            if let Some(b) = bus {
-                b.publish_snapshot(repo);
-            }
             let _ = event_logger::log_sync_failed(
                 repo,
                 file.id,
@@ -279,7 +271,7 @@ pub fn process_all_pending(
                     return Ok(processed);
                 }
             }
-            if let Err(e) = process_item(repo, item, bus) {
+            if let Err(e) = process_item(repo, item) {
                 tracing::error!("Error processing sync queue item {}: {}", item.id, e);
             }
             processed += 1;
@@ -563,7 +555,7 @@ mod tests {
             .unwrap();
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        process_item(&repo, &item, None).unwrap();
+        process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -626,7 +618,7 @@ mod tests {
 
         for action in &["mirror", "restore_master", "restore_mirror", "verify"] {
             let item = repo.create_sync_queue_item(file.id, action).unwrap();
-            process_item(&repo, &item, None).unwrap();
+            process_item(&repo, &item).unwrap();
             let updated = repo.get_sync_queue_item(item.id).unwrap();
             assert_eq!(
                 updated.status, "completed",
@@ -752,7 +744,7 @@ mod tests {
         let item = create_from_integrity_failure(&repo, &file, &result)
             .unwrap()
             .unwrap();
-        process_item(&repo, &item, None).unwrap();
+        process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -1009,7 +1001,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item, None).unwrap();
+        process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -1045,7 +1037,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item, None).unwrap();
+        process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -1079,7 +1071,7 @@ mod tests {
             .create_sync_queue_item(file.id, "adopt_mirror")
             .unwrap();
 
-        process_item(&repo, &item, None).unwrap();
+        process_item(&repo, &item).unwrap();
 
         let updated = repo.get_sync_queue_item(item.id).unwrap();
         assert_eq!(updated.status, "completed");
@@ -1145,7 +1137,10 @@ mod tests {
     }
 
     #[test]
-    fn test_process_item_with_bus_broadcasts_status_transitions() {
+    fn test_process_item_completes_and_mirrors_file() {
+        // Verifies that process_item correctly mirrors a file and marks the queue
+        // item as completed. Progress events are published by the caller
+        // (process_all_pending) not by process_item itself.
         let (primary, secondary, repo) = setup();
         let content = b"bus test";
         let hash = checksum::checksum_bytes(content);
@@ -1163,17 +1158,17 @@ mod tests {
             .unwrap();
         let item = repo.create_sync_queue_item(file.id, "mirror").unwrap();
 
-        let bus = SyncEventBus::new();
-        let mut rx = bus.subscribe();
+        process_item(&repo, &item).unwrap();
 
-        process_item(&repo, &item, Some(&bus)).unwrap();
-
-        // Two events expected: in_progress and completed
-        let ev1 = rx.try_recv().expect("in_progress event");
-        let ev2 = rx.try_recv().expect("completed event");
-        assert!(ev2.revision > ev1.revision, "revision must increase");
-        assert_eq!(ev2.in_progress_items, 0);
-        assert_eq!(ev2.completed_items, 1);
+        // Item should be completed and file should be mirrored.
+        let updated = repo.get_sync_queue_item(item.id).unwrap();
+        assert_eq!(updated.status, "completed");
+        assert!(secondary.path().join("btest.txt").exists());
+        assert_eq!(
+            fs::read(secondary.path().join("btest.txt")).unwrap(),
+            content,
+            "mirrored file content must match original"
+        );
     }
 
     #[test]
