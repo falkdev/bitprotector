@@ -534,17 +534,17 @@ fn validate_db_restore_target_path(db_path: &str) -> anyhow::Result<PathBuf> {
         bail!("Database path must be absolute");
     }
 
+    if !path.is_file() {
+        bail!(
+            "Database path must point to an existing file: {}",
+            path.display()
+        );
+    }
+
     let canonical_path = fs::canonicalize(path).context("Failed to canonicalize database path")?;
     if canonical_path != path {
         bail!(
             "Database path must be canonical and must not include symlinks or normalization components"
-        );
-    }
-
-    if !canonical_path.is_file() {
-        bail!(
-            "Database path must point to an existing file: {}",
-            canonical_path.display()
         );
     }
 
