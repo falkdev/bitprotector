@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface Column<T> {
@@ -19,6 +19,8 @@ interface DataTableProps<T> {
   className?: string
   emptyState?: ReactNode
   tableTestId?: string
+  expandedRowKey?: string | number | null
+  renderExpandedRow?: (row: T) => ReactNode
 }
 
 export function DataTable<T>({
@@ -32,6 +34,8 @@ export function DataTable<T>({
   className,
   emptyState,
   tableTestId,
+  expandedRowKey,
+  renderExpandedRow,
 }: DataTableProps<T>) {
   if (data.length === 0 && emptyState) return <>{emptyState}</>
 
@@ -53,23 +57,32 @@ export function DataTable<T>({
         <tbody>
           {data.map((row) => {
             const key = rowKey(row)
+            const isExpanded = renderExpandedRow && expandedRowKey === key
             return (
-              <tr
-                key={key}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                data-testid={rowTestId?.(row)}
-                className={cn(
-                  'border-t border-border transition-colors',
-                  onRowClick && 'cursor-pointer hover:bg-accent/50',
-                  (selectedRowKey === key || selectedRowKeys?.has(key)) && 'bg-primary/5'
+              <Fragment key={key}>
+                <tr
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  data-testid={rowTestId?.(row)}
+                  className={cn(
+                    'border-t border-border transition-colors',
+                    onRowClick && 'cursor-pointer hover:bg-accent/50',
+                    (selectedRowKey === key || selectedRowKeys?.has(key)) && 'bg-primary/5'
+                  )}
+                >
+                  {columns.map((col) => (
+                    <td key={col.key} className={cn('px-3 py-2', col.className)}>
+                      {col.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+                {isExpanded && (
+                  <tr className="border-t border-border bg-muted/20">
+                    <td colSpan={columns.length} className="px-3 py-3">
+                      {renderExpandedRow(row)}
+                    </td>
+                  </tr>
                 )}
-              >
-                {columns.map((col) => (
-                  <td key={col.key} className={cn('px-3 py-2', col.className)}>
-                    {col.cell(row)}
-                  </td>
-                ))}
-              </tr>
+              </Fragment>
             )
           })}
         </tbody>

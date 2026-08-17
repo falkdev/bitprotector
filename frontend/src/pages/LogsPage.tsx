@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import { logsApi } from '@/api/logs'
@@ -174,11 +174,6 @@ export function LogsPage() {
     }
   }, [page, appliedFilters, expandedLogId])
 
-  const expandedEntry = useMemo(
-    () => entries.find((entry) => entry.id === expandedLogId) ?? null,
-    [entries, expandedLogId]
-  )
-
   const applyFilters = () => {
     setPage(1)
     setAppliedFilters(filters)
@@ -304,7 +299,7 @@ export function LogsPage() {
                 header: 'Event Type',
                 cell: (entry) => (
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[entry.event_type]}`}
+                    className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[entry.event_type]}`}
                   >
                     {formatEventType(entry.event_type)}
                   </span>
@@ -352,6 +347,28 @@ export function LogsPage() {
             data={entries}
             rowKey={(entry) => entry.id}
             rowTestId={(entry) => `log-row-${entry.id}`}
+            expandedRowKey={expandedLogId}
+            renderExpandedRow={(entry) => (
+              <div>
+                <div className="flex items-start justify-between gap-4">
+                  <h2 className="text-sm font-semibold">Log Entry #{entry.id}</h2>
+                  <p className="text-sm text-muted-foreground">{formatDate(entry.created_at)}</p>
+                </div>
+                {entry.file_path && (
+                  <p className="mt-2 text-sm">
+                    <span className="font-medium text-muted-foreground">File:</span>{' '}
+                    <span className="font-mono text-xs">{entry.file_path}</span>
+                    {entry.tracked_file_id && (
+                      <span className="ml-1 text-muted-foreground">
+                        (#{entry.tracked_file_id})
+                      </span>
+                    )}
+                  </p>
+                )}
+                <p className="mt-2 text-sm">{entry.message}</p>
+                <StructuredDetails details={entry.details} />
+              </div>
+            )}
             emptyState={
               <EmptyState
                 title="No matching log entries"
@@ -359,37 +376,6 @@ export function LogsPage() {
               />
             }
           />
-        )}
-
-        {expandedEntry && (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold">Log Entry #{expandedEntry.id}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {formatDate(expandedEntry.created_at)}
-                </p>
-              </div>
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${EVENT_STYLES[expandedEntry.event_type]}`}
-              >
-                {formatEventType(expandedEntry.event_type)}
-              </span>
-            </div>
-            {expandedEntry.file_path && (
-              <p className="mt-2 text-sm">
-                <span className="font-medium text-muted-foreground">File:</span>{' '}
-                <span className="font-mono text-xs">{expandedEntry.file_path}</span>
-                {expandedEntry.tracked_file_id && (
-                  <span className="ml-1 text-muted-foreground">
-                    (#{expandedEntry.tracked_file_id})
-                  </span>
-                )}
-              </p>
-            )}
-            <p className="mt-2 text-sm">{expandedEntry.message}</p>
-            <StructuredDetails details={expandedEntry.details} />
-          </div>
         )}
 
         {entries.length > 0 && (
