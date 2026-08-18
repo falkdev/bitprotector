@@ -359,9 +359,7 @@ export function LogsPage() {
                     <span className="font-medium text-muted-foreground">File:</span>{' '}
                     <span className="font-mono text-xs">{entry.file_path}</span>
                     {entry.tracked_file_id && (
-                      <span className="ml-1 text-muted-foreground">
-                        (#{entry.tracked_file_id})
-                      </span>
+                      <span className="ml-1 text-muted-foreground">(#{entry.tracked_file_id})</span>
                     )}
                   </p>
                 )}
