@@ -276,7 +276,9 @@ pub fn process_all_pending(
         if items.is_empty() {
             break;
         }
-        let all_skipped = items.iter().all(|(_, i)| i.action == "user_action_required");
+        let all_skipped = items
+            .iter()
+            .all(|(_, i)| i.action == "user_action_required");
 
         // Group by drive pair: one worker thread per drive pair, so mirroring
         // for different pairs runs in parallel while a single pair's items
