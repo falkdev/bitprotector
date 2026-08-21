@@ -2017,6 +2017,51 @@ impl Repository {
         Ok(item)
     }
 
+    /// Fetch up to `limit` pending sync queue items paired with the
+    /// `drive_pair_id` of their tracked file, ordered by queue id.
+    ///
+    /// Used by `sync_queue::process_all_pending` to group work by physical
+    /// drive pair so items on different drive pairs can be processed
+    /// concurrently while items on the same drive pair stay sequential.
+    /// Orphaned queue items (tracked file no longer exists) are grouped
+    /// under drive_pair_id `0` so they don't get lost from the fetch.
+    pub fn list_pending_sync_queue_with_drive_pair(
+        &self,
+        limit: i64,
+    ) -> anyhow::Result<Vec<(i64, SyncQueueItem)>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
+                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at,
+                    COALESCE(tf.drive_pair_id, 0)
+             FROM sync_queue sq
+             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+             WHERE sq.status = 'pending'
+             ORDER BY sq.id
+             LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![limit], |row| {
+                let drive_pair_id: i64 = row.get(9)?;
+                Ok((
+                    drive_pair_id,
+                    SyncQueueItem {
+                        id: row.get(0)?,
+                        tracked_file_id: row.get(1)?,
+                        relative_path: row.get(2)?,
+                        action: row.get(3)?,
+                        status: row.get(4)?,
+                        error_message: row.get(5)?,
+                        reason: row.get(6)?,
+                        created_at: row.get(7)?,
+                        completed_at: row.get(8)?,
+                    },
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn list_sync_queue(
         &self,
         status: Option<&str>,
