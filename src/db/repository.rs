@@ -2018,26 +2018,41 @@ impl Repository {
     }
 
     /// Fetch up to `limit` pending sync queue items paired with the
-    /// `drive_pair_id` of their tracked file, ordered by queue id.
+    /// `drive_pair_id` of their tracked file, ordered fairly across drive
+    /// pairs (round-robin) while preserving per-pair queue order.
     ///
     /// Used by `sync_queue::process_all_pending` to group work by physical
     /// drive pair so items on different drive pairs can be processed
-    /// concurrently while items on the same drive pair stay sequential.
-    /// Orphaned queue items (tracked file no longer exists) are grouped
-    /// under drive_pair_id `0` so they don't get lost from the fetch.
+    /// concurrently while items on the same drive pair stay sequential. A
+    /// plain `ORDER BY sq.id LIMIT ?1` would let one drive pair with a deep
+    /// backlog monopolize the whole page, starving every other pair until
+    /// it's drained. Instead, rank each pair's own items by id and take the
+    /// lowest ranks first across all pairs, so every pending pair gets a
+    /// share of each fetched batch. Orphaned queue items (tracked file no
+    /// longer exists) are grouped under drive_pair_id `0` so they don't get
+    /// lost from the fetch.
     pub fn list_pending_sync_queue_with_drive_pair(
         &self,
         limit: i64,
     ) -> anyhow::Result<Vec<(i64, SyncQueueItem)>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, ''), sq.action,
-                    sq.status, sq.error_message, sq.reason, sq.created_at, sq.completed_at,
-                    COALESCE(tf.drive_pair_id, 0)
-             FROM sync_queue sq
-             LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
-             WHERE sq.status = 'pending'
-             ORDER BY sq.id
+            "WITH ranked AS (
+                 SELECT sq.id, sq.tracked_file_id, COALESCE(tf.relative_path, '') AS relative_path,
+                        sq.action, sq.status, sq.error_message, sq.reason, sq.created_at,
+                        sq.completed_at, COALESCE(tf.drive_pair_id, 0) AS drive_pair_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(tf.drive_pair_id, 0)
+                            ORDER BY sq.id
+                        ) AS pair_rank
+                 FROM sync_queue sq
+                 LEFT JOIN tracked_files tf ON sq.tracked_file_id = tf.id
+                 WHERE sq.status = 'pending'
+             )
+             SELECT id, tracked_file_id, relative_path, action, status, error_message,
+                    reason, created_at, completed_at, drive_pair_id
+             FROM ranked
+             ORDER BY pair_rank, id
              LIMIT ?1",
         )?;
         let rows = stmt
@@ -2554,6 +2569,48 @@ impl Repository {
         conn.execute(
             "UPDATE sync_settings SET queue_paused=?1 WHERE id=1",
             rusqlite::params![paused as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Attempt to acquire the exclusive sync-processing lock.
+    ///
+    /// Backed by a single row in `sync_settings`, so this is exclusive across
+    /// threads *and* across separate OS processes (CLI, scheduler, API
+    /// worker) sharing the same database file — SQLite serializes the
+    /// underlying `UPDATE`, so only one caller can ever observe `affected > 0`
+    /// for a given lock window. A lock older than `stale_after_secs` is
+    /// treated as abandoned (e.g. a crashed process) and can be reclaimed.
+    pub fn try_acquire_sync_processing_lock(&self, stale_after_secs: i64) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+        let affected = conn.execute(
+            "UPDATE sync_settings
+             SET processing_locked_at = datetime('now')
+             WHERE id = 1
+               AND (processing_locked_at IS NULL
+                    OR processing_locked_at <= datetime('now', ?1))",
+            rusqlite::params![format!("-{stale_after_secs} seconds")],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Refresh the sync-processing lock's timestamp so a long-running run
+    /// isn't reclaimed as stale/abandoned by another invocation.
+    pub fn heartbeat_sync_processing_lock(&self) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE sync_settings SET processing_locked_at = datetime('now') WHERE id = 1",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Release the exclusive sync-processing lock.
+    pub fn release_sync_processing_lock(&self) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE sync_settings SET processing_locked_at = NULL WHERE id = 1",
+            [],
         )?;
         Ok(())
     }
@@ -3351,6 +3408,65 @@ mod tests {
         let repo = make_repo();
         let counts = repo.count_sync_queue_by_status().unwrap();
         assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn test_list_pending_sync_queue_with_drive_pair_is_fair_across_pairs() {
+        let repo = make_repo();
+        let pair_a = repo.create_drive_pair("a", "/a1", "/a2").unwrap();
+        let pair_b = repo.create_drive_pair("b", "/b1", "/b2").unwrap();
+
+        // Pair A gets a deep backlog queued first; pair B gets a single item
+        // queued after all of pair A's items.
+        for i in 0..10 {
+            let file = repo
+                .create_tracked_file(pair_a.id, &format!("a-{i}.txt"), "h", 1, None)
+                .unwrap();
+            repo.create_sync_queue_item(file.id, "mirror").unwrap();
+        }
+        let file_b = repo
+            .create_tracked_file(pair_b.id, "b-0.txt", "h", 1, None)
+            .unwrap();
+        repo.create_sync_queue_item(file_b.id, "mirror").unwrap();
+
+        // A small page should still surface pair B's item instead of only
+        // returning pair A's backlog (which would starve pair B).
+        let page = repo.list_pending_sync_queue_with_drive_pair(3).unwrap();
+        assert!(
+            page.iter()
+                .any(|(drive_pair_id, _)| *drive_pair_id == pair_b.id),
+            "pair B's item should be included in a fair first page, got: {page:?}"
+        );
+
+        // Per-pair order is still preserved: pair A's fetched items must be
+        // its earliest-queued ones, in ascending id order.
+        let pair_a_ids: Vec<i64> = page
+            .iter()
+            .filter(|(drive_pair_id, _)| *drive_pair_id == pair_a.id)
+            .map(|(_, item)| item.id)
+            .collect();
+        let mut sorted = pair_a_ids.clone();
+        sorted.sort();
+        assert_eq!(
+            pair_a_ids, sorted,
+            "pair A's items must stay in queue order"
+        );
+    }
+
+    #[test]
+    fn test_sync_processing_lock_is_exclusive_and_reclaims_stale() {
+        let repo = make_repo();
+
+        assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
+        // A second attempt must fail while the lock is fresh.
+        assert!(!repo.try_acquire_sync_processing_lock(300).unwrap());
+
+        // A lock older than the given staleness window can be reclaimed
+        // (simulating recovery after a crashed process left it held).
+        assert!(repo.try_acquire_sync_processing_lock(0).unwrap());
+
+        repo.release_sync_processing_lock().unwrap();
+        assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
     }
 
     #[test]

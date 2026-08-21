@@ -233,6 +233,24 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
     Ok(())
 }
 
+/// Reclaim a `sync_settings.processing_locked_at` lock left behind by a
+/// process that exited (or panicked) without releasing it.
+const PROCESSING_LOCK_STALE_AFTER_SECS: i64 = 300;
+
+/// RAII guard that releases the cross-process sync-processing lock on drop,
+/// including on early `?` returns or panics inside `process_all_pending`.
+struct ProcessingLockGuard<'a> {
+    repo: &'a Repository,
+}
+
+impl Drop for ProcessingLockGuard<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = self.repo.release_sync_processing_lock() {
+            tracing::error!("Failed to release sync processing lock: {}", e);
+        }
+    }
+}
+
 /// Process all pending items in the sync queue.
 ///
 /// Items are grouped by the drive pair their tracked file belongs to. Each
@@ -242,6 +260,12 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
 /// files queued on two different mirror drives transfer in parallel instead
 /// of one full transfer blocking the other, while still never running two
 /// transfers against the same drive pair at once.
+///
+/// Only one invocation drains the queue at a time — a database-backed lock
+/// (`sync_settings.processing_locked_at`) ensures this holds even across
+/// separate OS processes (CLI, scheduler, API worker), not just within one.
+/// A second invocation while the lock is held is a no-op that returns `Ok(0)`
+/// immediately.
 ///
 /// - If `stop_by` is `Some(instant)` and the deadline has passed, processing
 ///   stops early; remaining items stay `pending` for the next run.
@@ -254,11 +278,21 @@ pub fn process_all_pending(
     stop_by: Option<std::time::Instant>,
     bus: Option<&SyncEventBus>,
 ) -> anyhow::Result<u32> {
+    if !repo.try_acquire_sync_processing_lock(PROCESSING_LOCK_STALE_AFTER_SECS)? {
+        // Another invocation (this process or a different one) already owns
+        // the queue; requeuing in-progress items here would race with it.
+        return Ok(0);
+    }
+    let _lock_guard = ProcessingLockGuard { repo };
+
     repo.requeue_in_progress_sync_queue()?;
     let page_size: i64 = 1000;
     let mut processed = 0u32;
     let last_progress_published_at = Mutex::new(None::<Instant>);
     loop {
+        // Refresh the lock so a long-running pass isn't reclaimed as stale.
+        repo.heartbeat_sync_processing_lock()?;
+
         // Check global pause flag / deadline before fetching another batch so
         // a paused/expired run doesn't spin fetching the same items forever.
         if repo.get_sync_queue_paused()? {
@@ -298,7 +332,10 @@ pub fn process_all_pending(
                         if item.action == "user_action_required" {
                             continue;
                         }
-                        if repo.get_sync_queue_paused().unwrap_or(false) {
+                        // Fail closed: if the pause flag can't be read (pool
+                        // timeout, DB error), assume paused rather than let a
+                        // transfer start when we can't verify it's allowed.
+                        if repo.get_sync_queue_paused().unwrap_or(true) {
                             break;
                         }
                         if let Some(dl) = stop_by {
@@ -1059,6 +1096,48 @@ mod tests {
         repo.set_sync_queue_paused(false).unwrap();
         let processed = process_all_pending(&repo, None, None).unwrap();
         assert_eq!(processed, 2, "Both items should be processed after resume");
+    }
+
+    /// Simulates a second concurrent invocation (e.g. scheduler + CLI, or two
+    /// CLI processes sharing the same database) by holding the
+    /// cross-process processing lock before calling `process_all_pending`.
+    /// The call must be a no-op instead of requeuing/reprocessing items that
+    /// another invocation already owns.
+    #[test]
+    fn test_process_all_pending_is_noop_while_another_invocation_holds_the_lock() {
+        let (primary, secondary, repo) = setup();
+        let content = b"lock test";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("f.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        // Hold the lock as if another invocation is already draining the queue.
+        assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
+
+        let processed = process_all_pending(&repo, None, None).unwrap();
+        assert_eq!(
+            processed, 0,
+            "must not process while lock is held elsewhere"
+        );
+
+        let item = repo.list_sync_queue(None, 1, 10).unwrap().0;
+        assert_eq!(item[0].status, "pending", "item must be untouched");
+
+        // Once released, a normal run proceeds.
+        repo.release_sync_processing_lock().unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
+        assert_eq!(processed, 1);
     }
 
     #[test]
