@@ -155,7 +155,7 @@ BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./tests/installa
 ./tests/installation/bundles/drive_media_type.sh
 ```
 
-The upgrade bundle requires `BASELINE_DEB` and includes explicit schema, SQLite integrity, post-upgrade write-path, and restore-path compatibility assertions.
+The upgrade bundle requires `BASELINE_DEB` and includes explicit schema, SQLite integrity, post-upgrade write-path, restore-path compatibility, and paused-sync-queue-persistence assertions.
 
 Nightly-only bundles (resource-heavy; not run in standard CI):
 

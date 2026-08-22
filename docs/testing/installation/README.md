@@ -182,7 +182,7 @@ BASELINE_DEB=/path/to/bitprotector_<previous-release>_amd64.deb ./tests/installa
 ./tests/installation/bundles/drive_media_type.sh
 ```
 
-The upgrade bundle now validates schema compatibility, SQLite integrity, post-upgrade write behavior, and restore-path compatibility in addition to startup and data visibility checks.
+The upgrade bundle now validates schema compatibility, SQLite integrity, post-upgrade write behavior, restore-path compatibility, and that a paused sync queue stays paused across the upgrade, in addition to startup and data visibility checks.
 
 ---
 
