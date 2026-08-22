@@ -2,9 +2,10 @@ use crate::core::{drive, integrity, mirror};
 use crate::db::repository::{Repository, SyncQueueItem, TrackedFile};
 use crate::logging::event_logger;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -232,7 +233,39 @@ pub fn process_item(repo: &Repository, item: &SyncQueueItem) -> anyhow::Result<(
     Ok(())
 }
 
+/// Reclaim a `sync_settings.processing_locked_at` lock left behind by a
+/// process that exited (or panicked) without releasing it.
+const PROCESSING_LOCK_STALE_AFTER_SECS: i64 = 300;
+
+/// RAII guard that releases the cross-process sync-processing lock on drop,
+/// including on early `?` returns or panics inside `process_all_pending`.
+struct ProcessingLockGuard<'a> {
+    repo: &'a Repository,
+}
+
+impl Drop for ProcessingLockGuard<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = self.repo.release_sync_processing_lock() {
+            tracing::error!("Failed to release sync processing lock: {}", e);
+        }
+    }
+}
+
 /// Process all pending items in the sync queue.
+///
+/// Items are grouped by the drive pair their tracked file belongs to. Each
+/// drive pair's items are processed sequentially, in order, on their own
+/// thread — but different drive pairs are processed **concurrently**, since
+/// they read/write independent physical disks. This ensures e.g. two large
+/// files queued on two different mirror drives transfer in parallel instead
+/// of one full transfer blocking the other, while still never running two
+/// transfers against the same drive pair at once.
+///
+/// Only one invocation drains the queue at a time — a database-backed lock
+/// (`sync_settings.processing_locked_at`) ensures this holds even across
+/// separate OS processes (CLI, scheduler, API worker), not just within one.
+/// A second invocation while the lock is held is a no-op that returns `Ok(0)`
+/// immediately.
 ///
 /// - If `stop_by` is `Some(instant)` and the deadline has passed, processing
 ///   stops early; remaining items stay `pending` for the next run.
@@ -245,41 +278,86 @@ pub fn process_all_pending(
     stop_by: Option<std::time::Instant>,
     bus: Option<&SyncEventBus>,
 ) -> anyhow::Result<u32> {
+    if !repo.try_acquire_sync_processing_lock(PROCESSING_LOCK_STALE_AFTER_SECS)? {
+        // Another invocation (this process or a different one) already owns
+        // the queue; requeuing in-progress items here would race with it.
+        return Ok(0);
+    }
+    let _lock_guard = ProcessingLockGuard { repo };
+
     repo.requeue_in_progress_sync_queue()?;
     let page_size: i64 = 1000;
     let mut processed = 0u32;
-    let mut last_progress_published_at = None;
+    let last_progress_published_at = Mutex::new(None::<Instant>);
     loop {
-        // Always fetch page 1: processed items are no longer "pending" so the
-        // window slides forward naturally without needing an explicit offset.
-        let (items, _) = repo.list_sync_queue(Some("pending"), 1, page_size)?;
+        // Refresh the lock so a long-running pass isn't reclaimed as stale.
+        repo.heartbeat_sync_processing_lock()?;
+
+        // Check global pause flag / deadline before fetching another batch so
+        // a paused/expired run doesn't spin fetching the same items forever.
+        if repo.get_sync_queue_paused()? {
+            break;
+        }
+        if let Some(dl) = stop_by {
+            if std::time::Instant::now() >= dl {
+                break;
+            }
+        }
+
+        // Always fetch from the front: processed items are no longer "pending"
+        // so the window slides forward naturally without an explicit offset.
+        let items = repo.list_pending_sync_queue_with_drive_pair(page_size)?;
         if items.is_empty() {
             break;
         }
-        let all_skipped = items.iter().all(|i| i.action == "user_action_required");
-        for item in &items {
-            if item.action == "user_action_required" {
-                continue;
-            }
-            // Check global pause flag.
-            if repo.get_sync_queue_paused()? {
-                return Ok(processed);
-            }
-            // Honour scheduler time window.
-            if let Some(dl) = stop_by {
-                if std::time::Instant::now() >= dl {
-                    return Ok(processed);
-                }
-            }
-            if let Err(e) = process_item(repo, item) {
-                tracing::error!("Error processing sync queue item {}: {}", item.id, e);
-            }
-            processed += 1;
+        let all_skipped = items
+            .iter()
+            .all(|(_, i)| i.action == "user_action_required");
 
-            if let Some(b) = bus {
-                try_publish_queue_progress(&mut last_progress_published_at, b, repo);
-            }
+        // Group by drive pair: one worker thread per drive pair, so mirroring
+        // for different pairs runs in parallel while a single pair's items
+        // are still processed strictly one-at-a-time and in order.
+        let mut groups: HashMap<i64, Vec<SyncQueueItem>> = HashMap::new();
+        for (drive_pair_id, item) in items {
+            groups.entry(drive_pair_id).or_default().push(item);
         }
+
+        let processed_this_pass = AtomicU32::new(0);
+        std::thread::scope(|scope| {
+            for group_items in groups.into_values() {
+                let processed_this_pass = &processed_this_pass;
+                let last_progress_published_at = &last_progress_published_at;
+                scope.spawn(move || {
+                    for item in &group_items {
+                        if item.action == "user_action_required" {
+                            continue;
+                        }
+                        // Fail closed: if the pause flag can't be read (pool
+                        // timeout, DB error), assume paused rather than let a
+                        // transfer start when we can't verify it's allowed.
+                        if repo.get_sync_queue_paused().unwrap_or(true) {
+                            break;
+                        }
+                        if let Some(dl) = stop_by {
+                            if std::time::Instant::now() >= dl {
+                                break;
+                            }
+                        }
+                        if let Err(e) = process_item(repo, item) {
+                            tracing::error!("Error processing sync queue item {}: {}", item.id, e);
+                        }
+                        processed_this_pass.fetch_add(1, Ordering::SeqCst);
+
+                        if let Some(b) = bus {
+                            let mut last = last_progress_published_at.lock().unwrap();
+                            try_publish_queue_progress(&mut last, b, repo);
+                        }
+                    }
+                });
+            }
+        });
+        processed += processed_this_pass.load(Ordering::SeqCst);
+
         // Guard against an infinite loop if every remaining item is
         // user_action_required (those items are never processed, so the pending
         // list would never shrink).
@@ -911,6 +989,79 @@ mod tests {
         }
     }
 
+    /// Verifies that two different drive pairs are mirrored concurrently
+    /// instead of one-at-a-time: while `process_all_pending` runs on the main
+    /// thread, a background poller records the peak number of simultaneously
+    /// `in_progress` queue items. Since each drive pair only ever has one item
+    /// in flight at a time (sequential-per-pair), observing 2 in-progress
+    /// items at once proves the two pairs ran in parallel.
+    #[test]
+    fn test_process_all_pending_mirrors_different_drive_pairs_concurrently() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+
+        let (primary_a, secondary_a, repo) = setup();
+        let primary_b = TempDir::new().unwrap();
+        let secondary_b = TempDir::new().unwrap();
+
+        let pair_a = repo
+            .create_drive_pair(
+                "a",
+                primary_a.path().to_str().unwrap(),
+                secondary_a.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let pair_b = repo
+            .create_drive_pair(
+                "b",
+                primary_b.path().to_str().unwrap(),
+                secondary_b.path().to_str().unwrap(),
+            )
+            .unwrap();
+
+        // Large-ish content so the copy+checksum window is wide enough for the
+        // poller to reliably observe both items in progress at once.
+        let content = vec![0xABu8; 32 * 1024 * 1024];
+        let hash = checksum::checksum_bytes(&content);
+        fs::write(primary_a.path().join("big.bin"), &content).unwrap();
+        fs::write(primary_b.path().join("big.bin"), &content).unwrap();
+
+        let file_a = repo
+            .create_tracked_file(pair_a.id, "big.bin", &hash, content.len() as i64, None)
+            .unwrap();
+        let file_b = repo
+            .create_tracked_file(pair_b.id, "big.bin", &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(file_a.id, "mirror").unwrap();
+        repo.create_sync_queue_item(file_b.id, "mirror").unwrap();
+
+        let max_in_progress = Arc::new(AtomicUsize::new(0));
+        let stop_polling = Arc::new(AtomicBool::new(false));
+        let poller = {
+            let max_in_progress = max_in_progress.clone();
+            let stop_polling = stop_polling.clone();
+            let repo = repo.clone();
+            std::thread::spawn(move || {
+                while !stop_polling.load(Ordering::SeqCst) {
+                    if let Ok(count) = repo.count_in_progress_sync_queue() {
+                        max_in_progress.fetch_max(count as usize, Ordering::SeqCst);
+                    }
+                }
+            })
+        };
+
+        let processed = process_all_pending(&repo, None, None).unwrap();
+        stop_polling.store(true, Ordering::SeqCst);
+        poller.join().unwrap();
+
+        assert_eq!(processed, 2, "both mirror items should be processed");
+        assert_eq!(
+            max_in_progress.load(Ordering::SeqCst),
+            2,
+            "both drive pairs should mirror concurrently, not one at a time"
+        );
+    }
+
     #[test]
     fn test_process_all_pending_stops_when_paused() {
         let (primary, secondary, repo) = setup();
@@ -945,6 +1096,48 @@ mod tests {
         repo.set_sync_queue_paused(false).unwrap();
         let processed = process_all_pending(&repo, None, None).unwrap();
         assert_eq!(processed, 2, "Both items should be processed after resume");
+    }
+
+    /// Simulates a second concurrent invocation (e.g. scheduler + CLI, or two
+    /// CLI processes sharing the same database) by holding the
+    /// cross-process processing lock before calling `process_all_pending`.
+    /// The call must be a no-op instead of requeuing/reprocessing items that
+    /// another invocation already owns.
+    #[test]
+    fn test_process_all_pending_is_noop_while_another_invocation_holds_the_lock() {
+        let (primary, secondary, repo) = setup();
+        let content = b"lock test";
+        let hash = checksum::checksum_bytes(content);
+        fs::write(primary.path().join("f.txt"), content).unwrap();
+
+        let pair = repo
+            .create_drive_pair(
+                "p",
+                primary.path().to_str().unwrap(),
+                secondary.path().to_str().unwrap(),
+            )
+            .unwrap();
+        let file = repo
+            .create_tracked_file(pair.id, "f.txt", &hash, content.len() as i64, None)
+            .unwrap();
+        repo.create_sync_queue_item(file.id, "mirror").unwrap();
+
+        // Hold the lock as if another invocation is already draining the queue.
+        assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
+
+        let processed = process_all_pending(&repo, None, None).unwrap();
+        assert_eq!(
+            processed, 0,
+            "must not process while lock is held elsewhere"
+        );
+
+        let item = repo.list_sync_queue(None, 1, 10).unwrap().0;
+        assert_eq!(item[0].status, "pending", "item must be untouched");
+
+        // Once released, a normal run proceeds.
+        repo.release_sync_processing_lock().unwrap();
+        let processed = process_all_pending(&repo, None, None).unwrap();
+        assert_eq!(processed, 1);
     }
 
     #[test]

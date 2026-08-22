@@ -216,6 +216,20 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE tracked_folders ADD COLUMN include_checksum_sidecars INTEGER NOT NULL DEFAULT 0",
         [],
     );
+    // NULL means unlocked; a timestamp marks the sync queue as being drained
+    // by some invocation (CLI, scheduler, or API worker) so a second
+    // concurrent invocation doesn't requeue/reprocess the same items.
+    let _ = conn.execute(
+        "ALTER TABLE sync_settings ADD COLUMN processing_locked_at TEXT",
+        [],
+    );
+    // OS PID of the process holding processing_locked_at, so a killed
+    // holder's lock can be reclaimed immediately instead of waiting out the
+    // time-based staleness window.
+    let _ = conn.execute(
+        "ALTER TABLE sync_settings ADD COLUMN processing_locked_by_pid INTEGER",
+        [],
+    );
     let _ = conn.execute(
         "ALTER TABLE tracked_folders ADD COLUMN scanning INTEGER NOT NULL DEFAULT 0",
         [],
