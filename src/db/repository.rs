@@ -38,6 +38,22 @@ pub fn create_cli_pool(db_path: &str) -> anyhow::Result<DbPool> {
     create_file_pool(db_path, 1, None)
 }
 
+/// Whether a process with the given PID is currently running.
+///
+/// Used to reclaim `sync_settings`'s processing lock immediately when its
+/// holder has died. Only checkable on Linux (via `/proc/<pid>`); elsewhere
+/// this conservatively assumes the process is alive, leaving the time-based
+/// staleness window as the sole reclaim path.
+#[cfg(target_os = "linux")]
+fn process_is_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
+}
+
 /// Create an in-memory pool for testing.
 pub fn create_memory_pool() -> anyhow::Result<DbPool> {
     let manager = SqliteConnectionManager::memory().with_init(|conn| {
@@ -2581,15 +2597,34 @@ impl Repository {
     /// underlying `UPDATE`, so only one caller can ever observe `affected > 0`
     /// for a given lock window. A lock older than `stale_after_secs` is
     /// treated as abandoned (e.g. a crashed process) and can be reclaimed.
+    /// A lock whose recorded holder PID is no longer a running process (e.g.
+    /// it was killed with `SIGKILL` and never released it) is reclaimed
+    /// immediately regardless of age; the time-based window remains the
+    /// fallback for holders whose liveness can't be checked (e.g. a
+    /// different host sharing the database).
     pub fn try_acquire_sync_processing_lock(&self, stale_after_secs: i64) -> anyhow::Result<bool> {
         let conn = self.conn()?;
+        let pid = std::process::id() as i64;
+        let held_by: Option<i64> = conn.query_row(
+            "SELECT processing_locked_by_pid FROM sync_settings WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )?;
+        let held_by_dead_process = held_by.is_some_and(|p| !process_is_alive(p as u32));
+
         let affected = conn.execute(
             "UPDATE sync_settings
-             SET processing_locked_at = datetime('now')
+             SET processing_locked_at = datetime('now'), processing_locked_by_pid = ?1
              WHERE id = 1
                AND (processing_locked_at IS NULL
-                    OR processing_locked_at <= datetime('now', ?1))",
-            rusqlite::params![format!("-{stale_after_secs} seconds")],
+                    OR processing_locked_at <= datetime('now', ?2)
+                    OR (?3 AND processing_locked_by_pid = ?4))",
+            rusqlite::params![
+                pid,
+                format!("-{stale_after_secs} seconds"),
+                held_by_dead_process,
+                held_by
+            ],
         )?;
         Ok(affected > 0)
     }
@@ -2609,7 +2644,7 @@ impl Repository {
     pub fn release_sync_processing_lock(&self) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "UPDATE sync_settings SET processing_locked_at = NULL WHERE id = 1",
+            "UPDATE sync_settings SET processing_locked_at = NULL, processing_locked_by_pid = NULL WHERE id = 1",
             [],
         )?;
         Ok(())
@@ -3466,6 +3501,25 @@ mod tests {
         assert!(repo.try_acquire_sync_processing_lock(0).unwrap());
 
         repo.release_sync_processing_lock().unwrap();
+        assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
+    }
+
+    #[test]
+    fn test_sync_processing_lock_reclaims_dead_holder_immediately() {
+        let repo = make_repo();
+
+        // A PID that cannot possibly be a live process (SIGKILL'd holder
+        // that never released the lock via its Drop guard).
+        let conn = repo.conn().unwrap();
+        conn.execute(
+            "UPDATE sync_settings SET processing_locked_at = datetime('now'), processing_locked_by_pid = 999999999 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        // Even with a large staleness window, a dead holder's lock is
+        // reclaimed immediately instead of waiting out the time window.
         assert!(repo.try_acquire_sync_processing_lock(300).unwrap());
     }
 
