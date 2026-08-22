@@ -209,7 +209,7 @@ After all resilience scenarios have run, calls the shared `journal_error_scraper
 ## Upgrade
 
 **Entry point:** `tests/installation/bundles/upgrade.sh`  
-**Scenarios:** `tests/installation/scenarios/upgrade/` (3 scenarios)  
+**Scenarios:** `tests/installation/scenarios/upgrade/` (4 scenarios)  
 **Environment:** Requires `BASELINE_DEB` pointing to the previous tagged release build  
 **Purpose:** Validates that upgrading from an older package version to the current version preserves user data and configuration, keeps the database structurally valid, preserves schema compatibility, and keeps post-upgrade restore behavior functional.
 
@@ -223,6 +223,9 @@ Installs and configures the package, then reinstalls (not upgrade — same versi
 
 **upgrade-03 — Restore-path compatibility after upgrade**  
 Creates an upgrade database, snapshots a pre-change restore source, upgrades the package, stages a database restore, restarts the service to apply the staged restore, and verifies restore semantics by confirming post-snapshot data is rolled back while baseline data remains intact. Then performs a post-restore write assertion by tracking a new file and running integrity checks to confirm ongoing write/read compatibility.
+
+**upgrade-04 — Paused sync queue persists across upgrade**  
+Queues sync items, then pauses the sync queue before upgrading. Confirms `sync list` still reports `[PAUSED]` after the upgrade and that `sync process` remains a no-op while paused. Resumes the queue and confirms the previously queued items are then processed, verifying the `sync_settings.queue_paused` flag is neither reset nor ignored across a package upgrade.
 
 ---
 

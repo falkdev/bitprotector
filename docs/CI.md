@@ -78,7 +78,7 @@ If `BASELINE_DEB` is unset for local runs, `scripts/run-tests.sh` attempts to au
 | 5 | `qemu-smoke` | Matrix: Ubuntu 24.04 + 26.04. Installs `.deb`, smoke scenarios including scheduler + DB-backup smoke coverage. | ubuntu-24.04 | 10-14 min per guest |
 | 6 | `qemu-application-workflows` | Matrix: Ubuntu 24.04 + 26.04. Scheduled sync/integrity/backup workflows, backup repair, restart persistence. | ubuntu-24.04 | 20-35 min per guest |
 | 7 | `qemu-resilience` | Matrix: Ubuntu 24.04 + 26.04. ENOSPC/readonly/signal/restart scenarios. | ubuntu-24.04 | 15-25 min per guest |
-| 8 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. baseline release → current upgrade scenarios. | ubuntu-24.04 | 20-30 min per guest |
+| 8 | `qemu-upgrade` | Matrix: Ubuntu 24.04 + 26.04. baseline release → current upgrade scenarios, including paused sync-queue persistence. | ubuntu-24.04 | 20-30 min per guest |
 | 9 | `qemu-degraded-boot` | Matrix: Ubuntu 24.04 + 26.04. Degraded boot scenarios. | ubuntu-24.04 | 10-15 min per guest |
 | 10 | `qemu-failover` | Matrix: Ubuntu 24.04 + 26.04. Failover scenarios + QMP hot-remove. | ubuntu-24.04 | 15-20 min per guest |
 | 11 | `qemu-drive-media-type` | Matrix: Ubuntu 24.04 + 26.04. Drive media type + `active_workers` integrity progress checks. | ubuntu-24.04 | 10-15 min per guest |

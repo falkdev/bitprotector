@@ -159,6 +159,10 @@ run_scenario "upgrade-02-reinstall-preserves-config" upgrade_02_reinstall_preser
 source "${SCENARIOS_DIR}/upgrade-03-restore-path-compatibility.sh"
 run_scenario "upgrade-03-restore-path-compatibility" upgrade_03_restore_path_compatibility
 
+# shellcheck source=tests/installation/scenarios/upgrade/upgrade-04-paused-queue-persists.sh
+source "${SCENARIOS_DIR}/upgrade-04-paused-queue-persists.sh"
+run_scenario "upgrade-04-paused-queue-persists" upgrade_04_paused_queue_persists
+
 run_scenario "journal-error-scraper" journal_error_scraper
 
 echo ""
